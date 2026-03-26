@@ -1,0 +1,18 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="f_panel" x1="34" y1="24" x2="264" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1A1630"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="f_star" x1="88" y1="82" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE2A8"/>
+      <stop offset="1" stop-color="#D39A45"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="264" height="264" rx="82" fill="url(#f_panel)"/>
+  <path d="M90 92L156 226L222 92" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M156 78L171 108L204 113L180 136L186 170L156 154L126 170L132 136L108 113L141 108L156 78Z" fill="url(#f_star)"/>
+  <path d="M92 212C112 228 132 236 156 236C180 236 200 228 220 212" stroke="url(#f_star)" stroke-width="12" stroke-linecap="round"/>
+  <text x="338" y="148" fill="#141B2D" font-family="'Times New Roman', Georgia, serif" font-size="80" font-weight="700">VedaSuite AI</text>
+  <text x="342" y="204" fill="#8B7355" font-family="Arial, Helvetica, sans-serif" font-size="28" letter-spacing="7">AI COMMERCE INTELLIGENT SUITE</text>
+</svg>

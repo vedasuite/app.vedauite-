@@ -1,0 +1,56 @@
+client_id = "b7789c5899a579e9bc9e950a9bbd6547"
+name = "VedaSuite AI"
+handle = "vedasuite-ai"
+application_url = "https://margarete-conidian-pearlie.ngrok-free.dev"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_orders,write_orders,read_customers,write_own_subscription"
+
+[auth]
+redirect_urls = [
+  "https://margarete-conidian-pearlie.ngrok-free.dev/auth/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/shopify/app_uninstalled"
+
+[[webhooks.subscriptions]]
+topics = [ "orders/create" ]
+uri = "/webhooks/shopify/orders_create"
+
+[[webhooks.subscriptions]]
+topics = [ "orders/updated" ]
+uri = "/webhooks/shopify/orders_updated"
+
+[[webhooks.subscriptions]]
+topics = [ "customers/create" ]
+uri = "/webhooks/shopify/customers_create"
+
+[[webhooks.subscriptions]]
+topics = [ "customers/update" ]
+uri = "/webhooks/shopify/customers_update"
+
+[[webhooks.subscriptions]]
+topics = [ "app_subscriptions/update" ]
+uri = "/webhooks/shopify/app_subscriptions_update"
+
+[[webhooks.subscriptions]]
+compliance_topics = [ "customers/data_request" ]
+uri = "/webhooks/shopify/customers_data_request"
+
+[[webhooks.subscriptions]]
+compliance_topics = [ "customers/redact" ]
+uri = "/webhooks/shopify/customers_redact"
+
+[[webhooks.subscriptions]]
+compliance_topics = [ "shop/redact" ]
+uri = "/webhooks/shopify/shop_redact"

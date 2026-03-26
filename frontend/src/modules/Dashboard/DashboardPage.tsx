@@ -1,0 +1,821 @@
+import {
+  Banner,
+  Badge,
+  BlockStack,
+  Button,
+  Box,
+  Card,
+  InlineGrid,
+  InlineStack,
+  Layout,
+  List,
+  Modal,
+  Page,
+  Tabs,
+  Text,
+  Toast,
+} from "@shopify/polaris";
+import { useEffect, useMemo, useState } from "react";
+import { useApiClient } from "../../api/client";
+import { LoadingPageState } from "../../components/PageState";
+import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+
+type Metrics = {
+  fraudAlertsToday: number;
+  highRiskOrders: number;
+  serialReturners: number;
+  competitorPriceChanges: number;
+  promotionAlerts: number;
+  aiPricingSuggestions: number;
+  profitOptimizationOpportunities: number;
+};
+
+type WebhookStatus = {
+  registeredCount: number;
+  totalTracked: number;
+};
+
+type LaunchAudit = {
+  checks: Array<{
+    key: string;
+    ok: boolean;
+    detail: string;
+  }>;
+};
+
+type DecisionCenter = {
+  summary: {
+    activeModules: number;
+    priorityLevel: string;
+    automationReadiness: string;
+  };
+  decisions: Array<{
+    id: string;
+    title: string;
+    module: string;
+    severity: string;
+    rationale: string;
+    route: string;
+    confidence: number;
+    recommendedAction: string;
+    explanationPoints: string[];
+    automationPosture: string;
+  }>;
+};
+
+const fallbackMetrics: Metrics = {
+  fraudAlertsToday: 0,
+  highRiskOrders: 0,
+  serialReturners: 0,
+  competitorPriceChanges: 0,
+  promotionAlerts: 0,
+  aiPricingSuggestions: 0,
+  profitOptimizationOpportunities: 0,
+};
+
+export function DashboardPage() {
+  const api = useApiClient();
+  const { navigateEmbedded } = useEmbeddedNavigation();
+  const { subscription } = useSubscriptionPlan();
+  const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
+  const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? fallbackMetrics);
+  const [loading, setLoading] = useState(!cachedMetrics);
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
+  const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
+  const [launchAudit, setLaunchAudit] = useState<LaunchAudit | null>(null);
+  const [decisionCenter, setDecisionCenter] = useState<DecisionCenter | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+
+  const loadMetrics = () => {
+    api
+      .get<Metrics>("/api/dashboard/metrics")
+      .then((res) => {
+        setMetrics(res.data);
+        writeModuleCache("dashboard-metrics", res.data);
+      })
+      .catch(() => setMetrics(fallbackMetrics))
+      .finally(() => setLoading(false));
+  };
+
+  const loadWebhookStatus = () => {
+    api
+      .get<{ result: WebhookStatus }>("/api/shopify/webhook-status")
+      .then((res) => setWebhookStatus(res.data.result))
+      .catch(() => setWebhookStatus(null));
+  };
+
+  useEffect(() => {
+    loadMetrics();
+    loadWebhookStatus();
+    api
+      .get<LaunchAudit>("/launch/audit")
+      .then((res) => setLaunchAudit(res.data))
+      .catch(() => setLaunchAudit(null));
+    api
+      .get<DecisionCenter>("/api/dashboard/decision-center")
+      .then((res) => setDecisionCenter(res.data))
+      .catch(() => setDecisionCenter(null));
+  }, [api]);
+
+  const syncLiveStoreData = async () => {
+    try {
+      setSyncing(true);
+      await api.post("/api/shopify/sync", {});
+      loadMetrics();
+      setToast("Live Shopify data synced into VedaSuite.");
+    } catch {
+      setToast("Unable to sync Shopify data right now.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const registerWebhooks = async () => {
+    try {
+      setRegisteringWebhooks(true);
+      const response = await api.post<{
+        result: { created: string[]; totalTracked: number };
+      }>("/api/shopify/register-webhooks", {});
+      setToast(
+        response.data.result.created.length > 0
+          ? `Registered ${response.data.result.created.length} Shopify sync webhooks.`
+          : "Shopify sync webhooks are already registered."
+      );
+      loadWebhookStatus();
+    } catch {
+      setToast("Unable to register Shopify sync webhooks.");
+    } finally {
+      setRegisteringWebhooks(false);
+    }
+  };
+
+  const tabs = [
+    { id: "overview", content: "Overview" },
+    { id: "signals", content: "Signals" },
+    { id: "actions", content: "Action plan" },
+  ];
+  const reportsEnabled =
+    subscription?.planName === "TRIAL" ||
+    subscription?.planName === "GROWTH" ||
+    subscription?.planName === "PRO";
+
+  const onboardingChecklist = useMemo(
+    () => [
+      {
+        label: "Shopify sync webhooks are registered",
+        done:
+          webhookStatus != null &&
+          webhookStatus.totalTracked > 0 &&
+          webhookStatus.registeredCount === webhookStatus.totalTracked,
+        action: "Register webhooks",
+        route: null as string | null,
+        run: registerWebhooks,
+      },
+      {
+        label: "Reports and weekly intelligence are available",
+        done: reportsEnabled,
+        action: "Review plans",
+        route: "/subscription",
+      },
+      {
+        label: "Pricing and profit modules are enabled",
+        done:
+          !!subscription?.enabledModules.pricing &&
+          !!subscription?.enabledModules.profitOptimization,
+        action: "Unlock Pro",
+        route: "/subscription",
+      },
+      {
+        label: "Launch-facing configuration checks are green",
+        done: launchAudit?.checks.every((item) => item.ok) ?? false,
+        action: "Open settings",
+        route: "/settings",
+      },
+    ],
+    [
+      launchAudit?.checks,
+      reportsEnabled,
+      subscription?.enabledModules.pricing,
+      subscription?.enabledModules.profitOptimization,
+      webhookStatus,
+    ]
+  );
+
+  const quickActions = [
+    {
+      title: "Review fraud queue",
+      description: "Inspect risky orders, chargeback exposure, and return abuse flags.",
+      route: "/fraud?focus=high-risk",
+      cta: "Open fraud intelligence",
+      tone: "critical" as const,
+    },
+    {
+      title: "Watch the market",
+      description: "Check promotion surges, stock pressure, and competitor price moves.",
+      route: "/competitor?focus=promotions",
+      cta: "Open competitor intelligence",
+      tone: "info" as const,
+    },
+    {
+      title: "Approve pricing actions",
+      description: "Validate the next AI recommendation and protect margin expansion.",
+      route: "/pricing?focus=simulation",
+      cta: "Open pricing strategy",
+      tone: "success" as const,
+      locked: !subscription?.enabledModules.pricing,
+    },
+  ];
+
+  const kpis = useMemo(
+    () => [
+      {
+        title: "Fraud alerts today",
+        value: metrics.fraudAlertsToday,
+        tone: "critical" as const,
+        note: "High-priority review queue",
+      },
+      {
+        title: "High-risk orders",
+        value: metrics.highRiskOrders,
+        tone: "critical" as const,
+        note: "Orders above 70 risk score",
+      },
+      {
+        title: "Serial returners",
+        value: metrics.serialReturners,
+        tone: "warning" as const,
+        note: "Refund-heavy customer profiles",
+      },
+      {
+        title: "Competitor price changes",
+        value: metrics.competitorPriceChanges,
+        tone: "info" as const,
+        note: "Tracked in the last 24 hours",
+      },
+      {
+        title: "Promotion alerts",
+        value: metrics.promotionAlerts,
+        tone: "success" as const,
+        note: "New offer or campaign movement",
+      },
+      {
+        title: "AI pricing suggestions",
+        value: metrics.aiPricingSuggestions,
+        tone: "success" as const,
+        note: "Ready for merchant approval",
+      },
+      {
+        title: "Profit optimization opportunities",
+        value: metrics.profitOptimizationOpportunities,
+        tone: "attention" as const,
+        note: "Best opportunities for margin lift",
+      },
+    ],
+    [metrics]
+  );
+
+  const onboardingSteps = useMemo(
+    () => [
+      {
+        title: "Connect live store signals",
+        body: "Run a live sync so the suite reflects recent orders, products, and customer activity from Shopify.",
+        action: "Sync live Shopify data",
+        onAction: syncLiveStoreData,
+      },
+      {
+        title: "Register background coverage",
+        body: "Register Shopify sync webhooks so VedaSuite keeps refreshing signals after order and customer changes.",
+        action: "Register webhooks",
+        onAction: registerWebhooks,
+      },
+      {
+        title: "Configure monitoring depth",
+        body: "Open settings to tune fraud sensitivity, competitor domains, and AI operating preferences for this store.",
+        action: "Open settings",
+        onAction: () => navigateEmbedded("/settings"),
+      },
+      {
+        title: "Unlock full-suite workflows",
+        body: "Review plans if you want pricing, shopper credit, reports, or profit optimization available to the team.",
+        action: "Review plans",
+        onAction: () => navigateEmbedded("/subscription"),
+      },
+    ],
+    [navigateEmbedded]
+  );
+
+  if (loading) {
+    return (
+      <LoadingPageState
+        title="VedaSuite AI Dashboard"
+        subtitle="Loading store intelligence..."
+        message="Preparing fraud, market, pricing, and profit signals for your dashboard."
+      />
+    );
+  }
+
+  return (
+    <Page
+      title="VedaSuite AI Dashboard"
+      subtitle="A single control center for fraud, competition, pricing, credit, and profit intelligence."
+      primaryAction={{
+        content: syncing ? "Syncing..." : "Sync live Shopify data",
+        onAction: syncLiveStoreData,
+        disabled: syncing,
+      }}
+      secondaryActions={[
+        {
+          content: registeringWebhooks
+            ? "Registering webhooks..."
+            : "Register sync webhooks",
+          onAction: registerWebhooks,
+          disabled: registeringWebhooks,
+        },
+      ]}
+    >
+      <Layout>
+        <Layout.Section>
+          <Banner title="Weekly AI briefing ready" tone="info">
+            <p>
+              Fraud activity is contained, competitor movement is rising, and one
+              pricing recommendation is ready for review today.
+            </p>
+            <Box paddingBlockStart="300">
+              <Button onClick={() => setOnboardingOpen(true)}>Open onboarding guide</Button>
+            </Box>
+          </Banner>
+        </Layout.Section>
+
+        <Layout.Section>
+          <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <div>
+                    <Text as="h2" variant="headingLg">
+                      Suite posture
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      {subscription?.planName ?? "TRIAL"} plan coverage is active for
+                      your connected Shopify store.
+                    </Text>
+                  </div>
+                  <Badge tone="success">Connected</Badge>
+                </InlineStack>
+                <div className="vs-analytics-strip" aria-hidden="true">
+                  {[52, 68, 61, 82, 74, 88, 79].map((width, index) => (
+                    <span
+                      key={`analytics-${index}`}
+                      style={{ width: `${width}%` }}
+                    />
+                  ))}
+                </div>
+                <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Protected revenue
+                    </Text>
+                    <Text as="p" variant="headingLg">
+                      ${metrics.highRiskOrders * 340}
+                    </Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Active modules
+                    </Text>
+                    <Text as="p" variant="headingLg">
+                      {
+                        [
+                          subscription?.enabledModules.fraud,
+                          subscription?.enabledModules.competitor,
+                          subscription?.enabledModules.pricing,
+                          subscription?.enabledModules.creditScore,
+                          subscription?.enabledModules.profitOptimization,
+                        ].filter(Boolean).length
+                      }
+                    </Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Webhook coverage
+                    </Text>
+                    <Text as="p" variant="headingLg">
+                      {webhookStatus
+                        ? `${webhookStatus.registeredCount}/${webhookStatus.totalTracked}`
+                        : "-"}
+                    </Text>
+                  </div>
+                </InlineGrid>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg">
+                  Quick actions
+                </Text>
+                <Text as="p" tone="subdued">
+                  Move directly into the next high-leverage workflow.
+                </Text>
+                <BlockStack gap="300">
+                  {quickActions.map((action) => (
+                    <div key={action.title} className="vs-action-card">
+                      <InlineStack align="space-between" blockAlign="start" gap="300">
+                        <BlockStack gap="100">
+                          <InlineStack gap="200" blockAlign="center">
+                            <Text as="h3" variant="headingMd">
+                              {action.title}
+                            </Text>
+                            <Badge tone={action.tone}>
+                              {action.locked ? "Upgrade required" : "Ready"}
+                            </Badge>
+                          </InlineStack>
+                          <Text as="p" tone="subdued">
+                            {action.description}
+                          </Text>
+                        </BlockStack>
+                        <Button
+                          variant={action.locked ? "secondary" : "primary"}
+                          onClick={() =>
+                            navigateEmbedded(
+                              action.locked ? "/subscription" : action.route
+                            )
+                          }
+                        >
+                          {action.locked ? "View plans" : action.cta}
+                        </Button>
+                      </InlineStack>
+                    </div>
+                  ))}
+                </BlockStack>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <div>
+                    <Text as="h2" variant="headingLg">
+                      Launch readiness checklist
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Keep this store configured for review, sync health, and full-suite operations.
+                    </Text>
+                  </div>
+                  <Badge tone="info">
+                    {`${onboardingChecklist.filter((item) => item.done).length}/${onboardingChecklist.length} complete`}
+                  </Badge>
+                </InlineStack>
+                <BlockStack gap="300">
+                  {onboardingChecklist.map((item) => (
+                    <div key={item.label} className="vs-action-card">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <BlockStack gap="100">
+                          <Text as="h3" variant="headingMd">
+                            {item.label}
+                          </Text>
+                          <Badge tone={item.done ? "success" : "attention"}>
+                            {item.done ? "Complete" : "Needs attention"}
+                          </Badge>
+                        </BlockStack>
+                        <Button
+                          variant={item.done ? "secondary" : "primary"}
+                          onClick={() => {
+                            if (item.run) {
+                              void item.run();
+                              return;
+                            }
+
+                            if (item.route) {
+                              navigateEmbedded(item.route);
+                            }
+                          }}
+                        >
+                          {item.done ? "Reviewed" : item.action}
+                        </Button>
+                      </InlineStack>
+                    </div>
+                  ))}
+                </BlockStack>
+              </BlockStack>
+            </Card>
+            {decisionCenter ? (
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <div>
+                      <Text as="h2" variant="headingLg">
+                        Unified decision center
+                      </Text>
+                      <Text as="p" tone="subdued">
+                        One operating layer connecting fraud, trust, market pressure, pricing, and profit.
+                      </Text>
+                    </div>
+                    <Badge
+                      tone={
+                        decisionCenter.summary.priorityLevel === "High"
+                          ? "critical"
+                          : "info"
+                      }
+                    >
+                      {`${decisionCenter.summary.priorityLevel} priority`}
+                    </Badge>
+                  </InlineStack>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {decisionCenter.summary.automationReadiness}
+                  </Text>
+                  <BlockStack gap="300">
+                    {decisionCenter.decisions.map((decision) => (
+                      <div key={decision.id} className="vs-action-card">
+                        <InlineStack align="space-between" blockAlign="start" gap="300">
+                          <BlockStack gap="100">
+                            <InlineStack gap="200" blockAlign="center">
+                              <Text as="h3" variant="headingMd">
+                                {decision.title}
+                              </Text>
+                              <Badge tone={decision.severity === "High" ? "critical" : "attention"}>
+                                {decision.module}
+                              </Badge>
+                            </InlineStack>
+                            <Text as="p" tone="subdued">
+                              {decision.rationale}
+                            </Text>
+                            <Text as="p" variant="bodySm">
+                              {decision.recommendedAction}
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {`${decision.confidence}% confidence | ${decision.automationPosture}`}
+                            </Text>
+                            <BlockStack gap="100">
+                              {decision.explanationPoints.map((point) => (
+                                <Text
+                                  key={`${decision.id}-${point}`}
+                                  as="p"
+                                  variant="bodySm"
+                                  tone="subdued"
+                                >
+                                  {point}
+                                </Text>
+                              ))}
+                            </BlockStack>
+                          </BlockStack>
+                          <Button onClick={() => navigateEmbedded(decision.route)}>
+                            Open
+                          </Button>
+                        </InlineStack>
+                      </div>
+                    ))}
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+            ) : null}
+          </InlineGrid>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
+              <Box paddingBlockStart="400">
+                {selectedTab === 0 ? (
+                  <BlockStack gap="400">
+                    <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
+                      {kpis.map((kpi, index) => (
+                        <Card key={kpi.title}>
+                          <BlockStack gap="300">
+                            <div className="vs-kpi-card">
+                              <BlockStack gap="300">
+                                <div className="vs-kpi-meta">
+                                  <Text as="h3" variant="headingMd">
+                                    {kpi.title}
+                                  </Text>
+                                  <Badge tone={kpi.tone}>{kpi.note}</Badge>
+                                </div>
+                                <div className="vs-kpi-value">{kpi.value}</div>
+                                <div className="vs-mini-chart" aria-hidden="true">
+                                  {[18, 30, 24, 38, 28].map((height, barIndex) => (
+                                    <span
+                                      key={`${index}-${barIndex}`}
+                                      style={{ height: `${height + index * 2}px` }}
+                                    />
+                                  ))}
+                                </div>
+                              </BlockStack>
+                            </div>
+                          </BlockStack>
+                        </Card>
+                      ))}
+                    </InlineGrid>
+                    <Card>
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h3" variant="headingMd">
+                            Module drilldowns
+                          </Text>
+                          <Badge tone="info">Connected suite</Badge>
+                        </InlineStack>
+                        <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                          <Button
+                            onClick={() => navigateEmbedded("/fraud?focus=high-risk")}
+                          >
+                            Open fraud queue
+                          </Button>
+                          <Button
+                            onClick={() =>
+                              navigateEmbedded("/competitor?focus=promotions")
+                            }
+                          >
+                            Review market alerts
+                          </Button>
+                          <Button
+                            onClick={() =>
+                              navigateEmbedded(
+                                subscription?.enabledModules.pricing
+                                  ? "/pricing?focus=simulation"
+                                  : "/subscription"
+                              )
+                            }
+                          >
+                            {subscription?.enabledModules.pricing
+                              ? "Approve pricing changes"
+                              : "Unlock pricing strategy"}
+                          </Button>
+                        </InlineGrid>
+                      </BlockStack>
+                    </Card>
+                  </BlockStack>
+                ) : selectedTab === 1 ? (
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Live detection signals
+                        </Text>
+                        <List type="bullet">
+                          <List.Item>
+                            {metrics.highRiskOrders} orders currently exceed the
+                            high-risk threshold.
+                          </List.Item>
+                          <List.Item>
+                            {metrics.serialReturners} customer profiles show elevated
+                            refund behavior.
+                          </List.Item>
+                          <List.Item>
+                            {metrics.competitorPriceChanges} competitor pricing
+                            movements were recorded today.
+                          </List.Item>
+                        </List>
+                      </BlockStack>
+                    </Card>
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Merchant priorities
+                        </Text>
+                        <List type="bullet">
+                          <List.Item>Review medium and high-risk orders first.</List.Item>
+                          <List.Item>
+                            Confirm whether the latest competitor promotions justify
+                            a pricing response.
+                          </List.Item>
+                          <List.Item>
+                            Push winning pricing changes into next week's report.
+                          </List.Item>
+                        </List>
+                        <InlineStack gap="300">
+                          <Button
+                            onClick={() =>
+                              navigateEmbedded(
+                                reportsEnabled
+                                  ? "/reports?focus=summary"
+                                  : "/subscription"
+                              )
+                            }
+                          >
+                            {reportsEnabled ? "Open weekly report" : "Unlock reports"}
+                          </Button>
+                          <Button
+                            onClick={() =>
+                              navigateEmbedded(
+                                subscription?.enabledModules.profitOptimization
+                                  ? "/profit?focus=opportunities"
+                                  : "/subscription"
+                              )
+                            }
+                          >
+                            {subscription?.enabledModules.profitOptimization
+                              ? "Review profit engine"
+                              : "Unlock profit engine"}
+                          </Button>
+                        </InlineStack>
+                      </BlockStack>
+                    </Card>
+                  </InlineGrid>
+                ) : (
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Suggested next actions
+                        </Text>
+                        <List type="number">
+                          <List.Item>Open Fraud Intelligence and review flagged orders.</List.Item>
+                          <List.Item>
+                            Compare competitor promotions against your margin floor.
+                          </List.Item>
+                          <List.Item>
+                            Validate AI price changes before publishing.
+                          </List.Item>
+                        </List>
+                        <Button onClick={() => setOnboardingOpen(true)}>
+                          Revisit onboarding guide
+                        </Button>
+                      </BlockStack>
+                    </Card>
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Current suite posture
+                        </Text>
+                        <Text as="p" tone="subdued">
+                          Your store is connected, seeded with intelligence signals,
+                          and ready for deeper module configuration.
+                        </Text>
+                      </BlockStack>
+                    </Card>
+                  </InlineGrid>
+                )}
+              </Box>
+            </Tabs>
+          </Card>
+        </Layout.Section>
+      </Layout>
+      <Modal
+        open={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        title="VedaSuite onboarding guide"
+        primaryAction={{
+          content: onboardingSteps[onboardingStep]?.action ?? "Continue",
+          onAction: () => {
+            onboardingSteps[onboardingStep]?.onAction();
+          },
+        }}
+        secondaryActions={[
+          ...(onboardingStep > 0
+            ? [
+                {
+                  content: "Back",
+                  onAction: () => setOnboardingStep((step) => Math.max(0, step - 1)),
+                },
+              ]
+            : []),
+          ...(onboardingStep < onboardingSteps.length - 1
+            ? [
+                {
+                  content: "Next step",
+                  onAction: () =>
+                    setOnboardingStep((step) =>
+                      Math.min(onboardingSteps.length - 1, step + 1)
+                    ),
+                },
+              ]
+            : []),
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="p" variant="bodySm" tone="subdued">
+                {`Step ${onboardingStep + 1} of ${onboardingSteps.length}`}
+              </Text>
+              <Badge tone="info">Embedded setup</Badge>
+            </InlineStack>
+            <Text as="h3" variant="headingLg">
+              {onboardingSteps[onboardingStep]?.title}
+            </Text>
+            <Text as="p" tone="subdued">
+              {onboardingSteps[onboardingStep]?.body}
+            </Text>
+            <InlineGrid columns={{ xs: 1, sm: 4 }} gap="200">
+              {onboardingSteps.map((step, index) => (
+                <div key={step.title} className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {`Step ${index + 1}`}
+                  </Text>
+                  <Text as="p">{step.title}</Text>
+                  <Badge tone={index === onboardingStep ? "info" : "success"}>
+                    {index === onboardingStep ? "Current" : "Guide"}
+                  </Badge>
+                </div>
+              ))}
+            </InlineGrid>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+      {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
+    </Page>
+  );
+}

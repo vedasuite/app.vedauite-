@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Store {
+  id          String @id @default(cuid())
+  shop        String @unique
+  accessToken String
+
+  fraudSensitivity   String  @default("medium")
+  sharedFraudNetwork Boolean @default(false)
+  pricingBias        Int     @default(55)
+  profitGuardrail    Int     @default(18)
+
+  subscription StoreSubscription? @relation("StoreToSubscription")
+
+  competitorDomains CompetitorDomain[]
+  orders            Order[]
+  customers         Customer[]
+  fraudSignals      FraudSignal[]
+  competitorData    CompetitorData[]
+  priceHistory      PriceHistory[]
+  profitData        ProfitOptimizationData[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SubscriptionPlan {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  price     Float
+  trialDays Int      @default(3)
+  features  String // JSON string describing enabled modules
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions StoreSubscription[]
+}
+
+model StoreSubscription {
+  id              String           @id @default(cuid())
+  store           Store            @relation("StoreToSubscription", fields: [storeId], references: [id])
+  storeId         String           @unique
+  plan            SubscriptionPlan @relation(fields: [planId], references: [id])
+  planId          String
+  starterModule   String?
+  shopifyChargeId String? // link to Shopify Billing
+  active          Boolean          @default(true)
+  startedAt       DateTime         @default(now())
+  endsAt          DateTime?
+}
+
+model Customer {
+  id                 String   @id @default(cuid())
+  store              Store    @relation(fields: [storeId], references: [id])
+  storeId            String
+  shopifyCustomerId  String
+  email              String?
+  totalOrders        Int      @default(0)
+  totalRefunds       Int      @default(0)
+  refundRate         Float    @default(0)
+  fraudSignalsCount  Int      @default(0)
+  paymentReliability Float    @default(0)
+  creditScore        Int      @default(50)
+  creditCategory     String   @default("Normal Buyer")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  orders       Order[]
+  fraudSignals FraudSignal[]
+}
+
+model Order {
+  id              String    @id @default(cuid())
+  store           Store     @relation(fields: [storeId], references: [id])
+  storeId         String
+  customer        Customer? @relation(fields: [customerId], references: [id])
+  customerId      String?
+  shopifyOrderId  String    @unique
+  totalAmount     Float
+  currency        String
+  fraudScore      Int       @default(0)
+  fraudRiskLevel  String    @default("Low")
+  refundRequested Boolean   @default(false)
+  refunded        Boolean   @default(false)
+  status          String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  fraudSignals FraudSignal[]
+}
+
+model FraudSignal {
+  id         String    @id @default(cuid())
+  store      Store     @relation(fields: [storeId], references: [id])
+  storeId    String
+  order      Order?    @relation(fields: [orderId], references: [id])
+  orderId    String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  customerId String?
+
+  ipAddress          String?
+  email              String?
+  shippingAddress    String?
+  deviceFingerprint  String?
+  paymentFingerprint String?
+  refundHistory      String?
+  orderFrequency     String?
+
+  riskScore         Int     @default(0)
+  riskLevel         String  @default("Low")
+  sharedNetworkHash String?
+
+  createdAt DateTime @default(now())
+}
+
+model CompetitorDomain {
+  id        String   @id @default(cuid())
+  store     Store    @relation(fields: [storeId], references: [id])
+  storeId   String
+  domain    String
+  label     String?
+  createdAt DateTime @default(now())
+}
+
+model CompetitorData {
+  id             String   @id @default(cuid())
+  store          Store    @relation(fields: [storeId], references: [id])
+  storeId        String
+  productHandle  String
+  competitorName String
+  competitorUrl  String
+  source         String // website | google_shopping | meta_ads
+  price          Float?
+  promotion      String?
+  stockStatus    String?
+  adCopy         String?
+  insightsJson   String? // AI-generated insights
+  collectedAt    DateTime @default(now())
+}
+
+model PriceHistory {
+  id                  String   @id @default(cuid())
+  store               Store    @relation(fields: [storeId], references: [id])
+  storeId             String
+  productHandle       String
+  currentPrice        Float
+  recommendedPrice    Float
+  expectedMarginDelta Float
+  expectedProfitGain  Float?
+  rationaleJson       String? // AI explanation
+  createdAt           DateTime @default(now())
+}
+
+model ProfitOptimizationData {
+  id                      String   @id @default(cuid())
+  store                   Store    @relation(fields: [storeId], references: [id])
+  storeId                 String
+  productHandle           String
+  productCost             Float
+  sellingPrice            Float
+  competitorAveragePrice  Float?
+  advertisingSpend        Float?
+  shippingCost            Float?
+  returnRate              Float?
+  salesVelocity           Float?
+  optimalPrice            Float?
+  projectedMarginIncrease Float?
+  projectedMonthlyProfit  Float?
+  bundleSuggestionsJson   String?
+  discountStrategyJson    String?
+  createdAt               DateTime @default(now())
+}

@@ -1,0 +1,92 @@
+import { Router } from "express";
+import qs from "qs";
+import crypto from "crypto";
+import axios from "axios";
+import { env } from "../config/env";
+import { prisma } from "../db/prismaClient";
+import { ensureStoreBootstrapped } from "../services/bootstrapService";
+import { registerSyncWebhooks } from "../services/shopifyAdminService";
+
+export const authRouter = Router();
+
+function buildInstallUrl(shop: string) {
+  const params = qs.stringify({
+    client_id: env.shopifyApiKey,
+    scope: env.shopifyScopes,
+    redirect_uri: `${env.shopifyAppUrl}/auth/callback`,
+  });
+  return `https://${shop}/admin/oauth/authorize?${params}`;
+}
+
+authRouter.get("/install", (req, res) => {
+  const { shop } = req.query;
+  if (!shop || typeof shop !== "string") {
+    return res.status(400).send("Missing shop parameter.");
+  }
+  const redirectUrl = buildInstallUrl(shop);
+  return res.redirect(redirectUrl);
+});
+
+authRouter.get("/callback", async (req, res) => {
+  const { shop, code, hmac } = req.query;
+
+  if (!shop || !code || !hmac) {
+    return res.status(400).send("Missing OAuth parameters.");
+  }
+
+  const message = qs.stringify(
+    Object.fromEntries(
+      Object.entries(req.query).filter(
+        ([key]) => key !== "hmac" && key !== "signature"
+      )
+    )
+  );
+
+  const generatedHmac = crypto
+    .createHmac("sha256", env.shopifyApiSecret)
+    .update(message)
+    .digest("hex");
+
+  if (generatedHmac !== hmac) {
+    return res.status(400).send("HMAC validation failed.");
+  }
+
+  const tokenUrl = `https://${shop}/admin/oauth/access_token`;
+
+  const tokenResponse = await axios.post(tokenUrl, {
+    client_id: env.shopifyApiKey,
+    client_secret: env.shopifyApiSecret,
+    code,
+  });
+
+  const accessToken = tokenResponse.data.access_token as string;
+
+  const shopDomain = String(shop);
+
+  await prisma.store.upsert({
+    where: { shop: shopDomain },
+    create: {
+      shop: shopDomain,
+      accessToken,
+    },
+    update: {
+      accessToken,
+    },
+  });
+
+  await ensureStoreBootstrapped(shopDomain);
+
+  try {
+    await registerSyncWebhooks(shopDomain, env.shopifyAppUrl);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[auth] Unable to auto-register Shopify sync webhooks.", error);
+  }
+
+  // After installation, redirect into the embedded app in Shopify Admin.
+  const redirectAppUrl = `${env.shopifyAppUrl}/?shop=${encodeURIComponent(
+    shopDomain
+  )}`;
+  return res.redirect(redirectAppUrl);
+});
+

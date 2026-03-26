@@ -1,0 +1,18 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="d_panel" x1="40" y1="30" x2="268" y2="282" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101828"/>
+      <stop offset="1" stop-color="#1C2437"/>
+    </linearGradient>
+    <linearGradient id="d_accent" x1="96" y1="78" x2="212" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4D38A"/>
+      <stop offset="1" stop-color="#C98532"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="264" height="264" rx="76" fill="url(#d_panel)"/>
+  <path d="M88 88C120 109 143 151 156 214C169 151 192 109 224 88" stroke="url(#d_accent)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M108 138L156 238L204 138" stroke="white" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="156" cy="119" r="10" fill="#FFF4D4"/>
+  <text x="338" y="150" fill="#111827" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700">VedaSuite AI</text>
+  <text x="342" y="202" fill="#8B6B3F" font-family="Arial, Helvetica, sans-serif" font-size="28" letter-spacing="8">AI COMMERCE INTELLIGENT SUITE</text>
+</svg>

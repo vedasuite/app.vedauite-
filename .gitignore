@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.vite/
+.next/
+.env
+.env.*
+backend/runtime/
+frontend/dist/
+backend/dist/
+*.log
