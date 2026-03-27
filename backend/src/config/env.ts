@@ -8,7 +8,7 @@ export const env = {
   shopifyApiSecret: process.env.SHOPIFY_API_SECRET || "",
   shopifyScopes:
     process.env.SHOPIFY_SCOPES ||
-    "read_products,write_products,read_orders,write_orders,read_customers,write_own_subscription",
+    "read_products,write_products,read_orders,write_orders,read_customers",
   shopifyAppUrl: process.env.SHOPIFY_APP_URL || "",
   databaseUrl: process.env.DATABASE_URL || "",
   complianceExportDir:
