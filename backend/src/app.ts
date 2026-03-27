@@ -68,6 +68,33 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
+  function redirectTopLevel(res: express.Response, url: string) {
+    return res
+      .status(200)
+      .type("html")
+      .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting…</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        var target = ${JSON.stringify(url)};
+        if (window.top && window.top !== window) {
+          window.top.location.href = target;
+          return;
+        }
+        window.location.href = target;
+      })();
+    </script>
+    <p>Redirecting… <a href="${url}">Continue</a></p>
+  </body>
+</html>`);
+  }
+
   app.use(
     express.static(frontendDistPath, {
       index: false,
@@ -128,7 +155,10 @@ export function createApp() {
       const token = await getToken(shop);
 
       if (!token) {
-        return res.redirect(`/auth?shop=${encodeURIComponent(shop)}`);
+        return redirectTopLevel(
+          res,
+          `/auth?shop=${encodeURIComponent(shop)}`
+        );
       }
 
       await ensureStoreBootstrapped(shop);

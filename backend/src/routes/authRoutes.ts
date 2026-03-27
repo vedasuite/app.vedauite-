@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Response, Router } from "express";
 import qs from "qs";
 import crypto from "crypto";
 import axios from "axios";
@@ -8,6 +8,33 @@ import { ensureStoreBootstrapped } from "../services/bootstrapService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
 
 export const authRouter = Router();
+
+function redirectTopLevel(res: Response, url: string) {
+  return res
+    .status(200)
+    .type("html")
+    .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting…</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        var target = ${JSON.stringify(url)};
+        if (window.top && window.top !== window) {
+          window.top.location.href = target;
+          return;
+        }
+        window.location.href = target;
+      })();
+    </script>
+    <p>Redirecting… <a href="${url}">Continue</a></p>
+  </body>
+</html>`);
+}
 
 function buildInstallUrl(shop: string) {
   const params = qs.stringify({
@@ -24,7 +51,7 @@ authRouter.get("/install", (req, res) => {
     return res.status(400).send("Missing shop parameter.");
   }
   const redirectUrl = buildInstallUrl(shop);
-  return res.redirect(redirectUrl);
+  return redirectTopLevel(res, redirectUrl);
 });
 
 authRouter.get("/callback", async (req, res) => {
@@ -84,9 +111,11 @@ authRouter.get("/callback", async (req, res) => {
   }
 
   // After installation, redirect into the embedded app in Shopify Admin.
-  const redirectAppUrl = `${env.shopifyAppUrl}/?shop=${encodeURIComponent(
-    shopDomain
-  )}`;
-  return res.redirect(redirectAppUrl);
+  const storeHandle = shopDomain.replace(".myshopify.com", "");
+  const adminAppUrl = `https://admin.shopify.com/store/${encodeURIComponent(
+    storeHandle
+  )}/apps/${encodeURIComponent(env.shopifyApiKey)}`;
+
+  return redirectTopLevel(res, adminAppUrl);
 });
 
