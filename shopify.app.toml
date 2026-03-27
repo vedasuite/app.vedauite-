@@ -1,7 +1,7 @@
 client_id = "b7789c5899a579e9bc9e950a9bbd6547"
 name = "VedaSuite AI"
 handle = "vedasuite-ai"
-application_url = "https://margarete-conidian-pearlie.ngrok-free.dev"
+application_url = "https://app.vedasuite.in"
 embedded = true
 
 [build]
@@ -13,7 +13,7 @@ scopes = "read_products,write_products,read_orders,write_orders,read_customers,w
 
 [auth]
 redirect_urls = [
-  "https://margarete-conidian-pearlie.ngrok-free.dev/auth/callback"
+  "https://app.vedasuite.in/auth/callback"
 ]
 
 [webhooks]

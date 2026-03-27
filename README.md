@@ -253,3 +253,17 @@ Launch and review packaging docs are included here:
 - [Support Guide](C:\Users\Abhimanyu\OneDrive\Desktop\untitled folder\vedasuite-shopify-app\SUPPORT.md)
 - [Security Reporting Guide](C:\Users\Abhimanyu\OneDrive\Desktop\untitled folder\vedasuite-shopify-app\SECURITY.md)
 
+---
+
+### Production Domain Values
+
+Use these exact production values during deployment and Shopify configuration:
+
+- App URL: `https://app.vedasuite.in`
+- OAuth redirect URL: `https://app.vedasuite.in/auth/callback`
+- Privacy Policy URL: `https://app.vedasuite.in/legal/privacy`
+- Terms of Service URL: `https://app.vedasuite.in/legal/terms`
+- Support URL: `https://app.vedasuite.in/support`
+
+Use [backend/.env.example](C:\Users\Abhimanyu\OneDrive\Desktop\untitled folder\vedasuite-shopify-app\app-repo\backend\.env.example) as the source of truth for Render environment variables.
+
