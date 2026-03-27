@@ -24,6 +24,7 @@ import { EmptyPageState, LoadingPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type CompetitorRow = {
   id: string;
@@ -137,12 +138,12 @@ export function CompetitorPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get<{ products: CompetitorRow[] }>("/api/competitor/products"),
-      api.get<CompetitorOverview>("/api/competitor/overview"),
-      api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors"),
-      api.get<{ responseEngine: CompetitorResponseEngine }>(
+      withRequestTimeout(api.get<{ products: CompetitorRow[] }>("/api/competitor/products")),
+      withRequestTimeout(api.get<CompetitorOverview>("/api/competitor/overview")),
+      withRequestTimeout(api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors")),
+      withRequestTimeout(api.get<{ responseEngine: CompetitorResponseEngine }>(
         "/api/competitor/response-engine"
-      ),
+      )),
     ])
       .then(
         ([
@@ -245,8 +246,10 @@ export function CompetitorPage() {
     try {
       setIngesting(true);
       const [productsResponse, overviewResponse] = await Promise.all([
-        api.post<{ result: { ingested: number } }>("/api/competitor/ingest", {}),
-        api.get<{ products: CompetitorRow[] }>("/api/competitor/products"),
+        withRequestTimeout(
+          api.post<{ result: { ingested: number } }>("/api/competitor/ingest", {})
+        ),
+        withRequestTimeout(api.get<{ products: CompetitorRow[] }>("/api/competitor/products")),
       ]);
       setToast(
         `Competitor ingestion completed with ${productsResponse.data.result.ingested} fresh market records.`
@@ -255,11 +258,11 @@ export function CompetitorPage() {
       writeModuleCache("competitor-rows", overviewResponse.data.products);
       const [refreshedOverview, refreshedConnectors, refreshedResponseEngine] =
         await Promise.all([
-        api.get<CompetitorOverview>("/api/competitor/overview"),
-        api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors"),
-        api.get<{ responseEngine: CompetitorResponseEngine }>(
+        withRequestTimeout(api.get<CompetitorOverview>("/api/competitor/overview")),
+        withRequestTimeout(api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors")),
+        withRequestTimeout(api.get<{ responseEngine: CompetitorResponseEngine }>(
           "/api/competitor/response-engine"
-        ),
+        )),
       ]);
       setOverview(refreshedOverview.data);
       writeModuleCache("competitor-overview", refreshedOverview.data);

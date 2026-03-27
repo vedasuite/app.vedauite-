@@ -21,6 +21,7 @@ import { EmptyPageState, LoadingPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type ProfitRow = {
   productHandle: string;
@@ -119,8 +120,9 @@ export function ProfitPage() {
       : null;
 
   useEffect(() => {
-    api
-      .get<{ opportunities: ProfitRow[] }>("/api/profit/opportunities")
+    withRequestTimeout(
+      api.get<{ opportunities: ProfitRow[] }>("/api/profit/opportunities")
+    )
       .then((res) => {
         const safeRows = (res.data.opportunities ?? []).map((row) => ({
           productHandle: row.productHandle ?? "Untitled product",

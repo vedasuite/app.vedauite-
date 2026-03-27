@@ -24,6 +24,7 @@ import { EmptyPageState, LoadingPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Recommendation = {
   id: string;
@@ -82,8 +83,9 @@ export function PricingPage() {
   const focus = searchParams.get("focus");
 
   useEffect(() => {
-    api
-      .get<{ recommendations: Recommendation[] }>("/api/pricing/recommendations")
+    withRequestTimeout(
+      api.get<{ recommendations: Recommendation[] }>("/api/pricing/recommendations")
+    )
       .then((res) => {
         setRecs(res.data.recommendations);
         writeModuleCache("pricing-recommendations", res.data.recommendations);

@@ -21,6 +21,7 @@ import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Metrics = {
   fraudAlertsToday: number;
@@ -93,8 +94,7 @@ export function DashboardPage() {
   const [onboardingStep, setOnboardingStep] = useState(0);
 
   const loadMetrics = () => {
-    api
-      .get<Metrics>("/api/dashboard/metrics")
+    withRequestTimeout(api.get<Metrics>("/api/dashboard/metrics"))
       .then((res) => {
         setMetrics(res.data);
         writeModuleCache("dashboard-metrics", res.data);
@@ -104,8 +104,7 @@ export function DashboardPage() {
   };
 
   const loadWebhookStatus = () => {
-    api
-      .get<{ result: WebhookStatus }>("/api/shopify/webhook-status")
+    withRequestTimeout(api.get<{ result: WebhookStatus }>("/api/shopify/webhook-status"))
       .then((res) => setWebhookStatus(res.data.result))
       .catch(() => setWebhookStatus(null));
   };
@@ -113,12 +112,10 @@ export function DashboardPage() {
   useEffect(() => {
     loadMetrics();
     loadWebhookStatus();
-    api
-      .get<LaunchAudit>("/launch/audit")
+    withRequestTimeout(api.get<LaunchAudit>("/launch/audit"))
       .then((res) => setLaunchAudit(res.data))
       .catch(() => setLaunchAudit(null));
-    api
-      .get<DecisionCenter>("/api/dashboard/decision-center")
+    withRequestTimeout(api.get<DecisionCenter>("/api/dashboard/decision-center"))
       .then((res) => setDecisionCenter(res.data))
       .catch(() => setDecisionCenter(null));
   }, [api]);

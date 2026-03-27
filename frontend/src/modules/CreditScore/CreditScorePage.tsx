@@ -24,6 +24,7 @@ import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type CustomerRow = {
   id: string;
@@ -132,10 +133,10 @@ export function CreditScorePage() {
 
   const loadCustomers = () => {
     Promise.all([
-      api.get<{ customers: CustomerRow[] }>("/api/credit-score/customers"),
-      api.get<{ operatingLayer: TrustOperatingLayer }>(
+      withRequestTimeout(api.get<{ customers: CustomerRow[] }>("/api/credit-score/customers")),
+      withRequestTimeout(api.get<{ operatingLayer: TrustOperatingLayer }>(
         "/api/credit-score/operating-layer"
-      ),
+      )),
     ])
       .then(([customersResponse, operatingLayerResponse]) => {
         setCustomers(customersResponse.data.customers);

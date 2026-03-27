@@ -22,6 +22,7 @@ import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type WeeklyReport = {
   since: string;
@@ -95,8 +96,7 @@ export function ReportsPage() {
     subscription?.planName === "PRO";
 
   useEffect(() => {
-    api
-      .get<{ report: WeeklyReport }>("/api/reports/weekly")
+    withRequestTimeout(api.get<{ report: WeeklyReport }>("/api/reports/weekly"))
       .then((res) => {
         setReport(res.data.report);
         writeModuleCache("weekly-report", res.data.report);
