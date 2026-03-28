@@ -263,9 +263,6 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
     "CUSTOMERS_UPDATE",
     "APP_SUBSCRIPTIONS_UPDATE",
     "APP_UNINSTALLED",
-    "CUSTOMERS_DATA_REQUEST",
-    "CUSTOMERS_REDACT",
-    "SHOP_REDACT",
   ];
 
   const existing = await shopifyGraphQL<{
@@ -369,9 +366,6 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
     "CUSTOMERS_UPDATE",
     "APP_SUBSCRIPTIONS_UPDATE",
     "APP_UNINSTALLED",
-    "CUSTOMERS_DATA_REQUEST",
-    "CUSTOMERS_REDACT",
-    "SHOP_REDACT",
   ];
 
   const existing = await shopifyGraphQL<{
