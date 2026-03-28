@@ -51,40 +51,60 @@ export async function shopifyGraphQL<T>(
   variables?: Record<string, unknown>
 ) {
   const store = await getStoreAccess(shopDomain);
-  const response = await fetch(
-    `https://${store.shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": store.accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    }
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
 
-  if (!response.ok) {
-    const text = await response.text();
+  try {
+    const response = await fetch(
+      `https://${store.shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": store.accessToken,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      if (
+        response.status === 401 ||
+        /invalid api key|invalid access token|unrecognized login|wrong password/i.test(
+          text
+        )
+      ) {
+        throw new Error(
+          `Stored Shopify access token is invalid for ${shopDomain}. Reauthorize the app and retry.`
+        );
+      }
+
+      throw new Error(`Shopify GraphQL request failed: ${response.status} ${text}`);
+    }
+
+    const payload = (await response.json()) as GraphQLResponse<T>;
+    if (payload.errors?.length) {
+      throw new Error(payload.errors.map((error) => error.message).join(", "));
+    }
+
+    return payload.data as T;
+  } catch (error) {
     if (
-      response.status === 401 ||
-      /invalid api key|invalid access token|unrecognized login|wrong password/i.test(
-        text
-      )
+      error instanceof Error &&
+      (error.name === "AbortError" ||
+        /aborted|network request failed|fetch failed/i.test(error.message))
     ) {
       throw new Error(
-        `Stored Shopify access token is invalid for ${shopDomain}. Reauthorize the app and retry.`
+        `Shopify API request timed out for ${shopDomain}. Retry in a few seconds. If this keeps happening, reconnect the app and retry.`
       );
     }
 
-    throw new Error(`Shopify GraphQL request failed: ${response.status} ${text}`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const payload = (await response.json()) as GraphQLResponse<T>;
-  if (payload.errors?.length) {
-    throw new Error(payload.errors.map((error) => error.message).join(", "));
-  }
-
-  return payload.data as T;
 }
 
 export async function createAppSubscription(params: {

@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
+import { useAppBridge } from "../../shopifyAppBridge";
 import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Subscription = {
@@ -95,9 +96,15 @@ function redirectTopLevel(url: string) {
 
 export function SubscriptionPage() {
   const api = useApiClient();
+  const { shop } = useAppBridge();
   const [searchParams] = useSearchParams();
   const [sub, setSub] = useState<Subscription | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [actionBanner, setActionBanner] = useState<{
+    title: string;
+    detail: string;
+    reauthorizeUrl?: string | null;
+  } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [starterModule, setStarterModule] = useState<"fraud" | "competitor">(
     "fraud"
@@ -105,10 +112,29 @@ export function SubscriptionPage() {
   const billingStatus = searchParams.get("billing");
   const activatedPlan = searchParams.get("plan");
   const activatedStarterModule = searchParams.get("starterModule");
+  const fallbackReauthorizeUrl = shop
+    ? `/auth/install?shop=${encodeURIComponent(shop)}`
+    : null;
+  const fallbackTrialSubscription: Subscription = {
+    planName: "TRIAL",
+    price: 0,
+    trialDays: 3,
+    starterModule: null,
+    active: false,
+    endsAt: null,
+    enabledModules: {
+      fraud: true,
+      competitor: true,
+      pricing: false,
+      creditScore: false,
+      profitOptimization: false,
+    },
+  };
 
   useEffect(() => {
     withRequestTimeout(
-      api.get<{ subscription: Subscription }>("/api/subscription/plan")
+      api.get<{ subscription: Subscription }>("/api/subscription/plan"),
+      25000
     )
       .then((res) => {
         setSub(res.data.subscription);
@@ -116,88 +142,82 @@ export function SubscriptionPage() {
           setStarterModule(res.data.subscription.starterModule);
         }
       })
-      .catch(() =>
-        setSub({
-          planName: "TRIAL",
-          price: 0,
-          trialDays: 3,
-          starterModule: null,
-          active: false,
-          endsAt: null,
-          enabledModules: {
-            fraud: true,
-            competitor: true,
-            pricing: false,
-            creditScore: false,
-            profitOptimization: false,
-          },
-        })
-      );
+      .catch(() => setSub(fallbackTrialSubscription));
   }, [api]);
 
   const changePlan = (planName: string) => {
     setBusyAction(planName);
+    setActionBanner(null);
     withRequestTimeout(
       api.post("/billing/create-recurring", {
         planName,
         starterModule: planName === "STARTER" ? starterModule : undefined,
-      })
+      }),
+      45000
     )
       .then((res) => {
         const url = res.data.confirmationUrl as string;
         redirectTopLevel(url);
       })
       .catch((error) => {
-        const reauthorizeUrl = getApiReauthorizeUrl(error);
+        const message = getApiErrorMessage(
+          error,
+          "Unable to open Shopify billing confirmation."
+        );
+        const reauthorizeUrl =
+          getApiReauthorizeUrl(error) ??
+          (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|session token/i.test(
+            message
+          )
+            ? fallbackReauthorizeUrl
+            : null);
         if (reauthorizeUrl) {
-          setToast("Reauthorizing VedaSuite with Shopify...");
-          redirectTopLevel(reauthorizeUrl);
+          setActionBanner({
+            title: "Reconnect Shopify before changing plans",
+            detail:
+              "Your embedded Shopify app session needs a fresh authorization before billing can continue.",
+            reauthorizeUrl,
+          });
+          setToast("Reconnect Shopify before changing plans.");
           return;
         }
 
-        setToast(
-          getApiErrorMessage(
-            error,
-            "Unable to open Shopify billing confirmation."
-          )
-        );
+        setActionBanner({
+          title: "Billing action needs attention",
+          detail: message,
+        });
+        setToast(message);
         setBusyAction(null);
       });
   };
 
   const refreshSubscription = () => {
     withRequestTimeout(
-      api.get<{ subscription: Subscription }>("/api/subscription/plan")
+      api.get<{ subscription: Subscription }>("/api/subscription/plan"),
+      25000
     )
       .then((res) => setSub(res.data.subscription))
-      .catch(() =>
-        setSub({
-          planName: "TRIAL",
-          price: 0,
-          trialDays: 3,
-          starterModule: null,
-          active: false,
-          endsAt: null,
-          enabledModules: {
-            fraud: true,
-            competitor: true,
-            pricing: false,
-            creditScore: false,
-            profitOptimization: false,
-          },
-        })
-      )
+      .catch(() => setSub(fallbackTrialSubscription))
       .finally(() => setBusyAction(null));
   };
 
   const updateStarterSelection = async () => {
     try {
       setBusyAction("starter-module");
-      await api.post("/api/subscription/starter-module", { starterModule });
+      setActionBanner(null);
+      await withRequestTimeout(
+        api.post("/api/subscription/starter-module", { starterModule }),
+        30000
+      );
       setToast(`Starter module switched to ${starterModule}.`);
       refreshSubscription();
     } catch (error) {
-      setToast(getApiErrorMessage(error, "Unable to update Starter module."));
+      const message = getApiErrorMessage(error, "Unable to update Starter module.");
+      setActionBanner({
+        title: "Starter module update needs attention",
+        detail: message,
+      });
+      setToast(message);
       setBusyAction(null);
     }
   };
@@ -205,13 +225,20 @@ export function SubscriptionPage() {
   const cancelPlan = async () => {
     try {
       setBusyAction("cancel");
-      await api.post("/api/subscription/cancel", {});
+      setActionBanner(null);
+      await withRequestTimeout(api.post("/api/subscription/cancel", {}), 30000);
       setToast("Subscription marked as cancelled.");
       refreshSubscription();
     } catch (error) {
-      setToast(
-        getApiErrorMessage(error, "Unable to cancel the subscription.")
+      const message = getApiErrorMessage(
+        error,
+        "Unable to cancel the subscription."
       );
+      setActionBanner({
+        title: "Cancellation needs attention",
+        detail: message,
+      });
+      setToast(message);
       setBusyAction(null);
     }
   };
@@ -219,13 +246,23 @@ export function SubscriptionPage() {
   const downgradeToTrial = async () => {
     try {
       setBusyAction("trial");
-      await api.post("/api/subscription/downgrade-to-trial", {});
+      setActionBanner(null);
+      await withRequestTimeout(
+        api.post("/api/subscription/downgrade-to-trial", {}),
+        30000
+      );
       setToast("Store downgraded to the Trial plan.");
       refreshSubscription();
     } catch (error) {
-      setToast(
-        getApiErrorMessage(error, "Unable to downgrade to Trial right now.")
+      const message = getApiErrorMessage(
+        error,
+        "Unable to downgrade to Trial right now."
       );
+      setActionBanner({
+        title: "Trial downgrade needs attention",
+        detail: message,
+      });
+      setToast(message);
       setBusyAction(null);
     }
   };
@@ -254,6 +291,31 @@ export function SubscriptionPage() {
                   ? ` with ${activatedStarterModule} as the active Starter module.`
                   : "."}
               </p>
+            </Banner>
+          ) : null}
+        </Layout.Section>
+        <Layout.Section>
+          {actionBanner ? (
+            <Banner
+              title={actionBanner.title}
+              tone={actionBanner.reauthorizeUrl ? "warning" : "critical"}
+            >
+              <BlockStack gap="300">
+                <p>{actionBanner.detail}</p>
+                <InlineStack gap="300">
+                  {actionBanner.reauthorizeUrl ? (
+                    <Button
+                      onClick={() =>
+                        redirectTopLevel(actionBanner.reauthorizeUrl ?? "")
+                      }
+                    >
+                      Reconnect Shopify
+                    </Button>
+                  ) : (
+                    <Button onClick={refreshSubscription}>Retry plan refresh</Button>
+                  )}
+                </InlineStack>
+              </BlockStack>
             </Banner>
           ) : null}
         </Layout.Section>

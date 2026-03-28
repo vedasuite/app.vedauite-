@@ -32,6 +32,9 @@ export const env = {
     starterPrice: Number(process.env.BILLING_PLAN_STARTER_PRICE) || 19,
     growthPrice: Number(process.env.BILLING_PLAN_GROWTH_PRICE) || 49,
     proPrice: Number(process.env.BILLING_PLAN_PRO_PRICE) || 99,
+    testMode:
+      (process.env.SHOPIFY_BILLING_TEST_MODE || "true").toLowerCase() !==
+      "false",
   },
 };
 

@@ -77,7 +77,7 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
       price: plan.price,
       returnUrl: returnUrl.toString(),
       trialDays: plan.trialDays,
-      test: process.env.NODE_ENV !== "production",
+      test: env.billing.testMode,
     });
 
     return res.json({
