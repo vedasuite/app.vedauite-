@@ -18,6 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useApiClient } from "../../api/client";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 import { withRequestTimeout } from "../../lib/requestTimeout";
@@ -138,6 +139,7 @@ const fallbackMetrics: Metrics = {
 export function DashboardPage() {
   const api = useApiClient();
   const { navigateEmbedded } = useEmbeddedNavigation();
+  const { shop } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
   const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
   const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? fallbackMetrics);
@@ -149,8 +151,17 @@ export function DashboardPage() {
   const [launchAudit, setLaunchAudit] = useState<LaunchAudit | null>(null);
   const [decisionCenter, setDecisionCenter] = useState<DecisionCenter | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{
+    title: string;
+    detail: string;
+    reauthorizeUrl?: string | null;
+  } | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+
+  const fallbackReauthorizeUrl = shop
+    ? `/auth/install?shop=${encodeURIComponent(shop)}`
+    : null;
 
   const loadMetrics = () => {
     withRequestTimeout(api.get<Metrics>("/api/dashboard/metrics"))
@@ -182,20 +193,35 @@ export function DashboardPage() {
   const syncLiveStoreData = async () => {
     try {
       setSyncing(true);
+      setActionError(null);
       await api.post("/api/shopify/sync", {});
       loadMetrics();
       setToast("Live Shopify data synced into VedaSuite.");
     } catch (error) {
-      const reauthorizeUrl = getApiReauthorizeUrl(error);
+      const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
+      const reauthorizeUrl =
+        getApiReauthorizeUrl(error) ??
+        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login/i.test(
+          message
+        )
+          ? fallbackReauthorizeUrl
+          : null);
       if (reauthorizeUrl) {
-        setToast("Reauthorizing VedaSuite with Shopify...");
-        redirectTopLevel(reauthorizeUrl);
+        setActionError({
+          title: "Shopify connection needs reauthorization",
+          detail:
+            "Your stored Shopify app connection looks stale. Reconnect VedaSuite, then retry sync and webhook setup.",
+          reauthorizeUrl,
+        });
+        setToast("Shopify connection needs reauthorization.");
         return;
       }
 
-      setToast(
-        getApiErrorMessage(error, "Unable to sync Shopify data right now.")
-      );
+      setActionError({
+        title: "Live sync needs attention",
+        detail: message,
+      });
+      setToast(message);
     } finally {
       setSyncing(false);
     }
@@ -204,6 +230,7 @@ export function DashboardPage() {
   const registerWebhooks = async () => {
     try {
       setRegisteringWebhooks(true);
+      setActionError(null);
       const response = await api.post<{
         result: { created: string[]; totalTracked: number };
       }>("/api/shopify/register-webhooks", {});
@@ -214,16 +241,30 @@ export function DashboardPage() {
       );
       loadWebhookStatus();
     } catch (error) {
-      const reauthorizeUrl = getApiReauthorizeUrl(error);
+      const message = getApiErrorMessage(error, "Unable to register Shopify sync webhooks.");
+      const reauthorizeUrl =
+        getApiReauthorizeUrl(error) ??
+        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login/i.test(
+          message
+        )
+          ? fallbackReauthorizeUrl
+          : null);
       if (reauthorizeUrl) {
-        setToast("Reauthorizing VedaSuite with Shopify...");
-        redirectTopLevel(reauthorizeUrl);
+        setActionError({
+          title: "Reconnect Shopify before registering webhooks",
+          detail:
+            "Webhook registration needs a fresh Shopify app authorization. Reconnect VedaSuite and retry once Shopify brings you back into the app.",
+          reauthorizeUrl,
+        });
+        setToast("Reconnect Shopify before registering webhooks.");
         return;
       }
 
-      setToast(
-        getApiErrorMessage(error, "Unable to register Shopify sync webhooks.")
-      );
+      setActionError({
+        title: "Webhook registration needs attention",
+        detail: message,
+      });
+      setToast(message);
     } finally {
       setRegisteringWebhooks(false);
     }
@@ -408,6 +449,31 @@ export function DashboardPage() {
           {loading ? (
             <Banner title="Refreshing store intelligence" tone="info">
               <p>Dashboard metrics are loading in the background.</p>
+            </Banner>
+          ) : null}
+        </Layout.Section>
+
+        <Layout.Section>
+          {actionError ? (
+            <Banner
+              title={actionError.title}
+              tone={actionError.reauthorizeUrl ? "warning" : "critical"}
+            >
+              <BlockStack gap="300">
+                <Text as="p">{actionError.detail}</Text>
+                <InlineStack gap="300">
+                  {actionError.reauthorizeUrl ? (
+                    <Button onClick={() => redirectTopLevel(actionError.reauthorizeUrl ?? "")}>
+                      Reconnect Shopify
+                    </Button>
+                  ) : (
+                    <Button onClick={syncLiveStoreData}>Retry live sync</Button>
+                  )}
+                  <Button variant="secondary" onClick={registerWebhooks}>
+                    Retry webhook setup
+                  </Button>
+                </InlineStack>
+              </BlockStack>
             </Banner>
           ) : null}
         </Layout.Section>

@@ -18,6 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
+import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
@@ -99,6 +100,7 @@ const resourceName = {
 
 export function FraudPage() {
   const api = useApiClient();
+  const { navigateEmbedded } = useEmbeddedNavigation();
   const { getOrderUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
   const cachedOrders = readModuleCache<OrderRow[]>("fraud-orders");
@@ -171,6 +173,30 @@ export function FraudPage() {
       : focus === "return-abuse"
       ? "Showing orders with medium and high-risk behavior to help isolate refund and wardrobing patterns."
       : null;
+
+  const workflowCards = useMemo(
+    () => [
+      {
+        title: "Shared Fraud Network",
+        body: "Surface repeated anonymized fraud signals and identify fingerprint overlap before more orders slip through.",
+        cta: "Open signals",
+        action: () => setSelectedTab(1),
+      },
+      {
+        title: "Refund & Wardrobing Watch",
+        body: "Review return-abuse profiles, likely wardrobing behavior, and chargeback candidates from one module.",
+        cta: "Review signals",
+        action: () => setSelectedTab(1),
+      },
+      {
+        title: "Store control actions",
+        body: "Move into dashboard and reconnect Shopify sync if you want fresh orders and webhook coverage reflected here.",
+        cta: "Open dashboard",
+        action: () => navigateEmbedded("/"),
+      },
+    ],
+    [navigateEmbedded]
+  );
 
   const runAction = async (action: "allow" | "flag" | "block" | "manual_review") => {
     if (!activeOrder) return;
@@ -274,8 +300,38 @@ export function FraudPage() {
                   </Text>
                 </BlockStack>
               </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Queue coverage
+                  </Text>
+                  <Text as="p" variant="heading2xl">
+                    {overview.summary.highRiskOrders}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    High-risk orders currently scored for review across the store.
+                  </Text>
+                </BlockStack>
+              </Card>
             </InlineGrid>
           ) : null}
+        </Layout.Section>
+        <Layout.Section>
+          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+            {workflowCards.map((card) => (
+              <Card key={card.title}>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    {card.title}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {card.body}
+                  </Text>
+                  <Button onClick={card.action}>{card.cta}</Button>
+                </BlockStack>
+              </Card>
+            ))}
+          </InlineGrid>
         </Layout.Section>
         <Layout.Section>
           <Card>
@@ -292,6 +348,43 @@ export function FraudPage() {
                           There are no orders in the current focused view. Try
                           another filter or return to the full review queue.
                         </Text>
+                        <InlineStack gap="300">
+                          {focus ? (
+                            <Button onClick={() => navigateEmbedded("/fraud")}>
+                              Show full review queue
+                            </Button>
+                          ) : null}
+                          <Button variant="secondary" onClick={() => setSelectedTab(1)}>
+                            Open signals
+                          </Button>
+                          <Button variant="secondary" onClick={() => navigateEmbedded("/")}>
+                            Open dashboard
+                          </Button>
+                        </InlineStack>
+                        <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                          <Card>
+                            <BlockStack gap="200">
+                              <Text as="h4" variant="headingSm">
+                                What this module covers
+                              </Text>
+                              <Text as="p" tone="subdued">
+                                Payment fraud detection, stolen-card watch patterns, chargeback pressure, serial refunders, return abuse, and wardrobing detection AI.
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                          <Card>
+                            <BlockStack gap="200">
+                              <Text as="h4" variant="headingSm">
+                                Score bands
+                              </Text>
+                              <Text as="p" tone="subdued">
+                                {overview
+                                  ? `Low ${overview.scoreBands.low} | Medium ${overview.scoreBands.medium} | High ${overview.scoreBands.high}`
+                                  : "Low 0-30 | Medium 31-70 | High 71-100"}
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                        </InlineGrid>
                       </BlockStack>
                     </Card>
                   ) : (
