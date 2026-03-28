@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { EmptyPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -97,7 +97,7 @@ export function CreditScorePage() {
   const [operatingLayer, setOperatingLayer] = useState<TrustOperatingLayer | null>(
     cachedOperatingLayer ?? null
   );
-  const [loading, setLoading] = useState(!cachedCustomers);
+  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [activeCustomer, setActiveCustomer] = useState<CustomerRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -172,16 +172,6 @@ export function CreditScorePage() {
     setSelectedTab(0);
   }, [focus]);
 
-  if (subscriptionLoading) {
-    return (
-      <LoadingPageState
-        title="Shopper Credit Score"
-        subtitle="Preparing customer trust data..."
-        message="Loading plan access and customer scoring."
-      />
-    );
-  }
-
   const recomputeScore = async () => {
     if (!activeCustomer) return;
 
@@ -210,13 +200,7 @@ export function CreditScorePage() {
       requiredPlan="Growth or Pro"
       allowed={!!subscription?.enabledModules.creditScore}
     >
-      {loading ? (
-        <LoadingPageState
-          title="Shopper Credit Score"
-          subtitle="Preparing customer trust data..."
-          message="Loading customer risk and credit insights."
-        />
-      ) : filteredCustomers.length === 0 ? (
+      {filteredCustomers.length === 0 ? (
         <EmptyPageState
           title="Shopper Credit Score"
           subtitle="No customer credit data yet."
@@ -228,6 +212,13 @@ export function CreditScorePage() {
           subtitle="See trust, refund behavior, and customer reliability at a glance."
         >
       <Layout>
+        {subscriptionLoading || loading ? (
+          <Layout.Section>
+            <Banner title="Refreshing customer trust data" tone="info">
+              <p>Customer scores are loading in the background.</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
         <Layout.Section>
           <Banner title="Customer trust scoring is active" tone="info">
             <p>

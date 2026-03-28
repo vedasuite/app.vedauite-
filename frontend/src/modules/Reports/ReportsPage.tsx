@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleGate } from "../../components/ModuleGate";
 import { useApiClient } from "../../api/client";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { EmptyPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -86,7 +86,7 @@ export function ReportsPage() {
   const { subscription } = useSubscriptionPlan();
   const cachedReport = readModuleCache<WeeklyReport>("weekly-report");
   const [report, setReport] = useState<WeeklyReport | null>(cachedReport ?? null);
-  const [loading, setLoading] = useState(!cachedReport);
+  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
@@ -108,16 +108,6 @@ export function ReportsPage() {
   useEffect(() => {
     setSelectedTab(focus === "highlights" ? 1 : 0);
   }, [focus]);
-
-  if (loading) {
-    return (
-      <LoadingPageState
-        title="Weekly Intelligence Reports"
-        subtitle="Preparing weekly brief..."
-        message="Loading fraud, competitor, pricing, and profit summaries."
-      />
-    );
-  }
 
   if (!report) {
     return (
@@ -162,6 +152,13 @@ export function ReportsPage() {
         primaryAction={{ content: "Export report", onAction: exportReport }}
       >
         <Layout>
+          {loading ? (
+            <Layout.Section>
+              <Banner title="Refreshing weekly brief" tone="info">
+                <p>Report data is loading in the background.</p>
+              </Banner>
+            </Layout.Section>
+          ) : null}
           <Layout.Section>
             <Banner title="Weekly report generated" tone="success">
               <p>

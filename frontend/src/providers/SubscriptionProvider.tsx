@@ -17,13 +17,29 @@ type Props = {
   children: ReactNode;
 };
 
+const fallbackSubscription: SubscriptionInfo = {
+  planName: "TRIAL",
+  price: 0,
+  trialDays: 3,
+  starterModule: null,
+  active: false,
+  endsAt: null,
+  enabledModules: {
+    fraud: true,
+    competitor: true,
+    pricing: false,
+    creditScore: false,
+    profitOptimization: false,
+  },
+};
+
 export function SubscriptionProvider({ children }: Props) {
   const api = useApiClient();
   const cachedSubscription = readModuleCache<SubscriptionInfo>("subscription-plan");
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(
-    cachedSubscription ?? null
+    cachedSubscription ?? fallbackSubscription
   );
-  const [loading, setLoading] = useState(!cachedSubscription);
+  const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     const res = await withRequestTimeout(
@@ -42,21 +58,7 @@ export function SubscriptionProvider({ children }: Props) {
       })
       .catch(() => {
         if (!mounted) return;
-        setSubscription({
-          planName: "TRIAL",
-          price: 0,
-          trialDays: 3,
-          starterModule: null,
-          active: false,
-          endsAt: null,
-          enabledModules: {
-            fraud: true,
-            competitor: true,
-            pricing: false,
-            creditScore: false,
-            profitOptimization: false,
-          },
-        });
+        setSubscription(fallbackSubscription);
       })
       .finally(() => {
         if (!mounted) return;

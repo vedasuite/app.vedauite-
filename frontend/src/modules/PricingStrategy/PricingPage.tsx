@@ -20,7 +20,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { EmptyPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -65,7 +65,7 @@ export function PricingPage() {
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
   const cachedRecs = readModuleCache<Recommendation[]>("pricing-recommendations");
   const [recs, setRecs] = useState<Recommendation[]>(cachedRecs ?? []);
-  const [loading, setLoading] = useState(!cachedRecs);
+  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [simulateOpen, setSimulateOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -103,16 +103,6 @@ export function PricingPage() {
 
     setSelectedTab(0);
   }, [focus]);
-
-  if (subscriptionLoading) {
-    return (
-      <LoadingPageState
-        title="AI Pricing Strategy"
-        subtitle="Preparing pricing intelligence..."
-        message="Loading plan access and pricing recommendations."
-      />
-    );
-  }
 
   const simulate = async () => {
     try {
@@ -171,13 +161,7 @@ export function PricingPage() {
       requiredPlan="Growth or Pro"
       allowed={!!subscription?.enabledModules.pricing}
     >
-      {loading ? (
-        <LoadingPageState
-          title="AI Pricing Strategy"
-          subtitle="Preparing pricing intelligence..."
-          message="Loading pricing recommendations and simulations."
-        />
-      ) : recs.length === 0 ? (
+      {recs.length === 0 ? (
         <EmptyPageState
           title="AI Pricing Strategy"
           subtitle="No recommendations available yet."
@@ -193,6 +177,13 @@ export function PricingPage() {
           }}
         >
       <Layout>
+        {subscriptionLoading || loading ? (
+          <Layout.Section>
+            <Banner title="Refreshing pricing intelligence" tone="info">
+              <p>Pricing recommendations are loading in the background.</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
         <Layout.Section>
           <Banner title="Pricing engine active" tone="success">
             <p>

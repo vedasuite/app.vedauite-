@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { EmptyPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -126,7 +126,7 @@ export function CompetitorPage() {
   );
   const [responseEngine, setResponseEngine] =
     useState<CompetitorResponseEngine | null>(cachedResponseEngine ?? null);
-  const [loading, setLoading] = useState(!(cachedRows && cachedOverview));
+  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [ingesting, setIngesting] = useState(false);
@@ -280,16 +280,6 @@ export function CompetitorPage() {
     }
   };
 
-  if (subscriptionLoading) {
-    return (
-      <LoadingPageState
-        title="Competitor Intelligence"
-        subtitle="Preparing market intelligence..."
-        message="Loading competitor monitoring and plan access."
-      />
-    );
-  }
-
   return (
     <ModuleGate
       title="Competitor Intelligence"
@@ -297,13 +287,7 @@ export function CompetitorPage() {
       requiredPlan="Starter, Growth, or Pro"
       allowed={!!subscription?.enabledModules.competitor}
     >
-      {loading ? (
-        <LoadingPageState
-          title="Competitor Intelligence"
-          subtitle="Preparing market intelligence..."
-          message="Loading competitor products, promotions, and stock posture."
-        />
-      ) : rows.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyPageState
           title="Competitor Intelligence"
           subtitle="No competitor tracking data is available yet."
@@ -326,6 +310,13 @@ export function CompetitorPage() {
           ]}
         >
           <Layout>
+            {subscriptionLoading || loading ? (
+              <Layout.Section>
+                <Banner title="Refreshing competitor intelligence" tone="info">
+                  <p>Competitor data is loading in the background.</p>
+                </Banner>
+              </Layout.Section>
+            ) : null}
             <Layout.Section>
               <Banner title="Market monitoring is live" tone="success">
                 <p>

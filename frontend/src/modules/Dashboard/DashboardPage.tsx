@@ -17,7 +17,6 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 import { useApiClient } from "../../api/client";
-import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -82,7 +81,7 @@ export function DashboardPage() {
   const { subscription } = useSubscriptionPlan();
   const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
   const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? fallbackMetrics);
-  const [loading, setLoading] = useState(!cachedMetrics);
+  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
@@ -307,16 +306,6 @@ export function DashboardPage() {
     [navigateEmbedded]
   );
 
-  if (loading) {
-    return (
-      <LoadingPageState
-        title="VedaSuite AI Dashboard"
-        subtitle="Loading store intelligence..."
-        message="Preparing fraud, market, pricing, and profit signals for your dashboard."
-      />
-    );
-  }
-
   return (
     <Page
       title="VedaSuite AI Dashboard"
@@ -337,6 +326,14 @@ export function DashboardPage() {
       ]}
     >
       <Layout>
+        <Layout.Section>
+          {loading ? (
+            <Banner title="Refreshing store intelligence" tone="info">
+              <p>Dashboard metrics are loading in the background.</p>
+            </Banner>
+          ) : null}
+        </Layout.Section>
+
         <Layout.Section>
           <Banner title="Weekly AI briefing ready" tone="info">
             <p>
