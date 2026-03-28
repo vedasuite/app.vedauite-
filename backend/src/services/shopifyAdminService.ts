@@ -319,8 +319,10 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
           }
         }
       }
-    `
-  }, { timeoutMs: 45000 });
+    `,
+    undefined,
+    { timeoutMs: 45000 }
+  );
 
   const existingKeys = new Set(
     existing.webhookSubscriptions.edges.map((edge) => {
@@ -423,8 +425,10 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
           }
         }
       }
-    `
-  }, { timeoutMs: 45000 });
+    `,
+    undefined,
+    { timeoutMs: 45000 }
+  );
 
   const webhooks = desiredTopics.map((topic) => {
     const callbackUrl = `${callbackBaseUrl}/${topic.toLowerCase()}`;
