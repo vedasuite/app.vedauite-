@@ -16,12 +16,11 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
-import { useApiClient } from "../../api/client";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
-import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Metrics = {
   fraudAlertsToday: number;
@@ -137,7 +136,6 @@ const fallbackMetrics: Metrics = {
 };
 
 export function DashboardPage() {
-  const api = useApiClient();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { shop } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
@@ -164,37 +162,48 @@ export function DashboardPage() {
     : null;
 
   const loadMetrics = () => {
-    withRequestTimeout(api.get<Metrics>("/api/dashboard/metrics"))
+    embeddedShopRequest<Metrics>("/api/dashboard/metrics", {
+      timeoutMs: 30000,
+    })
       .then((res) => {
-        setMetrics(res.data);
-        writeModuleCache("dashboard-metrics", res.data);
+        setMetrics(res);
+        writeModuleCache("dashboard-metrics", res);
       })
       .catch(() => setMetrics(fallbackMetrics))
       .finally(() => setLoading(false));
   };
 
   const loadWebhookStatus = () => {
-    withRequestTimeout(api.get<{ result: WebhookStatus }>("/api/shopify/webhook-status"))
-      .then((res) => setWebhookStatus(res.data.result))
+    embeddedShopRequest<{ result: WebhookStatus }>("/api/shopify/webhook-status", {
+      timeoutMs: 30000,
+    })
+      .then((res) => setWebhookStatus(res.result))
       .catch(() => setWebhookStatus(null));
   };
 
   useEffect(() => {
     loadMetrics();
     loadWebhookStatus();
-    withRequestTimeout(api.get<LaunchAudit>("/launch/audit"))
-      .then((res) => setLaunchAudit(res.data))
+    embeddedShopRequest<LaunchAudit>("/launch/audit", {
+      timeoutMs: 30000,
+    })
+      .then((res) => setLaunchAudit(res))
       .catch(() => setLaunchAudit(null));
-    withRequestTimeout(api.get<DecisionCenter>("/api/dashboard/decision-center"))
-      .then((res) => setDecisionCenter(res.data))
+    embeddedShopRequest<DecisionCenter>("/api/dashboard/decision-center", {
+      timeoutMs: 30000,
+    })
+      .then((res) => setDecisionCenter(res))
       .catch(() => setDecisionCenter(null));
-  }, [api]);
+  }, []);
 
   const syncLiveStoreData = async () => {
     try {
       setSyncing(true);
       setActionError(null);
-      await api.post("/api/shopify/sync", {});
+      await embeddedShopRequest("/api/shopify/sync", {
+        method: "POST",
+        timeoutMs: 60000,
+      });
       loadMetrics();
       setToast("Live Shopify data synced into VedaSuite.");
     } catch (error) {
@@ -231,12 +240,15 @@ export function DashboardPage() {
     try {
       setRegisteringWebhooks(true);
       setActionError(null);
-      const response = await api.post<{
+      const response = await embeddedShopRequest<{
         result: { created: string[]; totalTracked: number };
-      }>("/api/shopify/register-webhooks", {});
+      }>("/api/shopify/register-webhooks", {
+        method: "POST",
+        timeoutMs: 45000,
+      });
       setToast(
-        response.data.result.created.length > 0
-          ? `Registered ${response.data.result.created.length} Shopify sync webhooks.`
+        response.result.created.length > 0
+          ? `Registered ${response.result.created.length} Shopify sync webhooks.`
           : "Shopify sync webhooks are already registered."
       );
       loadWebhookStatus();

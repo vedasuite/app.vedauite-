@@ -14,9 +14,8 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useApiClient } from "../../api/client";
 import { useAppBridge } from "../../shopifyAppBridge";
-import { withRequestTimeout } from "../../lib/requestTimeout";
+import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 
 type Subscription = {
   planName: string;
@@ -95,8 +94,7 @@ function redirectTopLevel(url: string) {
 }
 
 export function SubscriptionPage() {
-  const api = useApiClient();
-  const { shop } = useAppBridge();
+  const { shop, host } = useAppBridge();
   const [searchParams] = useSearchParams();
   const [sub, setSub] = useState<Subscription | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -112,6 +110,7 @@ export function SubscriptionPage() {
   const billingStatus = searchParams.get("billing");
   const activatedPlan = searchParams.get("plan");
   const activatedStarterModule = searchParams.get("starterModule");
+  const billingError = searchParams.get("billingError");
   const fallbackReauthorizeUrl = shop
     ? `/auth/install?shop=${encodeURIComponent(shop)}`
     : null;
@@ -132,71 +131,73 @@ export function SubscriptionPage() {
   };
 
   useEffect(() => {
-    withRequestTimeout(
-      api.get<{ subscription: Subscription }>("/api/subscription/plan"),
-      25000
-    )
+    embeddedShopRequest<{ subscription: Subscription }>("/api/subscription/plan", {
+      timeoutMs: 30000,
+    })
       .then((res) => {
-        setSub(res.data.subscription);
-        if (res.data.subscription.starterModule) {
-          setStarterModule(res.data.subscription.starterModule);
+        setSub(res.subscription);
+        if (res.subscription.starterModule) {
+          setStarterModule(res.subscription.starterModule);
         }
       })
       .catch(() => setSub(fallbackTrialSubscription));
-  }, [api]);
+  }, []);
+
+  useEffect(() => {
+    if (billingError) {
+      setActionBanner({
+        title: "Billing needs attention",
+        detail: billingError,
+        reauthorizeUrl:
+          /reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|session token/i.test(
+            billingError
+          )
+            ? fallbackReauthorizeUrl
+            : null,
+      });
+      setToast(billingError);
+    }
+  }, [billingError, fallbackReauthorizeUrl]);
 
   const changePlan = (planName: string) => {
     setBusyAction(planName);
     setActionBanner(null);
-    withRequestTimeout(
-      api.post("/billing/create-recurring", {
-        planName,
-        starterModule: planName === "STARTER" ? starterModule : undefined,
-      }),
-      45000
-    )
-      .then((res) => {
-        const url = res.data.confirmationUrl as string;
-        redirectTopLevel(url);
-      })
-      .catch((error) => {
-        const message = getApiErrorMessage(
-          error,
-          "Unable to open Shopify billing confirmation."
-        );
-        const reauthorizeUrl =
-          getApiReauthorizeUrl(error) ??
-          (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|session token/i.test(
-            message
-          )
-            ? fallbackReauthorizeUrl
-            : null);
-        if (reauthorizeUrl) {
-          setActionBanner({
-            title: "Reconnect Shopify before changing plans",
-            detail:
-              "Your embedded Shopify app session needs a fresh authorization before billing can continue.",
-            reauthorizeUrl,
-          });
-          setToast("Reconnect Shopify before changing plans.");
-          return;
-        }
-
-        setActionBanner({
-          title: "Billing action needs attention",
-          detail: message,
-        });
-        setToast(message);
-        setBusyAction(null);
+    const currentParams = new URLSearchParams(window.location.search);
+    const shopParam = currentParams.get("shop") || shop;
+    const hostParam = currentParams.get("host") || host;
+    if (!shopParam) {
+      setActionBanner({
+        title: "Billing action needs attention",
+        detail: "Missing Shopify shop context. Reopen the embedded app and retry.",
       });
+      setToast("Missing Shopify shop context.");
+      setBusyAction(null);
+      return;
+    }
+
+    const url = new URL("/billing/start", window.location.origin);
+    url.searchParams.set("shop", shopParam);
+    url.searchParams.set("planName", planName);
+    if (hostParam) {
+      url.searchParams.set("host", hostParam);
+    }
+    if (planName === "STARTER") {
+      url.searchParams.set("starterModule", starterModule);
+    }
+
+    redirectTopLevel(url.toString());
   };
 
   const refreshSubscription = () => {
-    withRequestTimeout(
-      api.get<{ subscription: Subscription }>("/api/subscription/plan"),
-      25000
-    )
-      .then((res) => setSub(res.data.subscription))
+    embeddedShopRequest<{ subscription: Subscription }>("/api/subscription/plan", {
+      timeoutMs: 30000,
+    })
+      .then((res) => {
+        setSub(res.subscription);
+        if (res.subscription.starterModule) {
+          setStarterModule(res.subscription.starterModule);
+        }
+      })
       .catch(() => setSub(fallbackTrialSubscription))
       .finally(() => setBusyAction(null));
   };
@@ -205,10 +206,11 @@ export function SubscriptionPage() {
     try {
       setBusyAction("starter-module");
       setActionBanner(null);
-      await withRequestTimeout(
-        api.post("/api/subscription/starter-module", { starterModule }),
-        30000
-      );
+      await embeddedShopRequest("/api/subscription/starter-module", {
+        method: "POST",
+        body: { starterModule },
+        timeoutMs: 30000,
+      });
       setToast(`Starter module switched to ${starterModule}.`);
       refreshSubscription();
     } catch (error) {
@@ -226,7 +228,10 @@ export function SubscriptionPage() {
     try {
       setBusyAction("cancel");
       setActionBanner(null);
-      await withRequestTimeout(api.post("/api/subscription/cancel", {}), 30000);
+      await embeddedShopRequest("/api/subscription/cancel", {
+        method: "POST",
+        timeoutMs: 30000,
+      });
       setToast("Subscription marked as cancelled.");
       refreshSubscription();
     } catch (error) {
@@ -247,10 +252,10 @@ export function SubscriptionPage() {
     try {
       setBusyAction("trial");
       setActionBanner(null);
-      await withRequestTimeout(
-        api.post("/api/subscription/downgrade-to-trial", {}),
-        30000
-      );
+      await embeddedShopRequest("/api/subscription/downgrade-to-trial", {
+        method: "POST",
+        timeoutMs: 30000,
+      });
       setToast("Store downgraded to the Trial plan.");
       refreshSubscription();
     } catch (error) {
@@ -314,6 +319,9 @@ export function SubscriptionPage() {
                   ) : (
                     <Button onClick={refreshSubscription}>Retry plan refresh</Button>
                   )}
+                  <Button variant="secondary" onClick={() => changePlan("STARTER")}>
+                    Retry Starter checkout
+                  </Button>
                 </InlineStack>
               </BlockStack>
             </Banner>

@@ -30,7 +30,10 @@ pricingRouter.post("/simulate", async (req, res) => {
 
 pricingRouter.post("/recommendations/:id/approve", async (req, res) => {
   const { id } = req.params;
-  const { shop } = req.body as { shop: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
 
   if (!shop || !id) {
     return res.status(400).json({ error: "Missing shop or recommendation id." });

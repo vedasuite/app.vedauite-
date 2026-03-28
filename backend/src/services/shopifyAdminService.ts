@@ -14,7 +14,7 @@ function formatBillingPermissionMessage(message: string) {
   }
 
   if (/access denied|not authorized|forbidden|scope/i.test(message)) {
-    return `${message} Reinstall or reauthorize the app with the write_own_subscription scope, then retry billing.`;
+    return `${message} Reinstall or reauthorize the app, confirm billing is allowed for this app in Shopify Partner Dashboard, then retry billing.`;
   }
 
   return message;
@@ -48,11 +48,13 @@ async function getStoreAccess(shopDomain: string) {
 export async function shopifyGraphQL<T>(
   shopDomain: string,
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  options: { timeoutMs?: number } = {}
 ) {
   const store = await getStoreAccess(shopDomain);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeoutMs = options.timeoutMs ?? 20000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(
@@ -170,7 +172,8 @@ export async function createAppSubscription(params: {
           },
         },
       ],
-    }
+    },
+    { timeoutMs: 60000 }
   );
 
   const payload = data.appSubscriptionCreate;
@@ -259,7 +262,8 @@ export async function cancelAppSubscription(
     {
       id: subscriptionId,
       prorate,
-    }
+    },
+    { timeoutMs: 60000 }
   );
 
   const payload = data.appSubscriptionCancel;
@@ -316,7 +320,7 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
         }
       }
     `
-  );
+  }, { timeoutMs: 45000 });
 
   const existingKeys = new Set(
     existing.webhookSubscriptions.edges.map((edge) => {
@@ -357,7 +361,8 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
       {
         topic,
         callbackUrl,
-      }
+      },
+      { timeoutMs: 45000 }
     );
 
     if (createdWebhook.webhookSubscriptionCreate.userErrors.length) {
@@ -419,7 +424,7 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
         }
       }
     `
-  );
+  }, { timeoutMs: 45000 });
 
   const webhooks = desiredTopics.map((topic) => {
     const callbackUrl = `${callbackBaseUrl}/${topic.toLowerCase()}`;
@@ -627,7 +632,9 @@ export async function syncShopifyStoreData(shopDomain: string) {
           }
         }
       }
-    `
+    `,
+    undefined,
+    { timeoutMs: 60000 }
   );
 
   const products = data.shop.products.edges.map((edge) => edge.node);

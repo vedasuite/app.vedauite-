@@ -18,13 +18,11 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState } from "../../components/PageState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
-import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type CompetitorRow = {
   id: string;
@@ -105,7 +103,6 @@ const resourceName = {
 };
 
 export function CompetitorPage() {
-  const api = useApiClient();
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
@@ -136,35 +133,72 @@ export function CompetitorPage() {
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
 
+  const effectiveConnectors = useMemo(
+    () =>
+      connectors.length > 0
+        ? connectors
+        : [
+            {
+              id: "website",
+              label: "Website monitoring",
+              description:
+                "Track competitor pricing, promotions, and stock posture across monitored storefronts.",
+              connected: false,
+              trackedTargets: 0,
+              readiness: "Add competitor domains to begin monitoring",
+            },
+            {
+              id: "shopping",
+              label: "Google Shopping signals",
+              description:
+                "Estimate shopping-surface pressure and pricing posture from tracked competitor coverage.",
+              connected: false,
+              trackedTargets: 0,
+              readiness: "Available after monitored products are ingested",
+            },
+            {
+              id: "ads",
+              label: "Ad pressure watch",
+              description:
+                "Surface Meta-style ad and promotion signals alongside website monitoring.",
+              connected: false,
+              trackedTargets: 0,
+              readiness: "Build your tracked domain set first",
+            },
+          ],
+    [connectors]
+  );
+
   useEffect(() => {
     Promise.all([
-      withRequestTimeout(api.get<{ products: CompetitorRow[] }>("/api/competitor/products")),
-      withRequestTimeout(api.get<CompetitorOverview>("/api/competitor/overview")),
-      withRequestTimeout(api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors")),
-      withRequestTimeout(api.get<{ responseEngine: CompetitorResponseEngine }>(
-        "/api/competitor/response-engine"
-      )),
+      embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", {
+        timeoutMs: 30000,
+      }),
+      embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
+        timeoutMs: 30000,
+      }),
+      embeddedShopRequest<{ connectors: CompetitorConnector[] }>(
+        "/api/competitor/connectors",
+        { timeoutMs: 30000 }
+      ),
+      embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>(
+        "/api/competitor/response-engine",
+        { timeoutMs: 30000 }
+      ),
     ])
-      .then(
-        ([
-          productsResponse,
-          overviewResponse,
-          connectorsResponse,
-          responseEngineResponse,
-        ]) => {
-        setRows(productsResponse.data.products);
-        setOverview(overviewResponse.data);
-        setConnectors(connectorsResponse.data.connectors);
-        setResponseEngine(responseEngineResponse.data.responseEngine);
-        writeModuleCache("competitor-rows", productsResponse.data.products);
-        writeModuleCache("competitor-overview", overviewResponse.data);
-        writeModuleCache("competitor-connectors", connectorsResponse.data.connectors);
+      .then(([productsResponse, overviewResponse, connectorsResponse, responseEngineResponse]) => {
+        setRows(productsResponse.products);
+        setOverview(overviewResponse);
+        setConnectors(connectorsResponse.connectors);
+        setResponseEngine(responseEngineResponse.responseEngine);
+        writeModuleCache("competitor-rows", productsResponse.products);
+        writeModuleCache("competitor-overview", overviewResponse);
+        writeModuleCache("competitor-connectors", connectorsResponse.connectors);
         writeModuleCache(
           "competitor-response-engine",
-          responseEngineResponse.data.responseEngine
+          responseEngineResponse.responseEngine
         );
-      }
-      )
+      })
       .catch(() => {
         setRows([]);
         setOverview(null);
@@ -172,7 +206,7 @@ export function CompetitorPage() {
         setResponseEngine(null);
       })
       .finally(() => setLoading(false));
-  }, [api]);
+  }, []);
 
   useEffect(() => {
     setSelectedTab(
@@ -234,7 +268,11 @@ export function CompetitorPage() {
       .map((domain) => ({ domain }));
 
     try {
-      await api.post("/api/competitor/domains", { domains });
+      await embeddedShopRequest("/api/competitor/domains", {
+        method: "POST",
+        body: { domains },
+        timeoutMs: 30000,
+      });
       setToast("Competitor tracking domains updated.");
       setModalOpen(false);
     } catch {
@@ -246,32 +284,41 @@ export function CompetitorPage() {
     try {
       setIngesting(true);
       const [productsResponse, overviewResponse] = await Promise.all([
-        withRequestTimeout(
-          api.post<{ result: { ingested: number } }>("/api/competitor/ingest", {})
-        ),
-        withRequestTimeout(api.get<{ products: CompetitorRow[] }>("/api/competitor/products")),
+        embeddedShopRequest<{ result: { ingested: number } }>("/api/competitor/ingest", {
+          method: "POST",
+          timeoutMs: 45000,
+        }),
+        embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", {
+          timeoutMs: 30000,
+        }),
       ]);
       setToast(
-        `Competitor ingestion completed with ${productsResponse.data.result.ingested} fresh market records.`
+        `Competitor ingestion completed with ${productsResponse.result.ingested} fresh market records.`
       );
-      setRows(overviewResponse.data.products);
-      writeModuleCache("competitor-rows", overviewResponse.data.products);
+      setRows(overviewResponse.products);
+      writeModuleCache("competitor-rows", overviewResponse.products);
       const [refreshedOverview, refreshedConnectors, refreshedResponseEngine] =
         await Promise.all([
-        withRequestTimeout(api.get<CompetitorOverview>("/api/competitor/overview")),
-        withRequestTimeout(api.get<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors")),
-        withRequestTimeout(api.get<{ responseEngine: CompetitorResponseEngine }>(
-          "/api/competitor/response-engine"
-        )),
+        embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<{ connectors: CompetitorConnector[] }>(
+          "/api/competitor/connectors",
+          { timeoutMs: 30000 }
+        ),
+        embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>(
+          "/api/competitor/response-engine",
+          { timeoutMs: 30000 }
+        ),
       ]);
-      setOverview(refreshedOverview.data);
-      writeModuleCache("competitor-overview", refreshedOverview.data);
-      setConnectors(refreshedConnectors.data.connectors);
-      writeModuleCache("competitor-connectors", refreshedConnectors.data.connectors);
-      setResponseEngine(refreshedResponseEngine.data.responseEngine);
+      setOverview(refreshedOverview);
+      writeModuleCache("competitor-overview", refreshedOverview);
+      setConnectors(refreshedConnectors.connectors);
+      writeModuleCache("competitor-connectors", refreshedConnectors.connectors);
+      setResponseEngine(refreshedResponseEngine.responseEngine);
       writeModuleCache(
         "competitor-response-engine",
-        refreshedResponseEngine.data.responseEngine
+        refreshedResponseEngine.responseEngine
       );
     } catch {
       setToast("Unable to ingest competitor data right now.");
@@ -287,16 +334,13 @@ export function CompetitorPage() {
       requiredPlan="Starter, Growth, or Pro"
       allowed={!!subscription?.enabledModules.competitor}
     >
-      {rows.length === 0 ? (
-        <EmptyPageState
-          title="Competitor Intelligence"
-          subtitle="No competitor tracking data is available yet."
-          message="Add monitored domains and tracked products to start building competitor intelligence."
-        />
-      ) : (
         <Page
           title="Competitor Intelligence"
-          subtitle="Track price moves, promotions, and stock posture across key competitor domains."
+          subtitle={
+            rows.length === 0
+              ? "No competitor tracking data is available yet."
+              : "Track price moves, promotions, and stock posture across key competitor domains."
+          }
           primaryAction={{
             content: ingesting ? "Ingesting..." : "Ingest competitor data",
             onAction: ingestCompetitorData,
@@ -318,12 +362,20 @@ export function CompetitorPage() {
               </Layout.Section>
             ) : null}
             <Layout.Section>
-              <Banner title="Market monitoring is live" tone="success">
-                <p>
-                  VedaSuite can combine competitor websites, Google Shopping, and ad
-                  intelligence into weekly market movement reports.
-                </p>
-              </Banner>
+              {rows.length === 0 ? (
+                <Banner title="Competitor monitoring is ready to configure" tone="info">
+                  <p>
+                    Add monitored domains, then run ingestion to build competitor price, promotion, launch, and ad-pressure coverage.
+                  </p>
+                </Banner>
+              ) : (
+                <Banner title="Market monitoring is live" tone="success">
+                  <p>
+                    VedaSuite can combine competitor websites, Google Shopping, and ad
+                    intelligence into weekly market movement reports.
+                  </p>
+                </Banner>
+              )}
             </Layout.Section>
             {focusMessage ? (
               <Layout.Section>
@@ -335,7 +387,7 @@ export function CompetitorPage() {
 
             <Layout.Section>
               <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-                {connectors.map((connector) => (
+                {effectiveConnectors.map((connector) => (
                   <Card key={connector.id}>
                     <BlockStack gap="200">
                       <InlineStack align="space-between" blockAlign="center">
@@ -498,13 +550,19 @@ export function CompetitorPage() {
                         <Card>
                           <BlockStack gap="300">
                             <Text as="h3" variant="headingMd">
-                              No matching competitor results
+                              No tracked competitor results yet
                             </Text>
                             <Text as="p" tone="subdued">
-                              This focused market view does not currently have
-                              any tracked matches. Switch filters or add more
-                              competitor domains.
+                              Add competitor domains, run ingestion, and VedaSuite will start surfacing price moves, promotions, stock posture, launch watch signals, and response recommendations here.
                             </Text>
+                            <InlineStack gap="300">
+                              <Button onClick={() => setModalOpen(true)}>
+                                Add competitor domains
+                              </Button>
+                              <Button variant="secondary" onClick={ingestCompetitorData}>
+                                Run first ingestion
+                              </Button>
+                            </InlineStack>
                           </BlockStack>
                         </Card>
                       ) : (
@@ -808,7 +866,6 @@ export function CompetitorPage() {
 
           {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
         </Page>
-      )}
     </ModuleGate>
   );
 }

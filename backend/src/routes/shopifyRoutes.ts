@@ -20,7 +20,10 @@ function buildReauthorizeUrl(shop?: string) {
 }
 
 shopifyRouter.post("/sync", async (req, res) => {
-  const { shop } = req.body as { shop?: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
 
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
@@ -47,7 +50,10 @@ shopifyRouter.post("/sync", async (req, res) => {
 });
 
 shopifyRouter.post("/register-webhooks", async (req, res) => {
-  const { shop } = req.body as { shop?: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
 
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });

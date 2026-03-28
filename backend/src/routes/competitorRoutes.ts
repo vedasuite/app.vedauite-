@@ -51,10 +51,14 @@ competitorRouter.get("/response-engine", async (req, res) => {
 });
 
 competitorRouter.post("/domains", async (req, res) => {
-  const { shop, domains } = req.body as {
+  const body = req.body as {
     shop: string;
     domains: { domain: string; label?: string }[];
   };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const domains = body.domains;
 
   if (!shop || !domains) {
     return res.status(400).json({ error: "Missing shop or domains." });
@@ -65,7 +69,10 @@ competitorRouter.post("/domains", async (req, res) => {
 });
 
 competitorRouter.post("/ingest", async (req, res) => {
-  const { shop } = req.body as { shop: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
 
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });

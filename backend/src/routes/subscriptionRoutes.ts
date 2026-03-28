@@ -18,7 +18,10 @@ subscriptionRouter.get("/plan", async (req, res) => {
 });
 
 subscriptionRouter.post("/cancel", async (req, res) => {
-  const { shop } = req.body as { shop?: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
@@ -28,7 +31,10 @@ subscriptionRouter.post("/cancel", async (req, res) => {
 });
 
 subscriptionRouter.post("/downgrade-to-trial", async (req, res) => {
-  const { shop } = req.body as { shop?: string };
+  const body = req.body as { shop?: string };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
@@ -38,10 +44,14 @@ subscriptionRouter.post("/downgrade-to-trial", async (req, res) => {
 });
 
 subscriptionRouter.post("/starter-module", async (req, res) => {
-  const { shop, starterModule } = req.body as {
+  const body = req.body as {
     shop?: string;
     starterModule?: "fraud" | "competitor";
   };
+  const shop =
+    body.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const starterModule = body.starterModule;
 
   if (!shop || !starterModule) {
     return res.status(400).json({ error: "Missing shop or starter module." });

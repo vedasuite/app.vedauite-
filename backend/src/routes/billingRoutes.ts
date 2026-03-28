@@ -9,6 +9,82 @@ import {
 
 export const billingRouter = Router();
 
+function buildBillingReturnUrl(params: {
+  shop: string;
+  host?: string;
+  planName: string;
+  starterModule?: "fraud" | "competitor";
+}) {
+  const returnUrl = new URL(`${env.shopifyAppUrl}/billing/activate`);
+  returnUrl.searchParams.set("shop", params.shop);
+  returnUrl.searchParams.set("plan", params.planName);
+  if (params.host) {
+    returnUrl.searchParams.set("host", params.host);
+  }
+  if (params.starterModule) {
+    returnUrl.searchParams.set("starterModule", params.starterModule);
+  }
+
+  return returnUrl;
+}
+
+async function resolvePlanRecord(planName: string) {
+  return (
+    (await prisma.subscriptionPlan.findFirst({
+      where: { name: planName },
+    })) ||
+    (await prisma.subscriptionPlan.create({
+      data: {
+        name: planName,
+        price:
+          planName === "STARTER"
+            ? env.billing.starterPrice
+            : planName === "GROWTH"
+            ? env.billing.growthPrice
+            : env.billing.proPrice,
+        trialDays: env.billing.trialDays,
+        features: JSON.stringify({ planName }),
+      },
+    }))
+  );
+}
+
+async function createBillingRedirect(params: {
+  shop: string;
+  host?: string;
+  planName: string;
+  starterModule?: "fraud" | "competitor";
+}) {
+  const store = await prisma.store.findUnique({
+    where: { shop: params.shop },
+    include: {
+      subscription: {
+        include: {
+          plan: true,
+        },
+      },
+    },
+  });
+
+  if (!store) {
+    throw new Error("Store not found");
+  }
+
+  const plan = await resolvePlanRecord(params.planName);
+  const returnUrl = buildBillingReturnUrl(params);
+
+  const billing = await createAppSubscription({
+    shopDomain: params.shop,
+    name: `VedaSuite AI - ${params.planName}`,
+    price: plan.price,
+    returnUrl: returnUrl.toString(),
+    trialDays: plan.trialDays,
+    test: env.billing.testMode,
+  });
+
+  return billing.confirmationUrl;
+}
+
 billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, res) => {
   const { shop, host, planName, starterModule } = req.body as {
     shop: string;
@@ -27,62 +103,16 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
       .json({ error: "Starter plan requires a starterModule selection." });
   }
 
-  const store = await prisma.store.findUnique({
-    where: { shop },
-    include: {
-      subscription: {
-        include: {
-          plan: true,
-        },
-      },
-    },
-  });
-
-  if (!store) {
-    return res.status(404).json({ error: "Store not found" });
-  }
-
-  const plan =
-    (await prisma.subscriptionPlan.findFirst({
-      where: { name: planName },
-    })) ||
-    (await prisma.subscriptionPlan.create({
-      data: {
-        name: planName,
-        price:
-          planName === "STARTER"
-            ? env.billing.starterPrice
-            : planName === "GROWTH"
-            ? env.billing.growthPrice
-            : env.billing.proPrice,
-        trialDays: env.billing.trialDays,
-        features: JSON.stringify({ planName }),
-      },
-    }));
-
-  const returnUrl = new URL(`${env.shopifyAppUrl}/billing/activate`);
-  returnUrl.searchParams.set("shop", shop);
-  returnUrl.searchParams.set("plan", planName);
-  if (host) {
-    returnUrl.searchParams.set("host", host);
-  }
-  if (starterModule) {
-    returnUrl.searchParams.set("starterModule", starterModule);
-  }
-
   try {
-    const billing = await createAppSubscription({
-      shopDomain: shop,
-      name: `VedaSuite AI - ${planName}`,
-      price: plan.price,
-      returnUrl: returnUrl.toString(),
-      trialDays: plan.trialDays,
-      test: env.billing.testMode,
+    const confirmationUrl = await createBillingRedirect({
+      shop,
+      host,
+      planName,
+      starterModule,
     });
 
     return res.json({
-      confirmationUrl: billing.confirmationUrl,
-      pendingSubscriptionId: billing.appSubscription?.id ?? null,
+      confirmationUrl,
     });
   } catch (error) {
     const message =
@@ -101,6 +131,44 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
     }
 
     throw error;
+  }
+});
+
+billingRouter.get("/start", async (req, res) => {
+  const { shop, host, planName, starterModule } = req.query as {
+    shop?: string;
+    host?: string;
+    planName?: string;
+    starterModule?: "fraud" | "competitor";
+  };
+
+  if (!shop || !planName) {
+    return res.status(400).send("Missing shop or planName.");
+  }
+
+  if (planName === "STARTER" && !starterModule) {
+    return res.status(400).send("Starter plan requires a starterModule selection.");
+  }
+
+  try {
+    const confirmationUrl = await createBillingRedirect({
+      shop,
+      host,
+      planName,
+      starterModule,
+    });
+
+    return res.redirect(confirmationUrl);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to open Shopify billing confirmation.";
+    const fallback = new URL(`${env.shopifyAppUrl}/subscription`);
+    fallback.searchParams.set("shop", shop);
+    if (host) {
+      fallback.searchParams.set("host", host);
+    }
+    fallback.searchParams.set("billingError", message);
+    return res.redirect(fallback.toString());
   }
 });
 
