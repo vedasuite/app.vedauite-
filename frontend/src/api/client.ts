@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from "axios";
 import { getSessionToken } from "@shopify/app-bridge/utilities/session-token";
 import { useMemo } from "react";
 import { useAppBridge } from "../shopifyAppBridge";
+import { withRequestTimeout } from "../lib/requestTimeout";
 
 const backendUrl =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) || "";
@@ -22,7 +23,7 @@ export function useApiClient() {
       withCredentials: true,
     });
     client.interceptors.request.use(async (config) => {
-      const sessionToken = await getSessionToken(app);
+      const sessionToken = await withRequestTimeout(getSessionToken(app), 8000);
       if (config.headers && typeof config.headers.set === "function") {
         config.headers.set("Authorization", `Bearer ${sessionToken}`);
         config.headers.set("X-Requested-With", "XMLHttpRequest");

@@ -19,9 +19,8 @@ export function useAppBridge() {
     [host]
   );
 
-  const app = useMemo(() => createApp(config), [config]);
   const cachedApp = useMemo(() => {
-    const cacheKey = host || "default";
+    const cacheKey = `${apiKey}|${host || "default"}`;
     const existingApp = appCache.get(cacheKey);
     if (existingApp) {
       return existingApp;
