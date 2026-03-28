@@ -2,6 +2,7 @@ import { createContext, ReactNode, useCallback, useEffect, useState } from "reac
 import { useApiClient } from "../api/client";
 import type { SubscriptionInfo } from "../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../lib/moduleCache";
+import { withRequestTimeout } from "../lib/requestTimeout";
 
 type SubscriptionContextValue = {
   subscription: SubscriptionInfo | null;
@@ -25,8 +26,8 @@ export function SubscriptionProvider({ children }: Props) {
   const [loading, setLoading] = useState(!cachedSubscription);
 
   const refresh = useCallback(async () => {
-    const res = await api.get<{ subscription: SubscriptionInfo }>(
-      "/api/subscription/plan"
+    const res = await withRequestTimeout(
+      api.get<{ subscription: SubscriptionInfo }>("/api/subscription/plan")
     );
     setSubscription(res.data.subscription);
     writeModuleCache("subscription-plan", res.data.subscription);
@@ -41,7 +42,21 @@ export function SubscriptionProvider({ children }: Props) {
       })
       .catch(() => {
         if (!mounted) return;
-        setSubscription(null);
+        setSubscription({
+          planName: "TRIAL",
+          price: 0,
+          trialDays: 3,
+          starterModule: null,
+          active: false,
+          endsAt: null,
+          enabledModules: {
+            fraud: true,
+            competitor: true,
+            pricing: false,
+            creditScore: false,
+            profitOptimization: false,
+          },
+        });
       })
       .finally(() => {
         if (!mounted) return;

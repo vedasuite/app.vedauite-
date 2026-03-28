@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Subscription = {
   planName: string;
@@ -106,24 +107,42 @@ export function SubscriptionPage() {
   const activatedStarterModule = searchParams.get("starterModule");
 
   useEffect(() => {
-    api
-      .get<{ subscription: Subscription }>("/api/subscription/plan")
+    withRequestTimeout(
+      api.get<{ subscription: Subscription }>("/api/subscription/plan")
+    )
       .then((res) => {
         setSub(res.data.subscription);
         if (res.data.subscription.starterModule) {
           setStarterModule(res.data.subscription.starterModule);
         }
       })
-      .catch(() => setSub(null));
+      .catch(() =>
+        setSub({
+          planName: "TRIAL",
+          price: 0,
+          trialDays: 3,
+          starterModule: null,
+          active: false,
+          endsAt: null,
+          enabledModules: {
+            fraud: true,
+            competitor: true,
+            pricing: false,
+            creditScore: false,
+            profitOptimization: false,
+          },
+        })
+      );
   }, [api]);
 
   const changePlan = (planName: string) => {
     setBusyAction(planName);
-    api
-      .post("/billing/create-recurring", {
+    withRequestTimeout(
+      api.post("/billing/create-recurring", {
         planName,
         starterModule: planName === "STARTER" ? starterModule : undefined,
       })
+    )
       .then((res) => {
         const url = res.data.confirmationUrl as string;
         redirectTopLevel(url);
@@ -147,10 +166,27 @@ export function SubscriptionPage() {
   };
 
   const refreshSubscription = () => {
-    api
-      .get<{ subscription: Subscription }>("/api/subscription/plan")
+    withRequestTimeout(
+      api.get<{ subscription: Subscription }>("/api/subscription/plan")
+    )
       .then((res) => setSub(res.data.subscription))
-      .catch(() => setSub(null))
+      .catch(() =>
+        setSub({
+          planName: "TRIAL",
+          price: 0,
+          trialDays: 3,
+          starterModule: null,
+          active: false,
+          endsAt: null,
+          enabledModules: {
+            fraud: true,
+            competitor: true,
+            pricing: false,
+            creditScore: false,
+            profitOptimization: false,
+          },
+        })
+      )
       .finally(() => setBusyAction(null));
   };
 
