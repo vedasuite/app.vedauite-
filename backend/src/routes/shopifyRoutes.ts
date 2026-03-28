@@ -8,6 +8,17 @@ import {
 
 export const shopifyRouter = Router();
 
+function buildReauthorizeUrl(shop?: string) {
+  if (!shop) {
+    return undefined;
+  }
+
+  return new URL(
+    `/auth/install?shop=${encodeURIComponent(shop)}`,
+    env.shopifyAppUrl
+  ).toString();
+}
+
 shopifyRouter.post("/sync", async (req, res) => {
   const { shop } = req.body as { shop?: string };
 
@@ -15,8 +26,24 @@ shopifyRouter.post("/sync", async (req, res) => {
     return res.status(400).json({ error: "Missing shop." });
   }
 
-  const result = await syncShopifyStoreData(shop);
-  return res.json({ result });
+  try {
+    const result = await syncShopifyStoreData(shop);
+    return res.json({ result });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to sync Shopify data.";
+
+    if (/invalid for .*reauthorize the app/i.test(message)) {
+      return res.status(401).json({
+        error: {
+          message,
+          reauthorizeUrl: buildReauthorizeUrl(shop),
+        },
+      });
+    }
+
+    throw error;
+  }
 });
 
 shopifyRouter.post("/register-webhooks", async (req, res) => {
@@ -26,8 +53,26 @@ shopifyRouter.post("/register-webhooks", async (req, res) => {
     return res.status(400).json({ error: "Missing shop." });
   }
 
-  const result = await registerSyncWebhooks(shop, env.shopifyAppUrl);
-  return res.json({ result });
+  try {
+    const result = await registerSyncWebhooks(shop, env.shopifyAppUrl);
+    return res.json({ result });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to register Shopify sync webhooks.";
+
+    if (/invalid for .*reauthorize the app/i.test(message)) {
+      return res.status(401).json({
+        error: {
+          message,
+          reauthorizeUrl: buildReauthorizeUrl(shop),
+        },
+      });
+    }
+
+    throw error;
+  }
 });
 
 shopifyRouter.get("/webhook-status", async (req, res) => {

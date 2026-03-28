@@ -65,6 +65,66 @@ type DecisionCenter = {
   }>;
 };
 
+function getApiErrorMessage(error: unknown, fallback: string) {
+  const candidate = error as {
+    message?: string;
+    response?: {
+      data?: {
+        error?: string | { message?: string; reauthorizeUrl?: string };
+        message?: string;
+      };
+    };
+  };
+
+  const responseError = candidate.response?.data?.error;
+  if (typeof responseError === "string" && responseError.trim()) {
+    return responseError;
+  }
+
+  if (
+    responseError &&
+    typeof responseError === "object" &&
+    typeof responseError.message === "string" &&
+    responseError.message.trim()
+  ) {
+    return responseError.message;
+  }
+
+  const responseMessage = candidate.response?.data?.message;
+  if (typeof responseMessage === "string" && responseMessage.trim()) {
+    return responseMessage;
+  }
+
+  if (typeof candidate.message === "string" && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  return fallback;
+}
+
+function getApiReauthorizeUrl(error: unknown) {
+  const candidate = error as {
+    response?: {
+      data?: {
+        error?: {
+          reauthorizeUrl?: string;
+        };
+      };
+    };
+  };
+
+  return candidate.response?.data?.error?.reauthorizeUrl ?? null;
+}
+
+function redirectTopLevel(url: string) {
+  if (window.top && window.top !== window) {
+    window.top.location.href = url;
+    return;
+  }
+
+  window.location.href = url;
+}
+
 const fallbackMetrics: Metrics = {
   fraudAlertsToday: 0,
   highRiskOrders: 0,
@@ -125,8 +185,17 @@ export function DashboardPage() {
       await api.post("/api/shopify/sync", {});
       loadMetrics();
       setToast("Live Shopify data synced into VedaSuite.");
-    } catch {
-      setToast("Unable to sync Shopify data right now.");
+    } catch (error) {
+      const reauthorizeUrl = getApiReauthorizeUrl(error);
+      if (reauthorizeUrl) {
+        setToast("Reauthorizing VedaSuite with Shopify...");
+        redirectTopLevel(reauthorizeUrl);
+        return;
+      }
+
+      setToast(
+        getApiErrorMessage(error, "Unable to sync Shopify data right now.")
+      );
     } finally {
       setSyncing(false);
     }
@@ -144,8 +213,17 @@ export function DashboardPage() {
           : "Shopify sync webhooks are already registered."
       );
       loadWebhookStatus();
-    } catch {
-      setToast("Unable to register Shopify sync webhooks.");
+    } catch (error) {
+      const reauthorizeUrl = getApiReauthorizeUrl(error);
+      if (reauthorizeUrl) {
+        setToast("Reauthorizing VedaSuite with Shopify...");
+        redirectTopLevel(reauthorizeUrl);
+        return;
+      }
+
+      setToast(
+        getApiErrorMessage(error, "Unable to register Shopify sync webhooks.")
+      );
     } finally {
       setRegisteringWebhooks(false);
     }
