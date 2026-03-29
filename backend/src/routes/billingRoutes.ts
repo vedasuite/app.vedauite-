@@ -54,7 +54,7 @@ async function createBillingRedirect(params: {
   host?: string;
   planName: string;
   starterModule?: "fraud" | "competitor";
-}) {
+}): Promise<string> {
   const store = await prisma.store.findUnique({
     where: { shop: params.shop },
     include: {
@@ -81,6 +81,10 @@ async function createBillingRedirect(params: {
     trialDays: plan.trialDays,
     test: env.billing.testMode,
   });
+
+  if (!billing.confirmationUrl) {
+    throw new Error("Shopify did not return a billing confirmation URL.");
+  }
 
   return billing.confirmationUrl;
 }
