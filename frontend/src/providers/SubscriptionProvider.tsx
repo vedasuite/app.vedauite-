@@ -1,13 +1,21 @@
 import { createContext, ReactNode, useCallback, useEffect, useState } from "react";
-import { useApiClient } from "../api/client";
 import type { SubscriptionInfo } from "../hooks/useSubscriptionPlan";
-import { readModuleCache, writeModuleCache } from "../lib/moduleCache";
-import { withRequestTimeout } from "../lib/requestTimeout";
+import {
+  clearModuleCache,
+  readModuleCache,
+  writeModuleCache,
+} from "../lib/moduleCache";
+import { embeddedShopRequest } from "../lib/embeddedShopRequest";
+import {
+  fallbackSubscription,
+  readOptimisticSubscriptionFromSearch,
+} from "../lib/subscriptionState";
 
 type SubscriptionContextValue = {
   subscription: SubscriptionInfo | null;
   loading: boolean;
   refresh: () => Promise<void>;
+  applyOptimistic: (nextSubscription: SubscriptionInfo) => void;
 };
 
 export const SubscriptionContext =
@@ -17,40 +25,44 @@ type Props = {
   children: ReactNode;
 };
 
-const fallbackSubscription: SubscriptionInfo = {
-  planName: "TRIAL",
-  price: 0,
-  trialDays: 3,
-  starterModule: null,
-  active: false,
-  endsAt: null,
-  enabledModules: {
-    fraud: true,
-    competitor: true,
-    pricing: false,
-    creditScore: false,
-    profitOptimization: false,
-  },
-};
-
 export function SubscriptionProvider({ children }: Props) {
-  const api = useApiClient();
   const cachedSubscription = readModuleCache<SubscriptionInfo>("subscription-plan");
-  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(
-    cachedSubscription ?? fallbackSubscription
+  const optimisticSubscription = readOptimisticSubscriptionFromSearch(
+    window.location.search
   );
-  const [loading, setLoading] = useState(false);
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(
+    optimisticSubscription ?? cachedSubscription ?? fallbackSubscription
+  );
+  const [loading, setLoading] = useState(!cachedSubscription && !optimisticSubscription);
+
+  const applyOptimistic = useCallback((nextSubscription: SubscriptionInfo) => {
+    setSubscription(nextSubscription);
+    writeModuleCache("subscription-plan", nextSubscription);
+  }, []);
 
   const refresh = useCallback(async () => {
-    const res = await withRequestTimeout(
-      api.get<{ subscription: SubscriptionInfo }>("/api/subscription/plan")
+    const res = await embeddedShopRequest<{ subscription: SubscriptionInfo }>(
+      "/api/subscription/plan",
+      { timeoutMs: 45000 }
     );
-    setSubscription(res.data.subscription);
-    writeModuleCache("subscription-plan", res.data.subscription);
-  }, [api]);
+    applyOptimistic(res.subscription);
+  }, [applyOptimistic]);
 
   useEffect(() => {
     let mounted = true;
+
+    if (optimisticSubscription) {
+      applyOptimistic(optimisticSubscription);
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete("billing");
+      nextUrl.searchParams.delete("plan");
+      nextUrl.searchParams.delete("starterModule");
+      window.history.replaceState(
+        {},
+        "",
+        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+      );
+    }
 
     refresh()
       .then(() => {
@@ -58,7 +70,10 @@ export function SubscriptionProvider({ children }: Props) {
       })
       .catch(() => {
         if (!mounted) return;
-        setSubscription(fallbackSubscription);
+        if (!cachedSubscription && !optimisticSubscription) {
+          applyOptimistic(fallbackSubscription);
+          clearModuleCache("subscription-plan");
+        }
       })
       .finally(() => {
         if (!mounted) return;
@@ -70,24 +85,10 @@ export function SubscriptionProvider({ children }: Props) {
     };
   }, [refresh]);
 
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        refresh().catch(() => undefined);
-      }
-    };
-
-    window.addEventListener("focus", handleVisibility);
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    return () => {
-      window.removeEventListener("focus", handleVisibility);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
-  }, [refresh]);
-
   return (
-    <SubscriptionContext.Provider value={{ subscription, loading, refresh }}>
+    <SubscriptionContext.Provider
+      value={{ subscription, loading, refresh, applyOptimistic }}
+    >
       {children}
     </SubscriptionContext.Provider>
   );

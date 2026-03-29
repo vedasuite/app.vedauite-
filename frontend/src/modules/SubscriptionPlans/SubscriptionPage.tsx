@@ -14,24 +14,13 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import {
+  buildOptimisticSubscription,
+  fallbackSubscription,
+} from "../../lib/subscriptionState";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
-
-type Subscription = {
-  planName: string;
-  price: number;
-  trialDays: number;
-  starterModule: "fraud" | "competitor" | null;
-  active?: boolean;
-  endsAt?: string | null;
-  enabledModules: {
-    fraud: boolean;
-    competitor: boolean;
-    pricing: boolean;
-    creditScore: boolean;
-    profitOptimization: boolean;
-  };
-};
 
 function getApiErrorMessage(error: unknown, fallback: string) {
   const candidate = error as {
@@ -95,8 +84,12 @@ function redirectTopLevel(url: string) {
 
 export function SubscriptionPage() {
   const { shop, host } = useAppBridge();
+  const {
+    subscription,
+    refresh: refreshSubscriptionContext,
+    applyOptimistic,
+  } = useSubscriptionPlan();
   const [searchParams] = useSearchParams();
-  const [sub, setSub] = useState<Subscription | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [actionBanner, setActionBanner] = useState<{
     title: string;
@@ -114,34 +107,44 @@ export function SubscriptionPage() {
   const fallbackReauthorizeUrl = shop
     ? `/auth/install?shop=${encodeURIComponent(shop)}`
     : null;
-  const fallbackTrialSubscription: Subscription = {
-    planName: "TRIAL",
-    price: 0,
-    trialDays: 3,
-    starterModule: null,
-    active: false,
-    endsAt: null,
-    enabledModules: {
-      fraud: true,
-      competitor: true,
-      pricing: false,
-      creditScore: false,
-      profitOptimization: false,
-    },
-  };
+  const sub = subscription ?? fallbackSubscription;
 
   useEffect(() => {
-    embeddedShopRequest<{ subscription: Subscription }>("/api/subscription/plan", {
-      timeoutMs: 30000,
-    })
-      .then((res) => {
-        setSub(res.subscription);
-        if (res.subscription.starterModule) {
-          setStarterModule(res.subscription.starterModule);
-        }
-      })
-      .catch(() => setSub(fallbackTrialSubscription));
-  }, []);
+    if (!subscription) {
+      refreshSubscriptionContext().catch(() => undefined);
+    }
+  }, [refreshSubscriptionContext, subscription]);
+
+  useEffect(() => {
+    if (subscription?.starterModule) {
+      setStarterModule(subscription.starterModule);
+    }
+  }, [subscription?.starterModule]);
+
+  useEffect(() => {
+    if (billingStatus !== "activated" || !activatedPlan) {
+      return;
+    }
+
+    const optimisticSubscription = buildOptimisticSubscription({
+      planName: activatedPlan,
+      starterModule:
+        activatedStarterModule === "fraud" || activatedStarterModule === "competitor"
+          ? activatedStarterModule
+          : null,
+    });
+    applyOptimistic(optimisticSubscription);
+    if (optimisticSubscription.starterModule) {
+      setStarterModule(optimisticSubscription.starterModule);
+    }
+    refreshSubscriptionContext().catch(() => undefined);
+  }, [
+    activatedPlan,
+    activatedStarterModule,
+    applyOptimistic,
+    billingStatus,
+    refreshSubscriptionContext,
+  ]);
 
   useEffect(() => {
     if (billingError) {
@@ -189,16 +192,8 @@ export function SubscriptionPage() {
   };
 
   const refreshSubscription = () => {
-    embeddedShopRequest<{ subscription: Subscription }>("/api/subscription/plan", {
-      timeoutMs: 30000,
-    })
-      .then((res) => {
-        setSub(res.subscription);
-        if (res.subscription.starterModule) {
-          setStarterModule(res.subscription.starterModule);
-        }
-      })
-      .catch(() => setSub(fallbackTrialSubscription))
+    refreshSubscriptionContext()
+      .catch(() => applyOptimistic(fallbackSubscription))
       .finally(() => setBusyAction(null));
   };
 
@@ -209,8 +204,14 @@ export function SubscriptionPage() {
       await embeddedShopRequest("/api/subscription/starter-module", {
         method: "POST",
         body: { starterModule },
-        timeoutMs: 30000,
+        timeoutMs: 60000,
       });
+      applyOptimistic(
+        buildOptimisticSubscription({
+          planName: "STARTER",
+          starterModule,
+        })
+      );
       setToast(`Starter module switched to ${starterModule}.`);
       refreshSubscription();
     } catch (error) {
@@ -230,8 +231,9 @@ export function SubscriptionPage() {
       setActionBanner(null);
       await embeddedShopRequest("/api/subscription/cancel", {
         method: "POST",
-        timeoutMs: 30000,
+        timeoutMs: 60000,
       });
+      applyOptimistic(fallbackSubscription);
       setToast("Subscription marked as cancelled.");
       refreshSubscription();
     } catch (error) {
@@ -254,8 +256,9 @@ export function SubscriptionPage() {
       setActionBanner(null);
       await embeddedShopRequest("/api/subscription/downgrade-to-trial", {
         method: "POST",
-        timeoutMs: 30000,
+        timeoutMs: 60000,
       });
+      applyOptimistic(fallbackSubscription);
       setToast("Store downgraded to the Trial plan.");
       refreshSubscription();
     } catch (error) {

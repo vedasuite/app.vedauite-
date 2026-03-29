@@ -6,6 +6,8 @@ export type SubscriptionInfo = {
   price: number;
   trialDays: number;
   starterModule: "fraud" | "competitor" | null;
+  active?: boolean;
+  endsAt?: string | null;
   enabledModules: {
     fraud: boolean;
     competitor: boolean;
@@ -19,7 +21,12 @@ export function useSubscriptionPlan() {
   const context = useContext(SubscriptionContext);
 
   if (!context) {
-    return { subscription: null, loading: true };
+    return {
+      subscription: null,
+      loading: true,
+      refresh: async () => undefined,
+      applyOptimistic: (_subscription: SubscriptionInfo) => undefined,
+    };
   }
 
   return context;

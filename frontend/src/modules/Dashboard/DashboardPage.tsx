@@ -202,7 +202,7 @@ export function DashboardPage() {
       setActionError(null);
       await embeddedShopRequest("/api/shopify/sync", {
         method: "POST",
-        timeoutMs: 60000,
+        timeoutMs: 90000,
       });
       loadMetrics();
       setToast("Live Shopify data synced into VedaSuite.");
@@ -244,7 +244,7 @@ export function DashboardPage() {
         result: { created: string[]; totalTracked: number };
       }>("/api/shopify/register-webhooks", {
         method: "POST",
-        timeoutMs: 45000,
+        timeoutMs: 90000,
       });
       setToast(
         response.result.created.length > 0

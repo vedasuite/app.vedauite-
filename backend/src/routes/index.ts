@@ -21,6 +21,7 @@ router.use("/auth", authRouter);
 router.use("/billing", billingRouter);
 router.use(publicRouter);
 router.use(launchRouter);
+router.use("/api/subscription", subscriptionRouter);
 
 router.use("/api", verifyShopifySessionToken);
 
@@ -33,5 +34,4 @@ router.use("/api/profit", profitRouter);
 router.use("/api/reports", reportsRouter);
 router.use("/api/settings", settingsRouter);
 router.use("/api/shopify", shopifyRouter);
-router.use("/api/subscription", subscriptionRouter);
 

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
@@ -8,6 +8,28 @@ import {
 } from "../services/shopifyAdminService";
 
 export const billingRouter = Router();
+
+function redirectTopLevel(res: Response, url: string) {
+  const safeUrl = JSON.stringify(url);
+  res.status(200).send(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting…</title>
+    <script>
+      if (window.top && window.top !== window) {
+        window.top.location.href = ${safeUrl};
+      } else {
+        window.location.href = ${safeUrl};
+      }
+    </script>
+  </head>
+  <body>
+    <p>Redirecting back to VedaSuite…</p>
+    <p><a href=${safeUrl}>Continue</a></p>
+  </body>
+</html>`);
+}
 
 function buildBillingReturnUrl(params: {
   shop: string;
@@ -232,5 +254,5 @@ billingRouter.get("/activate", async (req, res) => {
   }
 
   const redirectAppUrl = redirectUrl.toString();
-  return res.redirect(redirectAppUrl);
+  return redirectTopLevel(res, redirectAppUrl);
 });

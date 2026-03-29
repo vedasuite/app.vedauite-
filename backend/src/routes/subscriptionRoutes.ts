@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
 import {
   cancelSubscription,
   downgradeToTrial,
@@ -17,7 +18,7 @@ subscriptionRouter.get("/plan", async (req, res) => {
   return res.json({ subscription: plan });
 });
 
-subscriptionRouter.post("/cancel", async (req, res) => {
+subscriptionRouter.post("/cancel", verifyShopifySessionToken, async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
@@ -30,7 +31,7 @@ subscriptionRouter.post("/cancel", async (req, res) => {
   return res.json({ subscription });
 });
 
-subscriptionRouter.post("/downgrade-to-trial", async (req, res) => {
+subscriptionRouter.post("/downgrade-to-trial", verifyShopifySessionToken, async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
@@ -43,7 +44,7 @@ subscriptionRouter.post("/downgrade-to-trial", async (req, res) => {
   return res.json({ result });
 });
 
-subscriptionRouter.post("/starter-module", async (req, res) => {
+subscriptionRouter.post("/starter-module", verifyShopifySessionToken, async (req, res) => {
   const body = req.body as {
     shop?: string;
     starterModule?: "fraud" | "competitor";
