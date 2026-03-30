@@ -19,7 +19,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -201,11 +200,100 @@ export function CreditScorePage() {
       allowed={!!subscription?.enabledModules.creditScore}
     >
       {filteredCustomers.length === 0 ? (
-        <EmptyPageState
+        <Page
           title="Shopper Credit Score"
-          subtitle="No customer credit data yet."
-          message="Customer scoring will appear here once shopper history is available."
-        />
+          subtitle="Trust, refund behavior, and reliability scoring for every shopper."
+        >
+          <Layout>
+            <Layout.Section>
+              <Banner title="Credit scoring is ready but store history is still light" tone="info">
+                <p>
+                  This module starts filling in after orders, refunds, and fraud signals
+                  are synced. Once customer history is available, VedaSuite will score
+                  each shopper and group them into trusted, normal, and risky segments.
+                </p>
+              </Banner>
+            </Layout.Section>
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Trusted Buyer
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      80-100
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Low refund pressure, strong completion behavior, and stable payment reliability.
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Normal Buyer
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      50-79
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Mixed behavior that usually needs standard merchant handling and monitoring.
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Risky Buyer
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      0-49
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Higher refund risk, fraud pressure, or payment unreliability requiring closer review.
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </InlineGrid>
+            </Layout.Section>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    What this module will show
+                  </Text>
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Inputs
+                      </Text>
+                      <Text as="p">
+                        Refund frequency, completed orders, fraud signals, and payment reliability.
+                      </Text>
+                    </div>
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Outputs
+                      </Text>
+                      <Text as="p">
+                        Shopper score, category, reasons, confidence, and operating recommendations.
+                      </Text>
+                    </div>
+                  </InlineGrid>
+                  <InlineStack gap="300">
+                    <Button onClick={() => navigateEmbedded("/fraud")}>
+                      Open fraud intelligence
+                    </Button>
+                    <Button onClick={() => navigateEmbedded("/reports")}>
+                      Open reports
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </Page>
       ) : (
         <Page
           title="Shopper Credit Score"

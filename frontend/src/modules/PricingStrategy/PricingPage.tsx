@@ -20,7 +20,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState } from "../../components/PageState";
+import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -60,6 +60,7 @@ const resourceName = {
 
 export function PricingPage() {
   const api = useApiClient();
+  const { navigateEmbedded } = useEmbeddedNavigation();
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
@@ -162,11 +163,100 @@ export function PricingPage() {
       allowed={!!subscription?.enabledModules.pricing}
     >
       {recs.length === 0 ? (
-        <EmptyPageState
+        <Page
           title="AI Pricing Strategy"
-          subtitle="No recommendations available yet."
-          message="Recommendations will appear here once competitor and price history data is available."
-        />
+          subtitle="AI-guided pricing recommendations based on margin, demand posture, and competitor movement."
+          primaryAction={{
+            content: "Open competitor intelligence",
+            onAction: () => navigateEmbedded("/competitor"),
+          }}
+        >
+          <Layout>
+            <Layout.Section>
+              <Banner title="Pricing engine is waiting for more live inputs" tone="info">
+                <p>
+                  Recommendations appear after VedaSuite has enough price history,
+                  competitor signals, and store-sync data to score a product confidently.
+                </p>
+              </Banner>
+            </Layout.Section>
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Competitor pressure
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Price and promotion movement from monitored domains helps shape the recommendation queue.
+                    </Text>
+                    <Badge tone="info">Market input</Badge>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Demand posture
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Sales velocity and pricing posture influence the AI demand score and trend.
+                    </Text>
+                    <Badge tone="success">Demand input</Badge>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Profit guardrails
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Margin thresholds and approval confidence keep pricing actions merchant-safe.
+                    </Text>
+                    <Badge tone="attention">Guardrail</Badge>
+                  </BlockStack>
+                </Card>
+              </InlineGrid>
+            </Layout.Section>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    What will appear here
+                  </Text>
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Recommendation queue
+                      </Text>
+                      <Text as="p">
+                        Product, current price, AI price, demand score, approval confidence, and projected gain.
+                      </Text>
+                    </div>
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Scenario tools
+                      </Text>
+                      <Text as="p">
+                        Simulation results, automation posture, and merchant-ready approval workflows.
+                      </Text>
+                    </div>
+                  </InlineGrid>
+                  <InlineStack gap="300">
+                    <Button onClick={() => navigateEmbedded("/competitor")}>
+                      Open competitor intelligence
+                    </Button>
+                    <Button onClick={() => navigateEmbedded("/reports")}>
+                      Open reports
+                    </Button>
+                    <Button onClick={() => navigateEmbedded("/subscription")}>
+                      Review plan coverage
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </Page>
       ) : (
         <Page
           title="AI Pricing Strategy"

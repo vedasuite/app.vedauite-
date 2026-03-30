@@ -17,7 +17,6 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleGate } from "../../components/ModuleGate";
 import { useApiClient } from "../../api/client";
-import { EmptyPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -111,11 +110,110 @@ export function ReportsPage() {
 
   if (!report) {
     return (
-      <EmptyPageState
+      <Page
         title="Weekly Intelligence Reports"
-        subtitle="No report available yet."
-        message="Weekly reports will appear here after enough activity is collected."
-      />
+        subtitle="A weekly operating brief for fraud, competitor activity, pricing, and profit."
+      >
+        <Layout>
+          <Layout.Section>
+            <Banner title="First weekly brief is not ready yet" tone="info">
+              <p>
+                Reports are generated after live store activity, sync events, and
+                module signals are collected. The section below shows what the weekly
+                brief will contain once data starts flowing.
+              </p>
+            </Banner>
+          </Layout.Section>
+          <Layout.Section>
+            <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Fraud section
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    High-risk orders, refund exposure, and customer-risk flags.
+                  </Text>
+                  <Badge tone="warning">Queue + signals</Badge>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Market section
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Competitor promotions, stock changes, and product movement.
+                  </Text>
+                  <Badge tone="info">Competitor watch</Badge>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Pricing section
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    AI recommendations, approval queue, and scenario highlights.
+                  </Text>
+                  <Badge tone="success">Price actions</Badge>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Profit section
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Margin lift, projected monthly gain, and strategy notes.
+                  </Text>
+                  <Badge tone="attention">Profit playbooks</Badge>
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </Layout.Section>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  What will appear here
+                </Text>
+                <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Executive summary
+                    </Text>
+                    <Text as="p">
+                      One weekly brief combining orders, revenue, fraud pressure,
+                      competitor activity, pricing actions, and profit opportunities.
+                    </Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Operational handoff
+                    </Text>
+                    <Text as="p">
+                      Quick actions that jump directly into fraud review, competitor
+                      monitoring, pricing approval, and profit optimization.
+                    </Text>
+                  </div>
+                </InlineGrid>
+                <InlineStack gap="300">
+                  <Button onClick={() => navigateEmbedded("/")}>
+                    Open dashboard
+                  </Button>
+                  <Button onClick={() => navigateEmbedded("/fraud")}>
+                    Open fraud intelligence
+                  </Button>
+                  <Button onClick={() => navigateEmbedded("/competitor")}>
+                    Open competitor intelligence
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
     );
   }
 

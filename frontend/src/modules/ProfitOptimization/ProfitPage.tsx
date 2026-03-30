@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -38,6 +38,7 @@ const resourceName = {
 
 export function ProfitPage() {
   const api = useApiClient();
+  const { navigateEmbedded } = useEmbeddedNavigation();
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
@@ -159,11 +160,55 @@ export function ProfitPage() {
 
   if (subscriptionLoading) {
     return (
-      <LoadingPageState
+      <Page
         title="AI Profit Optimization Engine"
-        subtitle="Preparing profit intelligence..."
-        message="Loading plan access and profit optimization data."
-      />
+        subtitle="Margin, pricing, and monthly profit guidance for high-leverage products."
+      >
+        <Layout>
+          <Layout.Section>
+            <Banner title="Preparing profit intelligence" tone="info">
+              <p>
+                VedaSuite is checking plan access and loading profit opportunities in
+                the background.
+              </p>
+            </Banner>
+          </Layout.Section>
+          <Layout.Section>
+            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Margin lift
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Expected margin improvement per product after optimal price adjustments.
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Monthly gain
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Projected profit upside based on product cost, pricing, and sales velocity.
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Strategy notes
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Bundle and discount playbooks that protect margin instead of cutting too broadly.
+                  </Text>
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </Layout.Section>
+        </Layout>
+      </Page>
     );
   }
 
@@ -181,11 +226,76 @@ export function ProfitPage() {
           message="Loading opportunity scoring and strategy recommendations."
         />
       ) : rows.length === 0 && !error ? (
-        <EmptyPageState
+        <Page
           title="AI Profit Optimization Engine"
-          subtitle="No profit opportunities available yet."
-          message="Profit recommendations will appear once pricing, cost, and sales signals are available."
-        />
+          subtitle="Optimize margin, pricing discipline, and projected monthly gain."
+        >
+          <Layout>
+            <Layout.Section>
+              <Banner title="No profit opportunities are ready yet" tone="info">
+                <p>
+                  This module comes alive after price history, competitor posture, and
+                  sales signals are synced. Once available, the engine will surface
+                  product-level margin and profit opportunities here.
+                </p>
+              </Banner>
+            </Layout.Section>
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+                {playbooks.map((playbook) => (
+                  <Card key={playbook.title}>
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h3" variant="headingMd">
+                          {playbook.title}
+                        </Text>
+                        <Badge tone={playbook.tone}>{playbook.tone}</Badge>
+                      </InlineStack>
+                      <Text as="p" tone="subdued">
+                        {playbook.note}
+                      </Text>
+                    </BlockStack>
+                  </Card>
+                ))}
+              </InlineGrid>
+            </Layout.Section>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    What will appear here
+                  </Text>
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Opportunity queue
+                      </Text>
+                      <Text as="p">
+                        Product, current price, optimal price, projected monthly gain, and margin lift.
+                      </Text>
+                    </div>
+                    <div className="vs-signal-stat">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Strategy guidance
+                      </Text>
+                      <Text as="p">
+                        Bundle suggestions, discount discipline, and pricing recommendations for profit protection.
+                      </Text>
+                    </div>
+                  </InlineGrid>
+                  <InlineStack gap="300">
+                    <Button onClick={() => navigateEmbedded("/pricing")}>
+                      Open pricing strategy
+                    </Button>
+                    <Button onClick={() => navigateEmbedded("/reports")}>
+                      Open reports
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </Page>
       ) : (
         <Page
           title="AI Profit Optimization Engine"
