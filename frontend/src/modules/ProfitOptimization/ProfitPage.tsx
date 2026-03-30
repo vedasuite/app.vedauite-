@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
+import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -122,7 +123,8 @@ export function ProfitPage() {
 
   useEffect(() => {
     withRequestTimeout(
-      api.get<{ opportunities: ProfitRow[] }>("/api/profit/opportunities")
+      api.get<{ opportunities: ProfitRow[] }>("/api/profit/opportunities"),
+      20000
     )
       .then((res) => {
         const safeRows = (res.data.opportunities ?? []).map((row) => ({

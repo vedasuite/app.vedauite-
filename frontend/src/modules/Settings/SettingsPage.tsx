@@ -19,9 +19,10 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { useApiClient } from "../../api/client";
-import { EmptyPageState, LoadingPageState } from "../../components/PageState";
+import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type Settings = {
   fraudSensitivity: "low" | "medium" | "high";
@@ -31,6 +32,14 @@ type Settings = {
   competitorDomains: { id: string; domain: string; label?: string | null }[];
 };
 
+const fallbackSettings: Settings = {
+  fraudSensitivity: "medium",
+  sharedFraudNetwork: false,
+  pricingBias: 55,
+  profitGuardrail: 18,
+  competitorDomains: [],
+};
+
 export function SettingsPage() {
   const api = useApiClient();
   const { navigateEmbedded } = useEmbeddedNavigation();
@@ -38,6 +47,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [serviceOffline, setServiceOffline] = useState(false);
   const [domainsInput, setDomainsInput] = useState("");
   const [selectedTab, setSelectedTab] = useState(0);
   const [pricingBias, setPricingBias] = useState(55);
@@ -73,17 +83,23 @@ export function SettingsPage() {
     : "Unlock pricing strategy to enable pricing automations.";
 
   useEffect(() => {
-    api
-      .get<{ settings: Settings }>("/api/settings")
+    withRequestTimeout(api.get<{ settings: Settings }>("/api/settings"), 20000)
       .then((res) => {
         setSettings(res.data.settings);
+        setServiceOffline(false);
         setPricingBias(res.data.settings.pricingBias ?? 55);
         setProfitGuardrail(res.data.settings.profitGuardrail ?? 18);
         setDomainsInput(
           res.data.settings.competitorDomains.map((domain) => domain.domain).join(", ")
         );
       })
-      .catch(() => setSettings(null))
+      .catch(() => {
+        setSettings(fallbackSettings);
+        setServiceOffline(true);
+        setPricingBias(fallbackSettings.pricingBias);
+        setProfitGuardrail(fallbackSettings.profitGuardrail);
+        setDomainsInput("");
+      })
       .finally(() => {
         setLoading(false);
         setLoadedOnce(true);
@@ -92,6 +108,11 @@ export function SettingsPage() {
 
   const save = async () => {
     if (!settings) return;
+
+    if (serviceOffline) {
+      setToast("Settings service is offline right now. Please try again after the next sync.");
+      return;
+    }
 
     if (competitorEnabled && connectedDomains === 0) {
       setToast("Add at least one competitor domain before saving competitor tracking.");
@@ -131,18 +152,6 @@ export function SettingsPage() {
     );
   }
 
-  if (!settings) {
-    return (
-      <EmptyPageState
-        title="Settings"
-        subtitle="Merchant controls are unavailable right now."
-        message="We could not load this store's settings. Try refreshing after the backend is running."
-        actionLabel="Open subscription plans"
-        onAction={() => navigateEmbedded("/subscription")}
-      />
-    );
-  }
-
   return (
     <Page
       title="Settings"
@@ -157,6 +166,24 @@ export function SettingsPage() {
             </p>
           </Banner>
         </Layout.Section>
+        {serviceOffline ? (
+          <Layout.Section>
+            <Banner
+              title="Settings service is temporarily unavailable"
+              tone="warning"
+              action={{
+                content: "Open subscription plans",
+                onAction: () => navigateEmbedded("/subscription"),
+              }}
+            >
+              <p>
+                You can still review the default operating profile below, but
+                saving merchant-specific settings will remain disabled until the
+                settings API responds again.
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
         {saveBanner ? (
           <Layout.Section>
             <Banner
@@ -441,7 +468,7 @@ export function SettingsPage() {
           </Card>
         </Layout.Section>
         <Layout.Section>
-          <Button variant="primary" onClick={save}>
+          <Button variant="primary" onClick={save} disabled={serviceOffline}>
             Save settings
           </Button>
         </Layout.Section>
