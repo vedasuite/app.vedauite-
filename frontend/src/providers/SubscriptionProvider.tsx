@@ -11,6 +11,10 @@ import {
   readOptimisticSubscriptionFromSearch,
 } from "../lib/subscriptionState";
 
+function isPaidSubscription(subscription: SubscriptionInfo | null | undefined) {
+  return !!subscription && subscription.planName !== "TRIAL" && !!subscription.active;
+}
+
 type SubscriptionContextValue = {
   subscription: SubscriptionInfo | null;
   loading: boolean;
@@ -45,8 +49,23 @@ export function SubscriptionProvider({ children }: Props) {
       "/api/subscription/plan",
       { timeoutMs: 45000 }
     );
-    applyOptimistic(res.subscription);
-  }, [applyOptimistic]);
+
+    setSubscription((currentSubscription) => {
+      const shouldPreserveOptimisticPaidPlan =
+        isPaidSubscription(currentSubscription) &&
+        res.subscription.planName === "TRIAL";
+
+      const nextSubscription = shouldPreserveOptimisticPaidPlan
+        ? currentSubscription
+        : res.subscription;
+
+      if (nextSubscription) {
+        writeModuleCache("subscription-plan", nextSubscription);
+      }
+
+      return nextSubscription;
+    });
+  }, []);
 
   useEffect(() => {
     let mounted = true;

@@ -1,5 +1,6 @@
 import { prisma } from "../db/prismaClient";
 import { cancelAppSubscription } from "./shopifyAdminService";
+import { getActiveAppSubscription } from "./shopifyAdminService";
 
 function isSubscriptionCurrentlyActive(endsAt?: Date | null, active?: boolean) {
   if (!active) {
@@ -11,6 +12,72 @@ function isSubscriptionCurrentlyActive(endsAt?: Date | null, active?: boolean) {
   }
 
   return endsAt.getTime() > Date.now();
+}
+
+function normalizePlanName(planName?: string | null) {
+  return planName
+    ?.replace(/^VedaSuite AI - /i, "")
+    .trim()
+    .toUpperCase();
+}
+
+async function reconcileCurrentSubscriptionFromShopify(store: {
+  id: string;
+  shop: string;
+  subscription: {
+    id: string;
+    starterModule: string | null;
+    shopifyChargeId: string | null;
+  } | null;
+}) {
+  const activeSubscription = await getActiveAppSubscription(store.shop);
+
+  if (!activeSubscription) {
+    return null;
+  }
+
+  const normalizedPlanName = normalizePlanName(activeSubscription.name);
+  if (!normalizedPlanName) {
+    return null;
+  }
+
+  const plan = await prisma.subscriptionPlan.findUnique({
+    where: { name: normalizedPlanName },
+  });
+
+  if (!plan) {
+    return null;
+  }
+
+  const currentPeriodEnd = activeSubscription.currentPeriodEnd
+    ? new Date(activeSubscription.currentPeriodEnd)
+    : null;
+
+  return prisma.storeSubscription.upsert({
+    where: { storeId: store.id },
+    update: {
+      planId: plan.id,
+      shopifyChargeId: activeSubscription.id,
+      active: true,
+      endsAt: currentPeriodEnd,
+      starterModule:
+        normalizedPlanName === "STARTER"
+          ? (store.subscription?.starterModule as "fraud" | "competitor" | null) ??
+            "fraud"
+          : null,
+    },
+    create: {
+      storeId: store.id,
+      planId: plan.id,
+      shopifyChargeId: activeSubscription.id,
+      active: true,
+      endsAt: currentPeriodEnd,
+      starterModule: normalizedPlanName === "STARTER" ? "fraud" : null,
+    },
+    include: {
+      plan: true,
+    },
+  });
 }
 
 export async function getCurrentSubscription(shopDomain: string) {
@@ -26,12 +93,36 @@ export async function getCurrentSubscription(shopDomain: string) {
   });
   if (!store) throw new Error("Store not found");
 
-  const subscriptionIsActive = isSubscriptionCurrentlyActive(
-    store.subscription?.endsAt,
-    store.subscription?.active
+  let subscription = store.subscription;
+  let subscriptionIsActive = isSubscriptionCurrentlyActive(
+    subscription?.endsAt,
+    subscription?.active
   );
-  const plan = subscriptionIsActive ? store.subscription?.plan : null;
-  const starterModule = store.subscription?.starterModule ?? null;
+
+  if (!subscriptionIsActive || !subscription?.plan) {
+    const reconciledSubscription = await reconcileCurrentSubscriptionFromShopify({
+      id: store.id,
+      shop: store.shop,
+      subscription: store.subscription
+        ? {
+            id: store.subscription.id,
+            starterModule: store.subscription.starterModule,
+            shopifyChargeId: store.subscription.shopifyChargeId,
+          }
+        : null,
+    });
+
+    if (reconciledSubscription) {
+      subscription = reconciledSubscription;
+      subscriptionIsActive = isSubscriptionCurrentlyActive(
+        subscription.endsAt,
+        subscription.active
+      );
+    }
+  }
+
+  const plan = subscriptionIsActive ? subscription?.plan : null;
+  const starterModule = subscription?.starterModule ?? null;
   const isStarterFraud = plan?.name === "STARTER" && starterModule === "fraud";
   const isStarterCompetitor =
     plan?.name === "STARTER" && starterModule === "competitor";
@@ -51,8 +142,8 @@ export async function getCurrentSubscription(shopDomain: string) {
     price: plan?.price ?? 0,
     trialDays: plan?.trialDays ?? 3,
     starterModule,
-    active: store.subscription?.active ?? false,
-    endsAt: store.subscription?.endsAt?.toISOString() ?? null,
+    active: subscription?.active ?? false,
+    endsAt: subscription?.endsAt?.toISOString() ?? null,
     enabledModules,
   };
 }

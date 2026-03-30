@@ -224,6 +224,10 @@ billingRouter.get("/activate", async (req, res) => {
     return res.status(400).send("No active Shopify app subscription found.");
   }
 
+  const currentPeriodEnd = activeSubscription.currentPeriodEnd
+    ? new Date(activeSubscription.currentPeriodEnd)
+    : null;
+
   await prisma.storeSubscription.upsert({
     where: { storeId: store.id },
     update: {
@@ -231,7 +235,7 @@ billingRouter.get("/activate", async (req, res) => {
       starterModule: typeof starterModule === "string" ? starterModule : null,
       shopifyChargeId: activeSubscription.id,
       active: true,
-      endsAt: null,
+      endsAt: currentPeriodEnd,
     },
     create: {
       storeId: store.id,
@@ -239,6 +243,7 @@ billingRouter.get("/activate", async (req, res) => {
       starterModule: typeof starterModule === "string" ? starterModule : null,
       shopifyChargeId: activeSubscription.id,
       active: true,
+      endsAt: currentPeriodEnd,
     },
   });
 

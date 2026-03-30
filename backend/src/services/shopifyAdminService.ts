@@ -222,7 +222,11 @@ export async function getActiveAppSubscription(shopDomain: string) {
 
   const subscriptions =
     data.currentAppInstallation?.activeSubscriptions
-      ?.filter((subscription) => subscription.status === "ACTIVE")
+      ?.filter((subscription) =>
+        ["ACTIVE", "ACCEPTED", "PENDING"].includes(
+          subscription.status?.toUpperCase?.() ?? subscription.status
+        )
+      )
       .sort(
         (left, right) =>
           new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
