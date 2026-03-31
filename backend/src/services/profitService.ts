@@ -1,21 +1,23 @@
 import { prisma } from "../db/prismaClient";
+import { getCurrentSubscription } from "./subscriptionService";
 
 async function assertProPlan(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    include: {
-      subscription: {
-        include: {
-          plan: true,
-        },
-      },
-    },
-  });
+  const [store, subscription] = await Promise.all([
+    prisma.store.findUnique({
+      where: { shop: shopDomain },
+    }),
+    getCurrentSubscription(shopDomain),
+  ]);
+
   if (!store) throw new Error("Store not found");
-  const storePlan = store.subscription?.plan;
-  if (!storePlan || storePlan.name !== "PRO") {
+
+  if (
+    subscription.planName !== "PRO" ||
+    !subscription.enabledModules.profitOptimization
+  ) {
     throw new Error("AI Profit Optimization Engine is available only on PRO.");
   }
+
   return store;
 }
 

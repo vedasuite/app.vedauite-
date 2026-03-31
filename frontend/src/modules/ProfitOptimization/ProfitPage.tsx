@@ -120,6 +120,9 @@ export function ProfitPage() {
       : focus === "strategy"
       ? "Showing the strategic guidance tab first so you can review discount and bundle posture."
       : null;
+  const shouldSuppressUpgradeMessage =
+    !!subscription?.enabledModules.profitOptimization &&
+    error?.includes("available only on PRO");
 
   useEffect(() => {
     withRequestTimeout(
@@ -304,10 +307,20 @@ export function ProfitPage() {
           subtitle="Optimize pricing, discounting, and bundle strategy with AI-driven profit analysis."
         >
       <Layout>
-        {error ? (
+        {error && !shouldSuppressUpgradeMessage ? (
           <Layout.Section>
             <Banner title="Upgrade to Pro" tone="info">
               <p>{error}</p>
+            </Banner>
+          </Layout.Section>
+        ) : error ? (
+          <Layout.Section>
+            <Banner title="Profit data is still syncing" tone="warning">
+              <p>
+                Your plan access is active, but the profit engine is still reconciling
+                the latest data in the background. Reload shortly if the opportunity
+                queue remains empty.
+              </p>
             </Banner>
           </Layout.Section>
         ) : null}
