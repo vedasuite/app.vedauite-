@@ -15,14 +15,12 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useApiClient } from "../../api/client";
 import { ModuleGate } from "../../components/ModuleGate";
-import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
-import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type ProfitRow = {
   productHandle: string;
@@ -38,14 +36,13 @@ const resourceName = {
 };
 
 export function ProfitPage() {
-  const api = useApiClient();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
   const cachedRows = readModuleCache<ProfitRow[]>("profit-opportunities");
   const [rows, setRows] = useState<ProfitRow[]>(cachedRows ?? []);
-  const [loading, setLoading] = useState(!cachedRows);
+  const [syncing, setSyncing] = useState(!cachedRows);
   const [error, setError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState(0);
@@ -125,12 +122,15 @@ export function ProfitPage() {
     error?.includes("available only on PRO");
 
   useEffect(() => {
-    withRequestTimeout(
-      api.get<{ opportunities: ProfitRow[] }>("/api/profit/opportunities"),
-      20000
-    )
+    let mounted = true;
+
+    setSyncing(true);
+    embeddedShopRequest<{ opportunities: ProfitRow[] }>("/api/profit/opportunities", {
+      timeoutMs: 12000,
+    })
       .then((res) => {
-        const safeRows = (res.data.opportunities ?? []).map((row) => ({
+        if (!mounted) return;
+        const safeRows = (res.opportunities ?? []).map((row) => ({
           productHandle: row.productHandle ?? "Untitled product",
           currentPrice: row.currentPrice ?? null,
           recommendedPrice: row.recommendedPrice ?? null,
@@ -142,14 +142,32 @@ export function ProfitPage() {
         writeModuleCache("profit-opportunities", safeRows);
       })
       .catch((err) => {
-        setRows([]);
-        setError(
-          err.response?.data?.error?.message ??
-            "AI Profit Optimization Engine is available on the Pro plan."
-        );
+        if (!mounted) return;
+        setRows((prev) => prev);
+        const message =
+          err instanceof Error
+            ? err.message
+            : "AI Profit Optimization Engine is available on the Pro plan.";
+
+        if (
+          !!subscription?.enabledModules.profitOptimization &&
+          /timed out|failed to fetch|network|load/i.test(message)
+        ) {
+          setError("Profit opportunity sync is still in progress.");
+          return;
+        }
+
+        setError(message);
       })
-      .finally(() => setLoading(false));
-  }, [api]);
+      .finally(() => {
+        if (!mounted) return;
+        setSyncing(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [subscription?.enabledModules.profitOptimization]);
 
   useEffect(() => {
     setSelectedTab(focus === "strategy" ? 1 : 0);
@@ -224,12 +242,56 @@ export function ProfitPage() {
       requiredPlan="Pro"
       allowed={!!subscription?.enabledModules.profitOptimization}
     >
-      {loading ? (
-        <LoadingPageState
+      {rows.length === 0 && !error && syncing ? (
+        <Page
           title="AI Profit Optimization Engine"
-          subtitle="Preparing profit intelligence..."
-          message="Loading opportunity scoring and strategy recommendations."
-        />
+          subtitle="Optimize margin, pricing discipline, and projected monthly gain."
+        >
+          <Layout>
+            <Layout.Section>
+              <Banner title="Refreshing profit intelligence" tone="info">
+                <p>
+                  VedaSuite is loading profit opportunities in the background. The
+                  module will stay open while the latest opportunity scoring syncs.
+                </p>
+              </Banner>
+            </Layout.Section>
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Opportunity queue
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Product-level profit opportunities will appear here once pricing and sales signals finish syncing.
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Margin lift
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Expected margin improvement will update as soon as the latest store data is processed.
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Monthly gain
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Projected profit upside is being prepared in the background.
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </InlineGrid>
+            </Layout.Section>
+          </Layout>
+        </Page>
       ) : rows.length === 0 && !error ? (
         <Page
           title="AI Profit Optimization Engine"
@@ -307,6 +369,16 @@ export function ProfitPage() {
           subtitle="Optimize pricing, discounting, and bundle strategy with AI-driven profit analysis."
         >
       <Layout>
+        {syncing ? (
+          <Layout.Section>
+            <Banner title="Refreshing profit intelligence" tone="info">
+              <p>
+                Live opportunity scoring is syncing in the background. Existing profit
+                signals remain available while the engine refreshes.
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
         {error && !shouldSuppressUpgradeMessage ? (
           <Layout.Section>
             <Banner title="Upgrade to Pro" tone="info">
