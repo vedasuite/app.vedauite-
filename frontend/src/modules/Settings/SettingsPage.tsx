@@ -18,11 +18,9 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
-import { useApiClient } from "../../api/client";
-import { LoadingPageState } from "../../components/PageState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
-import { withRequestTimeout } from "../../lib/requestTimeout";
+import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 
 type Settings = {
   fraudSensitivity: "low" | "medium" | "high";
@@ -41,14 +39,16 @@ const fallbackSettings: Settings = {
 };
 
 export function SettingsPage() {
-  const api = useApiClient();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { subscription } = useSubscriptionPlan();
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [settings, setSettings] = useState<Settings>(fallbackSettings);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(true);
+  const [hasLiveSettings, setHasLiveSettings] = useState(false);
   const [serviceOffline, setServiceOffline] = useState(false);
-  const [domainsInput, setDomainsInput] = useState("");
+  const [domainsInput, setDomainsInput] = useState(
+    fallbackSettings.competitorDomains.map((domain) => domain.domain).join(", ")
+  );
   const [selectedTab, setSelectedTab] = useState(0);
   const [pricingBias, setPricingBias] = useState(55);
   const [profitGuardrail, setProfitGuardrail] = useState(18);
@@ -83,37 +83,38 @@ export function SettingsPage() {
     : "Unlock pricing strategy to enable pricing automations.";
 
   useEffect(() => {
-    withRequestTimeout(api.get<{ settings: Settings }>("/api/settings"), 20000)
+    let mounted = true;
+
+    setSyncing(true);
+    embeddedShopRequest<{ settings: Settings }>("/api/settings", { timeoutMs: 12000 })
       .then((res) => {
-        setSettings(res.data.settings);
+        if (!mounted) return;
+        setSettings(res.settings);
+        setHasLiveSettings(true);
         setServiceOffline(false);
-        setPricingBias(res.data.settings.pricingBias ?? 55);
-        setProfitGuardrail(res.data.settings.profitGuardrail ?? 18);
+        setPricingBias(res.settings.pricingBias ?? 55);
+        setProfitGuardrail(res.settings.profitGuardrail ?? 18);
         setDomainsInput(
-          res.data.settings.competitorDomains.map((domain) => domain.domain).join(", ")
+          res.settings.competitorDomains.map((domain) => domain.domain).join(", ")
         );
       })
       .catch(() => {
-        setSettings(fallbackSettings);
+        if (!mounted) return;
+        setSettings((prev) => prev ?? fallbackSettings);
+        setHasLiveSettings(false);
         setServiceOffline(true);
-        setPricingBias(fallbackSettings.pricingBias);
-        setProfitGuardrail(fallbackSettings.profitGuardrail);
-        setDomainsInput("");
       })
       .finally(() => {
-        setLoading(false);
-        setLoadedOnce(true);
+        if (!mounted) return;
+        setSyncing(false);
       });
-  }, [api]);
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const save = async () => {
-    if (!settings) return;
-
-    if (serviceOffline) {
-      setToast("Settings service is offline right now. Please try again after the next sync.");
-      return;
-    }
-
     if (competitorEnabled && connectedDomains === 0) {
       setToast("Add at least one competitor domain before saving competitor tracking.");
       return;
@@ -126,31 +127,31 @@ export function SettingsPage() {
       .map((domain) => ({ domain }));
 
     try {
-      await api.post("/api/settings", {
-        settings: {
-          fraudSensitivity: settings.fraudSensitivity,
-          sharedFraudNetwork: settings.sharedFraudNetwork,
-          pricingBias,
-          profitGuardrail,
-          competitorDomains,
-        },
+      setLoading(true);
+      const payload = {
+        fraudSensitivity: settings.fraudSensitivity,
+        sharedFraudNetwork: settings.sharedFraudNetwork,
+        pricingBias,
+        profitGuardrail,
+        competitorDomains,
+      };
+      const response = await embeddedShopRequest<{ settings: Settings }>("/api/settings", {
+        method: "POST",
+        body: { settings: payload },
+        timeoutMs: 15000,
       });
+      setSettings(response.settings);
+      setHasLiveSettings(true);
+      setServiceOffline(false);
       setToast("Settings saved.");
       setSaveBanner("Merchant settings updated successfully.");
     } catch {
-      setToast("Unable to save settings.");
+      setServiceOffline(true);
+      setToast("Unable to save settings right now. Your current changes are still kept on this screen.");
+    } finally {
+      setLoading(false);
     }
   };
-
-  if (loading && !loadedOnce) {
-    return (
-      <LoadingPageState
-        title="Settings"
-        subtitle="Loading merchant controls..."
-        message="Preparing plan-aware settings and saved preferences."
-      />
-    );
-  }
 
   return (
     <Page
@@ -166,20 +167,33 @@ export function SettingsPage() {
             </p>
           </Banner>
         </Layout.Section>
+        {syncing ? (
+          <Layout.Section>
+            <Banner
+              title="Refreshing merchant controls"
+              tone="info"
+            >
+              <p>
+                VedaSuite is syncing the latest merchant settings in the background.
+                You can review and adjust controls immediately while live values load.
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
         {serviceOffline ? (
           <Layout.Section>
             <Banner
-              title="Settings service is temporarily unavailable"
+              title="Using ready-to-edit default controls"
               tone="warning"
               action={{
-                content: "Open subscription plans",
-                onAction: () => navigateEmbedded("/subscription"),
+                content: "Refresh settings",
+                onAction: () => window.location.reload(),
               }}
             >
               <p>
-                You can still review the default operating profile below, but
-                saving merchant-specific settings will remain disabled until the
-                settings API responds again.
+                Live merchant settings could not be loaded right now, so VedaSuite
+                is using a safe default operating profile. You can still review and
+                adjust controls from this page.
               </p>
             </Banner>
           </Layout.Section>
@@ -210,6 +224,9 @@ export function SettingsPage() {
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Operating profile: {operatingProfile}
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Source: {hasLiveSettings ? "Live merchant settings" : "Default fallback profile"}
                 </Text>
               </BlockStack>
             </Card>
@@ -468,7 +485,7 @@ export function SettingsPage() {
           </Card>
         </Layout.Section>
         <Layout.Section>
-          <Button variant="primary" onClick={save} disabled={serviceOffline}>
+          <Button variant="primary" onClick={save} loading={loading}>
             Save settings
           </Button>
         </Layout.Section>
