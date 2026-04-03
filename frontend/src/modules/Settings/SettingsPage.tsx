@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
 type Settings = {
   fraudSensitivity: "low" | "medium" | "high";
@@ -38,18 +39,27 @@ const fallbackSettings: Settings = {
   competitorDomains: [],
 };
 
+const SETTINGS_CACHE_KEY = "merchant-settings";
+
+type SettingsSyncState = "live" | "cached" | "fallback";
+
 export function SettingsPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { subscription } = useSubscriptionPlan();
-  const [settings, setSettings] = useState<Settings>(fallbackSettings);
+  const cachedSettings = readModuleCache<Settings>(SETTINGS_CACHE_KEY);
+  const initialSettings = cachedSettings ?? fallbackSettings;
+  const [settings, setSettings] = useState<Settings>(initialSettings);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [hasLiveSettings, setHasLiveSettings] = useState(false);
-  const [serviceOffline, setServiceOffline] = useState(false);
-  const [domainsInput, setDomainsInput] = useState("");
+  const [syncing, setSyncing] = useState(!cachedSettings);
+  const [syncState, setSyncState] = useState<SettingsSyncState>(
+    cachedSettings ? "cached" : "fallback"
+  );
+  const [domainsInput, setDomainsInput] = useState(
+    (initialSettings.competitorDomains ?? []).map((domain) => domain.domain).join(", ")
+  );
   const [selectedTab, setSelectedTab] = useState(0);
-  const [pricingBias, setPricingBias] = useState(fallbackSettings.pricingBias);
-  const [profitGuardrail, setProfitGuardrail] = useState(fallbackSettings.profitGuardrail);
+  const [pricingBias, setPricingBias] = useState(initialSettings.pricingBias);
+  const [profitGuardrail, setProfitGuardrail] = useState(initialSettings.profitGuardrail);
   const [toast, setToast] = useState<string | null>(null);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
@@ -73,13 +83,13 @@ export function SettingsPage() {
     setSyncing(true);
 
     embeddedShopRequest<{ settings: Settings }>("/api/settings", {
-      timeoutMs: 30000,
+      timeoutMs: 12000,
     })
       .then((res) => {
         if (!mounted) return;
         setSettings(res.settings);
-        setHasLiveSettings(true);
-        setServiceOffline(false);
+        writeModuleCache(SETTINGS_CACHE_KEY, res.settings);
+        setSyncState("live");
         setPricingBias(res.settings.pricingBias ?? fallbackSettings.pricingBias);
         setProfitGuardrail(
           res.settings.profitGuardrail ?? fallbackSettings.profitGuardrail
@@ -90,8 +100,7 @@ export function SettingsPage() {
       })
       .catch(() => {
         if (!mounted) return;
-        setHasLiveSettings(false);
-        setServiceOffline(true);
+        setSyncState(cachedSettings ? "cached" : "fallback");
       })
       .finally(() => {
         if (!mounted) return;
@@ -120,23 +129,34 @@ export function SettingsPage() {
         profitGuardrail,
         competitorDomains,
       };
+      const optimisticSettings: Settings = {
+        ...settings,
+        pricingBias,
+        profitGuardrail,
+        competitorDomains,
+      };
+      writeModuleCache(SETTINGS_CACHE_KEY, optimisticSettings);
+      setSettings(optimisticSettings);
+      setSyncState("cached");
       const response = await embeddedShopRequest<{ settings: Settings }>("/api/settings", {
         method: "POST",
         body: { settings: payload },
-        timeoutMs: 30000,
+        timeoutMs: 12000,
       });
 
       setSettings(response.settings);
-      setHasLiveSettings(true);
-      setServiceOffline(false);
+      writeModuleCache(SETTINGS_CACHE_KEY, response.settings);
+      setSyncState("live");
       setDomainsInput(
         (response.settings.competitorDomains ?? []).map((domain) => domain.domain).join(", ")
       );
       setToast("Settings saved.");
       setSaveBanner("Merchant settings updated successfully.");
     } catch {
-      setServiceOffline(true);
-      setToast("Unable to save settings right now. Your current changes are still visible on this screen.");
+      setSyncState("cached");
+      setToast(
+        "Settings are still usable locally. Live merchant sync will retry in the background."
+      );
     } finally {
       setLoading(false);
     }
@@ -157,11 +177,12 @@ export function SettingsPage() {
       : "Balanced pricing posture is best for controlled approval-led automation."
     : "Pricing & Profit is not active on this plan, so AI pricing controls stay view-only.";
   const activePlanLabel = subscription?.planName ?? "TRIAL";
-  const settingsSourceLabel = hasLiveSettings
-    ? "Live merchant settings"
-    : serviceOffline
-    ? "Fallback profile"
-    : "Ready-to-edit defaults";
+  const settingsSourceLabel =
+    syncState === "live"
+      ? "Live merchant settings"
+      : syncState === "cached"
+      ? "Last saved local profile"
+      : "Ready-to-edit defaults";
 
   return (
     <Page
@@ -186,16 +207,19 @@ export function SettingsPage() {
             </Banner>
           </Layout.Section>
         ) : null}
-        {serviceOffline ? (
+        {syncState !== "live" ? (
           <Layout.Section>
             <Banner
-              title="Using the fallback merchant profile"
+              title={
+                syncState === "cached"
+                  ? "Using the last saved merchant profile"
+                  : "Using the ready-to-edit merchant defaults"
+              }
               tone="info"
               action={{ content: "Refresh settings", onAction: () => window.location.reload() }}
             >
               <p>
-                Live merchant settings have not finished syncing yet, so VedaSuite is showing a safe fallback profile.
-                Settings stay open on every plan and will switch to live merchant values as soon as the API responds.
+                Settings stay open on every plan. VedaSuite will continue trying to sync the live merchant profile in the background while keeping these controls immediately available.
               </p>
             </Banner>
           </Layout.Section>
@@ -252,8 +276,8 @@ export function SettingsPage() {
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Profit controls</Text>
-                <Badge tone={fullProfitEngineEnabled ? "success" : "attention"}>
-                  {fullProfitEngineEnabled ? "Enabled" : "Pro unlock available"}
+                <Badge tone={fullProfitEngineEnabled ? "success" : "info"}>
+                  {fullProfitEngineEnabled ? "Enabled" : "Available on Pro"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Guardrail: {profitGuardrail}%
@@ -395,7 +419,6 @@ export function SettingsPage() {
                       max={100}
                       onChange={(value) => setPricingBias(Number(value))}
                       output
-                      disabled={!pricingProfitEnabled}
                     />
                     <Text as="p" tone="subdued">
                       {pricingAutomationPosture}
@@ -407,20 +430,17 @@ export function SettingsPage() {
                       max={40}
                       onChange={(value) => setProfitGuardrail(Number(value))}
                       output
-                      disabled={!fullProfitEngineEnabled}
                     />
                     <Text as="p" tone="subdued">
                       {fullProfitEngineEnabled
                         ? "Advanced profit guardrails are active for this store."
-                        : "Full profit guardrails become active on Pro."}
+                        : "These controls can be prepared now and go fully live when Pro access is active."}
                     </Text>
-                    {!pricingProfitEnabled || !fullProfitEngineEnabled ? (
-                      <InlineStack>
-                        <Button onClick={() => navigateEmbedded("/subscription")}>
-                          Review plan access
-                        </Button>
-                      </InlineStack>
-                    ) : null}
+                    <InlineStack>
+                      <Button onClick={() => navigateEmbedded("/subscription")}>
+                        Review plan access
+                      </Button>
+                    </InlineStack>
                   </BlockStack>
                 )}
               </Box>

@@ -12,9 +12,11 @@ import {
   Text,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
 type PricingProfitOverview = {
   subscription: {
@@ -116,19 +118,27 @@ const fallbackOverview: PricingProfitOverview = {
   scenarioPlaybook: [],
 };
 
+const PRICING_PROFIT_CACHE_KEY = "pricing-profit-overview";
+
 export function PricingProfitPage() {
+  const [searchParams] = useSearchParams();
   const { subscription } = useSubscriptionPlan();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const [overview, setOverview] = useState<PricingProfitOverview>(fallbackOverview);
-  const [loading, setLoading] = useState(false);
+  const cachedOverview = readModuleCache<PricingProfitOverview>(PRICING_PROFIT_CACHE_KEY);
+  const [overview, setOverview] = useState<PricingProfitOverview>(
+    cachedOverview ?? fallbackOverview
+  );
+  const [loading, setLoading] = useState(!cachedOverview);
   const [syncIssue, setSyncIssue] = useState(false);
   const allowed = !!subscription?.enabledModules.pricingProfit;
+  const focus = searchParams.get("focus");
+  const showingProfitFocus = focus === "profit";
 
   useEffect(() => {
     if (!allowed) {
       setLoading(false);
       setSyncIssue(false);
-      setOverview(fallbackOverview);
+      setOverview(cachedOverview ?? fallbackOverview);
       return;
     }
 
@@ -138,11 +148,11 @@ export function PricingProfitPage() {
 
     embeddedShopRequest<{ overview: PricingProfitOverview }>(
       "/api/pricing-profit/overview",
-      { timeoutMs: 30000 }
+      { timeoutMs: 12000 }
     )
       .then((res) => {
         if (!mounted) return;
-        setOverview({
+        const nextOverview = {
           ...fallbackOverview,
           ...res.overview,
           summary: {
@@ -153,7 +163,9 @@ export function PricingProfitPage() {
             ...fallbackOverview.marginAtRisk,
             ...res.overview.marginAtRisk,
           },
-        });
+        };
+        setOverview(nextOverview);
+        writeModuleCache(PRICING_PROFIT_CACHE_KEY, nextOverview);
       })
       .catch(() => {
         if (!mounted) return;
@@ -174,7 +186,7 @@ export function PricingProfitPage() {
     return () => {
       mounted = false;
     };
-  }, [allowed]);
+  }, [allowed, cachedOverview]);
 
   if (!allowed) {
     return (
@@ -214,14 +226,25 @@ export function PricingProfitPage() {
   }
 
   return (
-    <Page
-      title="Pricing & Profit Engine"
-      subtitle="Combines pricing recommendations, profit protection, market response, and daily action guidance."
+      <Page
+      title={showingProfitFocus ? "AI Profit Optimization Engine" : "Pricing & Profit Engine"}
+      subtitle={
+        showingProfitFocus
+          ? "Optimize discounting, bundling, and margin protection with profit-aware decision support."
+          : "Combines pricing recommendations, profit protection, market response, and daily action guidance."
+      }
     >
       <Layout>
         {loading ? (
           <Layout.Section>
-            <Banner title="Refreshing pricing and profit signals" tone="info">
+            <Banner
+              title={
+                showingProfitFocus
+                  ? "Refreshing profit intelligence"
+                  : "Refreshing pricing and profit signals"
+              }
+              tone="info"
+            >
               <p>
                 VedaSuite is refreshing pricing and profit signals in the background. You can stay
                 on this page while the latest recommendations load.
@@ -281,7 +304,8 @@ export function PricingProfitPage() {
             </Banner>
           )}
         </Layout.Section>
-        <Layout.Section>
+        {!showingProfitFocus ? (
+          <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
             <Card>
               <BlockStack gap="300">
@@ -344,8 +368,10 @@ export function PricingProfitPage() {
               </BlockStack>
             </Card>
           </InlineGrid>
-        </Layout.Section>
-        <Layout.Section>
+          </Layout.Section>
+        ) : null}
+        {!showingProfitFocus ? (
+          <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
             <Card>
               <BlockStack gap="300">
@@ -397,12 +423,15 @@ export function PricingProfitPage() {
               </BlockStack>
             </Card>
           </InlineGrid>
-        </Layout.Section>
+          </Layout.Section>
+        ) : null}
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
             <Card>
               <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">Pricing recommendations</Text>
+                <Text as="h3" variant="headingMd">
+                  {showingProfitFocus ? "Profit actions" : "Pricing recommendations"}
+                </Text>
                 {overview.pricingRecommendations.length === 0 ? (
                   <Text as="p" tone="subdued">
                     Pricing recommendations will appear after order, competitor, and product-level signals accumulate.
@@ -427,7 +456,9 @@ export function PricingProfitPage() {
             </Card>
             <Card>
               <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">Profit engine and margin-at-risk</Text>
+                <Text as="h3" variant="headingMd">
+                  {showingProfitFocus ? "Profit engine and margin-at-risk" : "Profit engine and margin-at-risk"}
+                </Text>
                 {overview.profitOpportunities.length > 0 ? (
                   overview.profitOpportunities.map((item) => (
                     <div key={item.productHandle} className="vs-action-card">
@@ -453,6 +484,44 @@ export function PricingProfitPage() {
             </Card>
           </InlineGrid>
         </Layout.Section>
+        {showingProfitFocus ? (
+          <Layout.Section>
+            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Active opportunities
+                  </Text>
+                  <Text as="p" variant="heading2xl">
+                    {overview.profitOpportunities.length}
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Projected monthly gain
+                  </Text>
+                  <Text as="p" variant="heading2xl">
+                    ${Math.round(overview.marginAtRisk.projectedMonthlyGain)}
+                  </Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingMd">
+                    Average margin lift
+                  </Text>
+                  <Text as="p" variant="heading2xl">
+                    {overview.scenarioPreset
+                      ? `${overview.scenarioPreset.expectedMarginImprovement.toFixed(1)}%`
+                      : "0.0%"}
+                  </Text>
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </Layout.Section>
+        ) : null}
       </Layout>
     </Page>
   );

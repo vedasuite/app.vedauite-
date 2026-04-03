@@ -11,24 +11,79 @@ async function safelyResolve<T>(work: Promise<T>, fallback: T) {
   }
 }
 
+async function safelyResolveWithTimeout<T>(
+  work: Promise<T>,
+  fallback: T,
+  timeoutMs = 8000
+) {
+  return safelyResolve(
+    Promise.race<T>([
+      work,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error("Timed out")), timeoutMs);
+      }),
+    ]),
+    fallback
+  );
+}
+
 export async function getPricingProfitOverview(shopDomain: string) {
-  const subscription = await getCurrentSubscription(shopDomain);
+  const subscription = await safelyResolveWithTimeout(
+    getCurrentSubscription(shopDomain),
+    {
+      planName: "TRIAL",
+      price: 0,
+      trialDays: 3,
+      starterModule: null,
+      active: false,
+      endsAt: null,
+      enabledModules: {
+        trustAbuse: true,
+        competitor: true,
+        pricingProfit: true,
+        reports: true,
+        settings: true,
+        fraud: true,
+        pricing: true,
+        creditScore: true,
+        profitOptimization: true,
+      },
+      featureAccess: {
+        shopperTrustScore: true,
+        returnAbuseIntelligence: true,
+        fraudReviewQueue: true,
+        supportCopilot: true,
+        evidencePackExport: true,
+        competitorMoveFeed: true,
+        competitorStrategyDetection: true,
+        weeklyCompetitorReports: true,
+        pricingRecommendations: true,
+        scenarioSimulator: true,
+        profitLeakDetector: true,
+        marginAtRisk: true,
+        dailyActionBoard: true,
+        advancedAutomation: true,
+        fullProfitEngine: true,
+      },
+    },
+    5000
+  );
 
   const [pricingRecommendations, competitorResponse] = await Promise.all([
-    safelyResolve(getPricingRecommendations(shopDomain), []),
-    safelyResolve(getCompetitorResponseEngine(shopDomain), {
+    safelyResolveWithTimeout(getPricingRecommendations(shopDomain), [], 7000),
+    safelyResolveWithTimeout(getCompetitorResponseEngine(shopDomain), {
       summary: {
         responseMode: "Monitor",
         topPressureCount: 0,
         automationReadiness: "Advisory mode",
       },
       responsePlans: [],
-    }),
+    }, 7000),
   ]);
 
   const canUseFullProfitEngine = subscription.featureAccess.fullProfitEngine;
   const profitOpportunities = canUseFullProfitEngine
-    ? await getProfitOpportunities(shopDomain).catch(() => [])
+    ? await safelyResolveWithTimeout(getProfitOpportunities(shopDomain), [], 7000)
     : [];
 
   const recommendationCount = pricingRecommendations.length;
@@ -37,7 +92,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
   const topProfitOpportunity = profitOpportunities[0] ?? null;
 
   const scenarioPreset = topRecommendation
-    ? await safelyResolve(
+    ? await safelyResolveWithTimeout(
         simulatePricingChange({
           currentPrice: topRecommendation.currentPrice,
           recommendedPrice: topRecommendation.recommendedPrice,
