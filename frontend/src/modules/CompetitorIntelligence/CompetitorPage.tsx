@@ -260,6 +260,37 @@ export function CompetitorPage() {
       ? "Showing low-stock competitor items where margin expansion may be possible."
       : null;
 
+  const moveFeed = useMemo(
+    () =>
+      rows.slice(0, 8).map((row) => ({
+        id: row.id,
+        headline: `${row.competitorName} moved on ${row.productHandle}`,
+        detail:
+          row.promotion ??
+          row.adCopy ??
+          (row.stockStatus ? `Stock posture: ${row.stockStatus}` : "Price observation captured"),
+        source: row.source ?? "website",
+      })),
+    [rows]
+  );
+
+  const strategyDetections = useMemo(() => {
+    if (!responseEngine?.responsePlans?.length) {
+      return [];
+    }
+
+    return responseEngine.responsePlans.slice(0, 3).map((plan) => ({
+      productHandle: plan.productHandle,
+      label:
+        plan.recommendedPlay === "bundle_defense"
+          ? "Likely inventory-clearout or share-defense push"
+          : plan.recommendedPlay === "selective_match"
+          ? "Likely tactical discounting on exposed SKU"
+          : "Likely watch-and-hold posture from competitor",
+      why: plan.rationale,
+    }));
+  }, [responseEngine]);
+
   const saveDomains = async () => {
     const domains = domainsInput
       .split(",")
@@ -385,6 +416,41 @@ export function CompetitorPage() {
               </Layout.Section>
             ) : null}
 
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingMd">
+                      Competitor Move Feed
+                    </Text>
+                    <Badge tone="info">
+                      {moveFeed.length > 0 ? `${moveFeed.length} recent moves` : "Awaiting first ingest"}
+                    </Badge>
+                  </InlineStack>
+                  {moveFeed.length === 0 ? (
+                    <Text as="p" tone="subdued">
+                      The move feed will surface launches, promotions, ad pressure, and stock posture once competitor ingestion runs.
+                    </Text>
+                  ) : (
+                    moveFeed.map((item) => (
+                      <div key={item.id} className="vs-action-card">
+                        <InlineStack align="space-between" blockAlign="start">
+                          <BlockStack gap="100">
+                            <Text as="p" variant="headingSm">
+                              {item.headline}
+                            </Text>
+                            <Text as="p" tone="subdued">
+                              {item.detail}
+                            </Text>
+                          </BlockStack>
+                          <Badge tone="attention">{item.source}</Badge>
+                        </InlineStack>
+                      </div>
+                    ))
+                  )}
+                </BlockStack>
+              </Card>
+            </Layout.Section>
             <Layout.Section>
               <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
                 {effectiveConnectors.map((connector) => (
@@ -642,7 +708,7 @@ export function CompetitorPage() {
                                   <BlockStack gap="100">
                                     <Text as="p">{mover.productHandle}</Text>
                                     <Text as="p" variant="bodySm" tone="subdued">
-                                      {`${mover.promotionSignals} promo signals • ${mover.stockSignals} stock signals`}
+                                      {`${mover.promotionSignals} promo signals | ${mover.stockSignals} stock signals`}
                                     </Text>
                                   </BlockStack>
                                   <Badge tone={mover.priceDelta < 0 ? "attention" : "info"}>
@@ -830,6 +896,29 @@ export function CompetitorPage() {
                                     {plan.rationale}
                                   </Text>
                                 </BlockStack>
+                              ))}
+                            </BlockStack>
+                          </Card>
+                        ) : null}
+                        {strategyDetections.length > 0 ? (
+                          <Card>
+                            <BlockStack gap="200">
+                              <Text as="h3" variant="headingMd">
+                                Competitor strategy detection
+                              </Text>
+                              {strategyDetections.map((detection) => (
+                                <div
+                                  key={`${detection.productHandle}-${detection.label}`}
+                                  className="vs-action-card"
+                                >
+                                  <Text as="p" variant="headingSm">
+                                    {detection.productHandle}
+                                  </Text>
+                                  <Text as="p">{detection.label}</Text>
+                                  <Text as="p" tone="subdued">
+                                    {detection.why}
+                                  </Text>
+                                </div>
                               ))}
                             </BlockStack>
                           </Card>

@@ -1,5 +1,18 @@
 import { prisma } from "../db/prismaClient";
 
+function maskCustomerLabel(value?: string | null, fallback = "Shopper profile") {
+  if (!value) {
+    return fallback;
+  }
+
+  if (value.includes("@")) {
+    const [prefix] = value.split("@");
+    return `${prefix.slice(0, 2)}***`;
+  }
+
+  return `${value.slice(0, 3)}***`;
+}
+
 export async function getWeeklyReport(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
@@ -198,7 +211,7 @@ export async function getWeeklyReport(shopDomain: string) {
     })),
     customers: {
       topRisky: topRiskCustomers.map((customer) => ({
-        email: customer.email,
+        email: maskCustomerLabel(customer.email),
         creditScore: customer.creditScore,
         refundRate: Number((customer.refundRate * 100).toFixed(1)),
         totalRefunds: customer.totalRefunds,

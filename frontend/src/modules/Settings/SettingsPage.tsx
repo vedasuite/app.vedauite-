@@ -189,13 +189,13 @@ export function SettingsPage() {
         {serviceOffline ? (
           <Layout.Section>
             <Banner
-              title="Using ready-to-edit default controls"
-              tone="warning"
+              title="Using the fallback merchant profile"
+              tone="info"
               action={{ content: "Refresh settings", onAction: () => window.location.reload() }}
             >
               <p>
-                Live merchant settings could not be loaded right now, so this page is using a safe fallback profile.
-                You can still review settings structure and retry saving once the service reconnects.
+                Live merchant settings have not finished syncing yet, so VedaSuite is showing a safe fallback profile.
+                Settings stay open on every plan and will switch to live merchant values as soon as the API responds.
               </p>
             </Banner>
           </Layout.Section>
@@ -231,7 +231,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Competitor controls</Text>
                 <Badge tone={competitorEnabled ? "success" : "info"}>
-                  {competitorEnabled ? "Enabled" : "Visible but inactive"}
+                  {competitorEnabled ? "Enabled" : "Ready for activation"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Tracked domains: {connectedDomains}
@@ -242,7 +242,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Pricing controls</Text>
                 <Badge tone={pricingProfitEnabled ? "success" : "info"}>
-                  {pricingProfitEnabled ? "Enabled" : "Visible but inactive"}
+                  {pricingProfitEnabled ? "Enabled" : "Ready for activation"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Bias: {pricingBias}/100
@@ -253,7 +253,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Profit controls</Text>
                 <Badge tone={fullProfitEngineEnabled ? "success" : "attention"}>
-                  {fullProfitEngineEnabled ? "Enabled" : "Pro-only active"}
+                  {fullProfitEngineEnabled ? "Enabled" : "Pro unlock available"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Guardrail: {profitGuardrail}%
@@ -362,9 +362,9 @@ export function SettingsPage() {
                 ) : selectedTab === 1 ? (
                   <BlockStack gap="300">
                     {!competitorEnabled ? (
-                      <Banner title="Competitor controls are visible but not active on this plan" tone="info">
+                      <Banner title="Competitor settings can be prepared ahead of activation" tone="info">
                         <p>
-                          You can prepare tracked domains now. Live competitor monitoring activates once a plan with Competitor Intelligence is active.
+                          You can prepare tracked domains now. Live competitor monitoring will start the moment a plan with Competitor Intelligence is active.
                         </p>
                       </Banner>
                     ) : null}
@@ -382,9 +382,9 @@ export function SettingsPage() {
                 ) : (
                   <BlockStack gap="400">
                     {!pricingProfitEnabled ? (
-                      <Banner title="Pricing & Profit controls are view-only on this plan" tone="warning">
+                      <Banner title="Pricing & Profit settings are staged for activation" tone="info">
                         <p>
-                          This plan can still show the operating profile, but AI pricing changes and profit guardrails activate on Growth and above.
+                          Settings are always open, but AI pricing changes and profit guardrails only become live once the matching plan access is active.
                         </p>
                       </Banner>
                     ) : null}

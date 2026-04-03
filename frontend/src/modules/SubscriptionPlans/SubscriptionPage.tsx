@@ -142,8 +142,8 @@ export function SubscriptionPage() {
     { label: "Trust & Abuse", enabled: current.enabledModules.trustAbuse },
     { label: "Competitor", enabled: current.enabledModules.competitor },
     { label: "Pricing & Profit", enabled: current.enabledModules.pricingProfit },
-    { label: "Reports", enabled: current.enabledModules.reports },
-    { label: "Settings", enabled: current.enabledModules.settings },
+    { label: "Reports", enabled: true },
+    { label: "Settings", enabled: true },
   ];
 
   return (
@@ -201,6 +201,34 @@ export function SubscriptionPage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
+              <Text as="h3" variant="headingMd">How access works now</Text>
+              <InlineGrid columns={{ xs: 1, md: 4 }} gap="300">
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Trial</Text>
+                  <Text as="p">All 3 modules unlocked for evaluation.</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Starter</Text>
+                  <Text as="p">Choose Trust & Abuse or Competitor as one active core module.</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Growth</Text>
+                  <Text as="p">Trust & Abuse + Competitor + basic Pricing & Profit.</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Pro</Text>
+                  <Text as="p">All 3 modules plus the full profit engine and premium features.</Text>
+                </div>
+              </InlineGrid>
+              <Text as="p" tone="subdued">
+                Reports and Settings stay open on every plan so merchants can review weekly operating briefs and maintain plan-aware controls.
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
               <Text as="h3" variant="headingMd">Plan coverage</Text>
               <InlineGrid columns={{ xs: 1, md: 5 }} gap="300">
                 {coverageItems.map(({ label, enabled }) => (
@@ -213,6 +241,40 @@ export function SubscriptionPage() {
                     </BlockStack>
                   </div>
                 ))}
+              </InlineGrid>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h3" variant="headingMd">Current access snapshot</Text>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                <div className="vs-action-card">
+                  <Text as="p" variant="headingSm">Currently active modules</Text>
+                  <Text as="p" tone="subdued">
+                    {coverageItems
+                      .filter((item) => item.enabled)
+                      .map((item) => item.label)
+                      .join(", ")}
+                  </Text>
+                </div>
+                <div className="vs-action-card">
+                  <Text as="p" variant="headingSm">Starter selector</Text>
+                  <Text as="p" tone="subdued">
+                    {current.planName === "STARTER"
+                      ? `Starter is currently pointed at ${starterLabel(current.starterModule)}.`
+                      : "Starter choice becomes relevant only when the Starter plan is active."}
+                  </Text>
+                </div>
+                <div className="vs-action-card">
+                  <Text as="p" variant="headingSm">Premium feature posture</Text>
+                  <Text as="p" tone="subdued">
+                    {current.featureAccess.fullProfitEngine
+                      ? "Full profit engine, advanced automation, and evidence export are active."
+                      : "Premium automation and full profit engine remain reserved for Pro."}
+                  </Text>
+                </div>
               </InlineGrid>
             </BlockStack>
           </Card>

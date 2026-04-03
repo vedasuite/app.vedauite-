@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   InlineGrid,
+  InlineStack,
   Layout,
   List,
   Page,
@@ -65,6 +66,24 @@ type PricingProfitOverview = {
     }>;
     projectedMonthlyGain: number;
   };
+  pricingModes?: Array<{
+    key: string;
+    label: string;
+    description: string;
+    recommended?: boolean;
+  }>;
+  doNothingRecommendation?: {
+    headline: string;
+    rationale: string;
+  } | null;
+  profitLeakSummary?: Array<{
+    title: string;
+    detail: string;
+  }>;
+  scenarioPlaybook?: Array<{
+    scenario: string;
+    outcome: string;
+  }>;
 };
 
 const fallbackOverview: PricingProfitOverview = {
@@ -91,6 +110,10 @@ const fallbackOverview: PricingProfitOverview = {
     pressureProducts: [],
     projectedMonthlyGain: 0,
   },
+  pricingModes: [],
+  doNothingRecommendation: null,
+  profitLeakSummary: [],
+  scenarioPlaybook: [],
 };
 
 export function PricingProfitPage() {
@@ -259,6 +282,70 @@ export function PricingProfitPage() {
           )}
         </Layout.Section>
         <Layout.Section>
+          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">Pricing mode selector</Text>
+                {(overview.pricingModes ?? []).length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    Pricing modes will appear after the pricing engine evaluates current store posture.
+                  </Text>
+                ) : (
+                  (overview.pricingModes ?? []).map((mode) => (
+                    <div key={mode.key} className="vs-action-card">
+                      <InlineGrid columns={{ xs: 1, sm: 2 }} gap="200">
+                        <BlockStack gap="100">
+                          <Text as="p" variant="headingSm">{mode.label}</Text>
+                          <Text as="p" tone="subdued">{mode.description}</Text>
+                        </BlockStack>
+                        <InlineStack align="end">
+                          <Badge tone={mode.recommended ? "success" : "info"}>
+                            {mode.recommended ? "Recommended" : "Available"}
+                          </Badge>
+                        </InlineStack>
+                      </InlineGrid>
+                    </div>
+                  ))
+                )}
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">Profit leak detector</Text>
+                {(overview.profitLeakSummary ?? []).length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    Profit leak signals will appear once pricing, competitor, and order histories are ready.
+                  </Text>
+                ) : (
+                  (overview.profitLeakSummary ?? []).map((item) => (
+                    <div key={item.title} className="vs-action-card">
+                      <Text as="p" variant="headingSm">{item.title}</Text>
+                      <Text as="p" tone="subdued">{item.detail}</Text>
+                    </div>
+                  ))
+                )}
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">Do-nothing guidance</Text>
+                {overview.doNothingRecommendation ? (
+                  <>
+                    <Badge tone="info">{overview.doNothingRecommendation.headline}</Badge>
+                    <Text as="p" tone="subdued">
+                      {overview.doNothingRecommendation.rationale}
+                    </Text>
+                  </>
+                ) : (
+                  <Text as="p" tone="subdued">
+                    VedaSuite will explicitly tell the merchant when no price change is the better move.
+                  </Text>
+                )}
+              </BlockStack>
+            </Card>
+          </InlineGrid>
+        </Layout.Section>
+        <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
             <Card>
               <BlockStack gap="300">
@@ -298,6 +385,15 @@ export function PricingProfitPage() {
                     Scenario presets will populate after enough pricing history and competitive pressure data is available.
                   </Text>
                 )}
+                {(overview.scenarioPlaybook ?? []).length > 0 ? (
+                  <List type="bullet">
+                    {(overview.scenarioPlaybook ?? []).map((scenario) => (
+                      <List.Item key={scenario.scenario}>
+                        <strong>{scenario.scenario}</strong>: {scenario.outcome}
+                      </List.Item>
+                    ))}
+                  </List>
+                ) : null}
               </BlockStack>
             </Card>
           </InlineGrid>
@@ -319,6 +415,11 @@ export function PricingProfitPage() {
                         ${recommendation.currentPrice} -&gt; ${recommendation.recommendedPrice}
                       </Text>
                       <Text as="p" tone="subdued">{recommendation.automationPosture}</Text>
+                      <List type="bullet">
+                        {recommendation.demandSignals.slice(0, 2).map((signal) => (
+                          <List.Item key={`${recommendation.id}-${signal}`}>{signal}</List.Item>
+                        ))}
+                      </List>
                     </div>
                   ))
                 )}

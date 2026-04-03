@@ -59,6 +59,24 @@ type TrustAbuseOverview = {
     refundRate: number;
     eventSummary: string;
   }>;
+  refundOutcomeSimulator?: {
+    likelyChannel: string;
+    merchantOutcome: string;
+    recoveryRate: string;
+    recommendedAction: string;
+  };
+  smartPolicyRecommendations?: Array<{
+    name: string;
+    description: string;
+    appliesTo: string;
+    action: string;
+  }>;
+  trustRecoveryActions?: Array<{
+    title: string;
+    detail: string;
+    eligibleProfiles: number;
+    priority: string;
+  }>;
 };
 
 const fallbackOverview: TrustAbuseOverview = {
@@ -86,6 +104,14 @@ const fallbackOverview: TrustAbuseOverview = {
     exports: [],
   },
   behaviorTimeline: [],
+  refundOutcomeSimulator: {
+    likelyChannel: "Store credit or exchange",
+    merchantOutcome: "Trust-aware refund handling becomes available once enough signals sync.",
+    recoveryRate: "Recovery insights will appear after shopper and refund history is available.",
+    recommendedAction: "Enable trust-aware refund routing once live signals are ready.",
+  },
+  smartPolicyRecommendations: [],
+  trustRecoveryActions: [],
 };
 
 export function TrustAbusePage() {
@@ -256,6 +282,73 @@ export function TrustAbusePage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">
+                  Refund Outcome Simulator
+                </Text>
+                <Text as="p" tone="subdued">
+                  {overview.refundOutcomeSimulator?.merchantOutcome}
+                </Text>
+                <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Likely channel
+                    </Text>
+                    <Badge tone="info">
+                      {overview.refundOutcomeSimulator?.likelyChannel ?? "Pending"}
+                    </Badge>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Recovery guidance
+                    </Text>
+                    <Text as="p">
+                      {overview.refundOutcomeSimulator?.recoveryRate ?? "Syncing"}
+                    </Text>
+                  </div>
+                </InlineGrid>
+                <Text as="p" variant="bodySm">
+                  {overview.refundOutcomeSimulator?.recommendedAction}
+                </Text>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  Smart Policy Engine
+                </Text>
+                {(overview.smartPolicyRecommendations ?? []).length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    Policy recommendations will appear after trust and abuse signals are synced.
+                  </Text>
+                ) : (
+                  (overview.smartPolicyRecommendations ?? []).map((policy) => (
+                    <div key={policy.name} className="vs-action-card">
+                      <BlockStack gap="100">
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="headingSm">
+                            {policy.name}
+                          </Text>
+                          <Badge tone="success">{policy.action}</Badge>
+                        </InlineStack>
+                        <Text as="p" tone="subdued">
+                          {policy.description}
+                        </Text>
+                        <Text as="p" variant="bodySm">
+                          Applies to: {policy.appliesTo}
+                        </Text>
+                      </BlockStack>
+                    </div>
+                  ))
+                )}
+              </BlockStack>
+            </Card>
+          </InlineGrid>
+        </Layout.Section>
+
+        <Layout.Section>
+          <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
                   Trust tiers
                 </Text>
                 {overview.trustTierSummary.length === 0 ? (
@@ -391,6 +484,42 @@ export function TrustAbusePage() {
               </BlockStack>
             </Card>
           </InlineGrid>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h3" variant="headingMd">
+                Trust Recovery Engine
+              </Text>
+              {(overview.trustRecoveryActions ?? []).length === 0 ? (
+                <Text as="p" tone="subdued">
+                  Trust recovery actions will appear once the shopper timeline has enough history.
+                </Text>
+              ) : (
+                <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                  {(overview.trustRecoveryActions ?? []).map((action) => (
+                    <div key={action.title} className="vs-signal-stat">
+                      <BlockStack gap="100">
+                        <InlineStack align="space-between">
+                          <Text as="p" variant="headingSm">
+                            {action.title}
+                          </Text>
+                          <Badge tone="attention">{action.priority}</Badge>
+                        </InlineStack>
+                        <Text as="p" tone="subdued">
+                          {action.detail}
+                        </Text>
+                        <Text as="p" variant="bodySm">
+                          Eligible profiles: {action.eligibleProfiles}
+                        </Text>
+                      </BlockStack>
+                    </div>
+                  ))}
+                </InlineGrid>
+              )}
+            </BlockStack>
+          </Card>
         </Layout.Section>
       </Layout>
     </Page>

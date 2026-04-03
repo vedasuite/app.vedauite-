@@ -84,6 +84,100 @@ export async function getPricingProfitOverview(shopDomain: string) {
     },
   ];
 
+  const pricingModes = [
+    {
+      key: "margin-first",
+      label: "Margin-first",
+      description:
+        "Protect contribution margin and approve only the strongest price changes.",
+      recommended:
+        subscription.planName === "PRO" &&
+        competitorResponse.summary.responseMode === "Defend margin",
+    },
+    {
+      key: "balanced",
+      label: "Balanced",
+      description:
+        "Blend conversion support with controlled margin protection across the catalog.",
+      recommended:
+        subscription.planName === "TRIAL" ||
+        subscription.planName === "GROWTH" ||
+        competitorResponse.summary.responseMode === "Hold and monitor",
+    },
+    {
+      key: "growth-first",
+      label: "Growth-first",
+      description:
+        "Use selective market response on exposed SKUs when share capture matters more than short-term margin.",
+      recommended:
+        competitorResponse.summary.responseMode === "Respond selectively",
+    },
+  ];
+
+  const doNothingRecommendation =
+    recommendationCount === 0
+      ? {
+          headline: "Do nothing right now",
+          rationale:
+            "There is not enough aligned pricing, market, and cost pressure to justify a change today.",
+        }
+      : topRecommendation &&
+        Math.abs(topRecommendation.recommendedPrice - topRecommendation.currentPrice) < 1
+      ? {
+          headline: "Do nothing on low-delta SKUs",
+          rationale:
+            "Some products are close enough to target price that reacting now would add noise without meaningful profit lift.",
+        }
+      : null;
+
+  const profitLeakSummary = [
+    {
+      title: "Discount leakage",
+      detail:
+        recommendationCount > 0
+          ? `${recommendationCount} pricing recommendations suggest preventable margin leakage from reactive discounting.`
+          : "No major discount leakage is visible yet.",
+    },
+    {
+      title: "Return-linked margin pressure",
+      detail:
+        profitOpportunityCount > 0
+          ? `${profitOpportunityCount} products show enough margin pressure to review returns, promotions, and unit economics together.`
+          : "Return-linked margin pressure is still below the action threshold.",
+    },
+    {
+      title: "Competitor pressure",
+      detail:
+        competitorResponse.summary.topPressureCount > 0
+          ? `${competitorResponse.summary.topPressureCount} SKUs are exposed to market pressure and may need a strategy response.`
+          : "Competitor pressure is currently modest across tracked SKUs.",
+    },
+  ];
+
+  const scenarioPlaybook = [
+    {
+      scenario: "Hold price",
+      outcome:
+        competitorResponse.summary.responseMode === "Hold and monitor"
+          ? "Recommended when pressure is low and margins should be protected."
+          : "Use when the market normalizes after a temporary competitor move.",
+    },
+    {
+      scenario: "Selective match",
+      outcome:
+        competitorResponse.summary.responseMode === "Respond selectively"
+          ? "Recommended on exposed hero SKUs with concentrated price pressure."
+          : "Reserve for SKUs where the competitor signal stack becomes more intense.",
+    },
+    {
+      scenario: "Bundle defense",
+      outcome:
+        competitorResponse.summary.responseMode === "Defend margin"
+          ? "Recommended when promotions spike and broad discounting would erode profit."
+          : "Best used when promotion clusters increase and the merchant wants to avoid price wars.",
+    },
+  ];
+
   return {
     subscription,
     summary: {
@@ -97,6 +191,10 @@ export async function getPricingProfitOverview(shopDomain: string) {
     pricingRecommendations: pricingRecommendations.slice(0, 8),
     profitOpportunities: profitOpportunities.slice(0, 8),
     dailyActionBoard,
+    pricingModes,
+    doNothingRecommendation,
+    profitLeakSummary,
+    scenarioPlaybook,
     scenarioPreset,
     marginAtRisk: {
       pressureProducts: competitorResponse.responsePlans
