@@ -1,6 +1,61 @@
 import { prisma } from "../db/prismaClient";
-import { cancelAppSubscription } from "./shopifyAdminService";
-import { getActiveAppSubscription } from "./shopifyAdminService";
+import {
+  cancelAppSubscription,
+  getActiveAppSubscription,
+} from "./shopifyAdminService";
+
+export type StarterModule = "trustAbuse" | "competitor";
+
+export type ModuleAccess = {
+  trustAbuse: boolean;
+  competitor: boolean;
+  pricingProfit: boolean;
+  reports: boolean;
+  settings: boolean;
+  fraud: boolean;
+  pricing: boolean;
+  creditScore: boolean;
+  profitOptimization: boolean;
+};
+
+export type FeatureAccess = {
+  shopperTrustScore: boolean;
+  returnAbuseIntelligence: boolean;
+  fraudReviewQueue: boolean;
+  supportCopilot: boolean;
+  evidencePackExport: boolean;
+  competitorMoveFeed: boolean;
+  competitorStrategyDetection: boolean;
+  weeklyCompetitorReports: boolean;
+  pricingRecommendations: boolean;
+  scenarioSimulator: boolean;
+  profitLeakDetector: boolean;
+  marginAtRisk: boolean;
+  dailyActionBoard: boolean;
+  advancedAutomation: boolean;
+  fullProfitEngine: boolean;
+};
+
+export type CurrentSubscription = {
+  planName: string;
+  price: number;
+  trialDays: number;
+  starterModule: StarterModule | null;
+  active: boolean;
+  endsAt: string | null;
+  enabledModules: ModuleAccess;
+  featureAccess: FeatureAccess;
+};
+
+export function normalizeStarterModuleLabel(moduleKey: StarterModule | null) {
+  if (moduleKey === "trustAbuse") {
+    return "Trust & Abuse Intelligence";
+  }
+  if (moduleKey === "competitor") {
+    return "Competitor Intelligence";
+  }
+  return null;
+}
 
 function isSubscriptionCurrentlyActive(endsAt?: Date | null, active?: boolean) {
   if (!active) {
@@ -15,17 +70,123 @@ function isSubscriptionCurrentlyActive(endsAt?: Date | null, active?: boolean) {
 }
 
 function normalizePlanName(planName?: string | null) {
-  return planName
-    ?.replace(/^VedaSuite AI - /i, "")
-    .trim()
-    .toUpperCase();
+  return planName?.replace(/^VedaSuite AI - /i, "").trim().toUpperCase() ?? null;
+}
+
+function normalizeStarterModule(value?: string | null): StarterModule | null {
+  if (value === "trustAbuse" || value === "competitor") {
+    return value;
+  }
+
+  if (value === "fraud" || value === "creditScore") {
+    return "trustAbuse";
+  }
+
+  return null;
+}
+
+function buildModuleAccess(
+  planName: string,
+  starterModule: StarterModule | null
+): ModuleAccess {
+  const isTrial = planName === "TRIAL";
+  const isStarterTrust =
+    planName === "STARTER" && normalizeStarterModule(starterModule) === "trustAbuse";
+  const isStarterCompetitor =
+    planName === "STARTER" && normalizeStarterModule(starterModule) === "competitor";
+
+  const trustAbuse =
+    isTrial || planName === "GROWTH" || planName === "PRO" || isStarterTrust;
+  const competitor =
+    isTrial || planName === "GROWTH" || planName === "PRO" || isStarterCompetitor;
+  const pricingProfit = isTrial || planName === "GROWTH" || planName === "PRO";
+  const reports = true;
+  const settings = true;
+
+  return {
+    trustAbuse,
+    competitor,
+    pricingProfit,
+    reports,
+    settings,
+    fraud: trustAbuse,
+    pricing: pricingProfit,
+    creditScore: trustAbuse,
+    profitOptimization: isTrial || planName === "PRO",
+  };
+}
+
+function buildFeatureAccess(
+  planName: string,
+  starterModule: StarterModule | null
+): FeatureAccess {
+  const modules = buildModuleAccess(planName, starterModule);
+  const isTrial = planName === "TRIAL";
+  const isGrowth = planName === "GROWTH";
+  const isPro = planName === "PRO";
+
+  return {
+    shopperTrustScore: modules.trustAbuse,
+    returnAbuseIntelligence: modules.trustAbuse,
+    fraudReviewQueue: modules.trustAbuse,
+    supportCopilot: isTrial || isGrowth || isPro,
+    evidencePackExport: isTrial || isPro,
+    competitorMoveFeed: modules.competitor,
+    competitorStrategyDetection: isTrial || isGrowth || isPro,
+    weeklyCompetitorReports: isTrial || isGrowth || isPro,
+    pricingRecommendations: modules.pricingProfit,
+    scenarioSimulator: modules.pricingProfit,
+    profitLeakDetector: modules.pricingProfit,
+    marginAtRisk: modules.pricingProfit,
+    dailyActionBoard: modules.pricingProfit,
+    advancedAutomation: isTrial || isPro,
+    fullProfitEngine: isTrial || isPro,
+  };
+}
+
+function buildSubscriptionPayload(params: {
+  planName: string;
+  price: number;
+  trialDays: number;
+  starterModule: StarterModule | null;
+  active: boolean;
+  endsAt: Date | null | undefined;
+}): CurrentSubscription {
+  return {
+    planName: params.planName,
+    price: params.price,
+    trialDays: params.trialDays,
+    starterModule: params.starterModule,
+    active: params.active,
+    endsAt: params.endsAt?.toISOString() ?? null,
+    enabledModules: buildModuleAccess(params.planName, params.starterModule),
+    featureAccess: buildFeatureAccess(params.planName, params.starterModule),
+  };
+}
+
+async function resolvePlanRecord(planName: string, trialDays = 3, price = 0) {
+  const existing = await prisma.subscriptionPlan.findUnique({
+    where: { name: planName },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.subscriptionPlan.create({
+    data: {
+      name: planName,
+      price,
+      trialDays,
+      features: JSON.stringify({ planName }),
+    },
+  });
 }
 
 async function reconcileCurrentSubscriptionFromShopify(store: {
   id: string;
   shop: string;
   subscription: {
-    id: string;
     starterModule: string | null;
     shopifyChargeId: string | null;
   } | null;
@@ -41,13 +202,17 @@ async function reconcileCurrentSubscriptionFromShopify(store: {
     return null;
   }
 
-  const plan = await prisma.subscriptionPlan.findUnique({
-    where: { name: normalizedPlanName },
-  });
-
-  if (!plan) {
-    return null;
-  }
+  const plan = await resolvePlanRecord(
+    normalizedPlanName,
+    3,
+    normalizedPlanName === "STARTER"
+      ? 19
+      : normalizedPlanName === "GROWTH"
+      ? 49
+      : normalizedPlanName === "PRO"
+      ? 99
+      : 0
+  );
 
   const currentPeriodEnd = activeSubscription.currentPeriodEnd
     ? new Date(activeSubscription.currentPeriodEnd)
@@ -62,8 +227,7 @@ async function reconcileCurrentSubscriptionFromShopify(store: {
       endsAt: currentPeriodEnd,
       starterModule:
         normalizedPlanName === "STARTER"
-          ? (store.subscription?.starterModule as "fraud" | "competitor" | null) ??
-            "fraud"
+          ? normalizeStarterModule(store.subscription?.starterModule) ?? "trustAbuse"
           : null,
     },
     create: {
@@ -72,7 +236,7 @@ async function reconcileCurrentSubscriptionFromShopify(store: {
       shopifyChargeId: activeSubscription.id,
       active: true,
       endsAt: currentPeriodEnd,
-      starterModule: normalizedPlanName === "STARTER" ? "fraud" : null,
+      starterModule: normalizedPlanName === "STARTER" ? "trustAbuse" : null,
     },
     include: {
       plan: true,
@@ -80,7 +244,9 @@ async function reconcileCurrentSubscriptionFromShopify(store: {
   });
 }
 
-export async function getCurrentSubscription(shopDomain: string) {
+export async function getCurrentSubscription(
+  shopDomain: string
+): Promise<CurrentSubscription> {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
     include: {
@@ -91,7 +257,10 @@ export async function getCurrentSubscription(shopDomain: string) {
       },
     },
   });
-  if (!store) throw new Error("Store not found");
+
+  if (!store) {
+    throw new Error("Store not found");
+  }
 
   let subscription = store.subscription;
   let subscriptionIsActive = isSubscriptionCurrentlyActive(
@@ -105,7 +274,6 @@ export async function getCurrentSubscription(shopDomain: string) {
       shop: store.shop,
       subscription: store.subscription
         ? {
-            id: store.subscription.id,
             starterModule: store.subscription.starterModule,
             shopifyChargeId: store.subscription.shopifyChargeId,
           }
@@ -121,31 +289,25 @@ export async function getCurrentSubscription(shopDomain: string) {
     }
   }
 
-  const plan = subscriptionIsActive ? subscription?.plan : null;
-  const starterModule = subscription?.starterModule ?? null;
-  const isStarterFraud = plan?.name === "STARTER" && starterModule === "fraud";
-  const isStarterCompetitor =
-    plan?.name === "STARTER" && starterModule === "competitor";
+  if (!subscriptionIsActive || !subscription?.plan) {
+    return buildSubscriptionPayload({
+      planName: "TRIAL",
+      price: 0,
+      trialDays: 3,
+      starterModule: null,
+      active: false,
+      endsAt: subscription?.endsAt,
+    });
+  }
 
-  const enabledModules = {
-    fraud: !!plan && (["GROWTH", "PRO"].includes(plan.name) || isStarterFraud),
-    competitor:
-      !!plan &&
-      (["GROWTH", "PRO"].includes(plan.name) || isStarterCompetitor),
-    pricing: !!plan && ["GROWTH", "PRO"].includes(plan.name),
-    creditScore: !!plan && ["GROWTH", "PRO"].includes(plan.name),
-    profitOptimization: !!plan && plan.name === "PRO",
-  };
-
-  return {
-    planName: plan?.name ?? "TRIAL",
-    price: plan?.price ?? 0,
-    trialDays: plan?.trialDays ?? 3,
-    starterModule,
-    active: subscription?.active ?? false,
-    endsAt: subscription?.endsAt?.toISOString() ?? null,
-    enabledModules,
-  };
+  return buildSubscriptionPayload({
+    planName: subscription.plan.name,
+    price: subscription.plan.price,
+    trialDays: subscription.plan.trialDays,
+    starterModule: normalizeStarterModule(subscription.starterModule),
+    active: subscription.active,
+    endsAt: subscription.endsAt,
+  });
 }
 
 export async function cancelSubscription(shopDomain: string) {
@@ -157,22 +319,16 @@ export async function cancelSubscription(shopDomain: string) {
   if (!store.subscription) throw new Error("No active subscription");
 
   if (store.subscription.shopifyChargeId) {
-    await cancelAppSubscription(
-      shopDomain,
-      store.subscription.shopifyChargeId,
-      false
-    );
+    await cancelAppSubscription(shopDomain, store.subscription.shopifyChargeId, false);
   }
 
-  const updated = await prisma.storeSubscription.update({
+  return prisma.storeSubscription.update({
     where: { id: store.subscription.id },
     data: {
       active: false,
       endsAt: new Date(),
     },
   });
-
-  return updated;
 }
 
 export async function downgradeToTrial(shopDomain: string) {
@@ -184,11 +340,7 @@ export async function downgradeToTrial(shopDomain: string) {
 
   if (store.subscription) {
     if (store.subscription.shopifyChargeId) {
-      await cancelAppSubscription(
-        shopDomain,
-        store.subscription.shopifyChargeId,
-        false
-      );
+      await cancelAppSubscription(shopDomain, store.subscription.shopifyChargeId, false);
     }
 
     await prisma.storeSubscription.delete({
@@ -196,15 +348,19 @@ export async function downgradeToTrial(shopDomain: string) {
     });
   }
 
-  return {
+  return buildSubscriptionPayload({
     planName: "TRIAL",
+    price: 0,
+    trialDays: 3,
+    starterModule: null,
     active: false,
-  };
+    endsAt: null,
+  });
 }
 
 export async function updateStarterModuleSelection(
   shopDomain: string,
-  starterModule: "fraud" | "competitor"
+  starterModule: StarterModule
 ) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
@@ -216,7 +372,9 @@ export async function updateStarterModuleSelection(
   });
   if (!store) throw new Error("Store not found");
   if (!store.subscription || store.subscription.plan.name !== "STARTER") {
-    throw new Error("Starter module selection can only be changed on the STARTER plan.");
+    throw new Error(
+      "Starter module selection can only be changed on the STARTER plan."
+    );
   }
 
   return prisma.storeSubscription.update({
@@ -249,10 +407,7 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
     normalizedStatus === "ACCEPTED" ||
     normalizedStatus === "PENDING";
 
-  const planName = input.planName
-    ?.replace(/^VedaSuite AI - /i, "")
-    .trim()
-    .toUpperCase();
+  const planName = normalizePlanName(input.planName);
 
   if (!isActive) {
     if (!store.subscription) {
@@ -287,6 +442,10 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       shopifyChargeId: input.shopifyChargeId ?? store.subscription?.shopifyChargeId ?? null,
       active: true,
       endsAt: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : null,
+      starterModule:
+        planName === "STARTER"
+          ? normalizeStarterModule(store.subscription?.starterModule) ?? "trustAbuse"
+          : null,
     },
     create: {
       storeId: store.id,
@@ -294,7 +453,7 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       shopifyChargeId: input.shopifyChargeId ?? null,
       active: true,
       endsAt: input.currentPeriodEnd ? new Date(input.currentPeriodEnd) : null,
+      starterModule: planName === "STARTER" ? "trustAbuse" : null,
     },
   });
 }
-

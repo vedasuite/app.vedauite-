@@ -312,9 +312,7 @@ export function DashboardPage() {
       },
       {
         label: "Pricing and profit modules are enabled",
-        done:
-          !!subscription?.enabledModules.pricing &&
-          !!subscription?.enabledModules.profitOptimization,
+        done: !!subscription?.enabledModules.pricingProfit,
         action: "Unlock Pro",
         route: "/subscription",
       },
@@ -328,8 +326,7 @@ export function DashboardPage() {
     [
       launchAudit?.checks,
       reportsEnabled,
-      subscription?.enabledModules.pricing,
-      subscription?.enabledModules.profitOptimization,
+      subscription?.enabledModules.pricingProfit,
       webhookStatus,
     ]
   );
@@ -338,8 +335,8 @@ export function DashboardPage() {
     {
       title: "Review fraud queue",
       description: "Inspect risky orders, chargeback exposure, and return abuse flags.",
-      route: "/fraud?focus=high-risk",
-      cta: "Open fraud intelligence",
+      route: "/trust-abuse?focus=high-risk",
+      cta: "Open trust & abuse",
       tone: "critical" as const,
     },
     {
@@ -352,10 +349,10 @@ export function DashboardPage() {
     {
       title: "Approve pricing actions",
       description: "Validate the next AI recommendation and protect margin expansion.",
-      route: "/pricing?focus=simulation",
-      cta: "Open pricing strategy",
+      route: "/pricing-profit?focus=simulation",
+      cta: "Open pricing & profit",
       tone: "success" as const,
-      locked: !subscription?.enabledModules.pricing,
+      locked: !subscription?.enabledModules.pricingProfit,
     },
   ];
 
@@ -440,7 +437,7 @@ export function DashboardPage() {
   return (
     <Page
       title="VedaSuite AI Dashboard"
-      subtitle="A single control center for fraud, competition, pricing, credit, and profit intelligence."
+      subtitle="A single control center for trust, competition, pricing, reporting, and profit intelligence."
       primaryAction={{
         content: syncing ? "Syncing..." : "Sync live Shopify data",
         onAction: syncLiveStoreData,
@@ -542,11 +539,9 @@ export function DashboardPage() {
                     <Text as="p" variant="headingLg">
                       {
                         [
-                          subscription?.enabledModules.fraud,
+                          subscription?.enabledModules.trustAbuse,
                           subscription?.enabledModules.competitor,
-                          subscription?.enabledModules.pricing,
-                          subscription?.enabledModules.creditScore,
-                          subscription?.enabledModules.profitOptimization,
+                          subscription?.enabledModules.pricingProfit,
                         ].filter(Boolean).length
                       }
                     </Text>
@@ -769,9 +764,9 @@ export function DashboardPage() {
                         </InlineStack>
                         <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
                           <Button
-                            onClick={() => navigateEmbedded("/fraud?focus=high-risk")}
+                            onClick={() => navigateEmbedded("/trust-abuse?focus=high-risk")}
                           >
-                            Open fraud queue
+                            Open trust & abuse
                           </Button>
                           <Button
                             onClick={() =>
@@ -783,15 +778,15 @@ export function DashboardPage() {
                           <Button
                             onClick={() =>
                               navigateEmbedded(
-                                subscription?.enabledModules.pricing
-                                  ? "/pricing?focus=simulation"
+                                subscription?.enabledModules.pricingProfit
+                                  ? "/pricing-profit?focus=simulation"
                                   : "/subscription"
                               )
                             }
                           >
-                            {subscription?.enabledModules.pricing
-                              ? "Approve pricing changes"
-                              : "Unlock pricing strategy"}
+                            {subscription?.enabledModules.pricingProfit
+                              ? "Open pricing & profit"
+                              : "Unlock pricing & profit"}
                           </Button>
                         </InlineGrid>
                       </BlockStack>
@@ -850,15 +845,15 @@ export function DashboardPage() {
                           <Button
                             onClick={() =>
                               navigateEmbedded(
-                                subscription?.enabledModules.profitOptimization
-                                  ? "/profit?focus=opportunities"
+                                subscription?.enabledModules.pricingProfit
+                                  ? "/pricing-profit?focus=profit"
                                   : "/subscription"
                               )
                             }
                           >
-                            {subscription?.enabledModules.profitOptimization
-                              ? "Review profit engine"
-                              : "Unlock profit engine"}
+                            {subscription?.enabledModules.pricingProfit
+                              ? "Review pricing & profit"
+                              : "Unlock pricing & profit"}
                           </Button>
                         </InlineStack>
                       </BlockStack>
@@ -872,7 +867,7 @@ export function DashboardPage() {
                           Suggested next actions
                         </Text>
                         <List type="number">
-                          <List.Item>Open Fraud Intelligence and review flagged orders.</List.Item>
+                          <List.Item>Open Trust & Abuse and review flagged orders.</List.Item>
                           <List.Item>
                             Compare competitor promotions against your margin floor.
                           </List.Item>

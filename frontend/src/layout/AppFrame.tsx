@@ -11,9 +11,19 @@ type Props = {
   children: ReactNode;
 };
 
+function starterModuleLabel(value: string | null | undefined) {
+  if (value === "trustAbuse") {
+    return "Trust & Abuse";
+  }
+  if (value === "competitor") {
+    return "Competitor";
+  }
+  return null;
+}
+
 export function AppFrame({ children }: Props) {
   const location = useLocation();
-  const { buildEmbeddedPath, navigateEmbedded } = useEmbeddedNavigation();
+  const { navigateEmbedded } = useEmbeddedNavigation();
   const { subscription } = useSubscriptionPlan();
   const { message: billingMessage, dismiss: dismissBillingMessage } =
     useBillingFlash();
@@ -21,12 +31,11 @@ export function AppFrame({ children }: Props) {
 
   const activePlan = subscription?.planName ?? "TRIAL";
   const moduleStatus = {
-    fraud: subscription?.enabledModules.fraud ?? true,
+    trustAbuse: subscription?.enabledModules.trustAbuse ?? true,
     competitor: subscription?.enabledModules.competitor ?? true,
-    pricing: subscription?.enabledModules.pricing ?? false,
-    profit: subscription?.enabledModules.profitOptimization ?? false,
-    creditScore: subscription?.enabledModules.creditScore ?? false,
-    reports: activePlan === "GROWTH" || activePlan === "PRO" || activePlan === "TRIAL",
+    pricingProfit: subscription?.enabledModules.pricingProfit ?? false,
+    reports: subscription?.enabledModules.reports ?? true,
+    settings: subscription?.enabledModules.settings ?? true,
   };
 
   const dismissToast = useCallback(() => setToast(null), []);
@@ -37,10 +46,9 @@ export function AppFrame({ children }: Props) {
       selected: location.pathname === path,
       badge: options?.badge,
       onClick: () => {
-        if (location.pathname === path) {
-          return;
+        if (location.pathname !== path) {
+          navigateEmbedded(path);
         }
-        navigateEmbedded(path);
       },
     }),
     [location.pathname, navigateEmbedded]
@@ -49,50 +57,27 @@ export function AppFrame({ children }: Props) {
   const navigationItems = useMemo(
     () => [
       createNavItem("/", "Dashboard"),
-      createNavItem("/fraud", "Fraud Intelligence", {
-        badge: moduleStatus.fraud ? undefined : "Upgrade",
+      createNavItem("/trust-abuse", "Trust & Abuse", {
+        badge: moduleStatus.trustAbuse ? undefined : "Upgrade",
       }),
       createNavItem("/competitor", "Competitor Intelligence", {
         badge: moduleStatus.competitor ? undefined : "Upgrade",
       }),
-      createNavItem(
-        "/pricing",
-        moduleStatus.pricing
-          ? "AI Pricing Strategy"
-          : "AI Pricing Strategy (PRO)",
-        {
-          badge: moduleStatus.pricing ? undefined : "Locked",
-        }
-      ),
-      createNavItem(
-        "/profit",
-        moduleStatus.profit
-          ? "AI Profit Optimization"
-          : "AI Profit Optimization (PRO)",
-        {
-          badge: moduleStatus.profit ? undefined : "Locked",
-        }
-      ),
-      createNavItem(
-        "/credit-score",
-        moduleStatus.creditScore
-          ? "Shopper Credit Score"
-          : "Shopper Credit Score (PRO)",
-        {
-          badge: moduleStatus.creditScore ? undefined : "Locked",
-        }
-      ),
-      createNavItem(
-        "/reports",
-        moduleStatus.reports ? "Reports" : "Reports (GROWTH)",
-        {
-          badge: moduleStatus.reports ? undefined : "Locked",
-        }
-      ),
+      createNavItem("/pricing-profit", "Pricing & Profit", {
+        badge: moduleStatus.pricingProfit ? undefined : "Upgrade",
+      }),
+      createNavItem("/reports", "Reports", {
+        badge: moduleStatus.reports ? undefined : "Upgrade",
+      }),
       createNavItem("/settings", "Settings"),
-      createNavItem("/subscription", "Subscription Plans"),
     ],
-    [createNavItem, moduleStatus.competitor, moduleStatus.creditScore, moduleStatus.fraud, moduleStatus.pricing, moduleStatus.profit, moduleStatus.reports]
+    [
+      createNavItem,
+      moduleStatus.competitor,
+      moduleStatus.pricingProfit,
+      moduleStatus.reports,
+      moduleStatus.trustAbuse,
+    ]
   );
 
   const navigation = (
@@ -105,12 +90,12 @@ export function AppFrame({ children }: Props) {
             <div>
               <p className="vs-brand__title">VedaSuite AI</p>
               <p className="vs-brand__subtitle">
-                AI Commerce Solutions For Shopify
+                Commerce intelligence operating system for Shopify
               </p>
               <div className="vs-plan-pill">{activePlan} PLAN</div>
               {activePlan === "STARTER" && subscription?.starterModule ? (
                 <p className="vs-brand__subtitle">
-                  {subscription.starterModule.toUpperCase()} MODULE ACTIVE
+                  {starterModuleLabel(subscription.starterModule)} ACTIVE
                 </p>
               ) : null}
             </div>

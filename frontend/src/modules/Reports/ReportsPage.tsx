@@ -202,8 +202,8 @@ export function ReportsPage() {
                   <Button onClick={() => navigateEmbedded("/")}>
                     Open dashboard
                   </Button>
-                  <Button onClick={() => navigateEmbedded("/fraud")}>
-                    Open fraud intelligence
+                  <Button onClick={() => navigateEmbedded("/trust-abuse")}>
+                    Open trust & abuse
                   </Button>
                   <Button onClick={() => navigateEmbedded("/competitor")}>
                     Open competitor intelligence
@@ -400,7 +400,7 @@ export function ReportsPage() {
                   </Text>
                   <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
                     <Button
-                      onClick={() => navigateEmbedded("/fraud?focus=high-risk")}
+                      onClick={() => navigateEmbedded("/trust-abuse?focus=high-risk")}
                     >
                       Open fraud review
                     </Button>
@@ -412,12 +412,12 @@ export function ReportsPage() {
                       Open competitor feed
                     </Button>
                     <Button
-                      onClick={() => navigateEmbedded("/pricing?focus=simulation")}
+                      onClick={() => navigateEmbedded("/pricing-profit?focus=simulation")}
                     >
                       Open pricing strategy
                     </Button>
                     <Button
-                      onClick={() => navigateEmbedded("/profit?focus=opportunities")}
+                      onClick={() => navigateEmbedded("/pricing-profit?focus=profit")}
                     >
                       Open profit engine
                     </Button>

@@ -36,6 +36,12 @@ export function ModuleGate({
 
   const currentPlan = subscription?.planName ?? "TRIAL";
   const currentStarterModule = subscription?.starterModule;
+  const starterLabel =
+    currentStarterModule === "trustAbuse"
+      ? "Trust & Abuse Intelligence"
+      : currentStarterModule === "competitor"
+      ? "Competitor Intelligence"
+      : null;
 
   return (
     <Page title={title} subtitle={subtitle}>
@@ -65,7 +71,7 @@ export function ModuleGate({
                 <Banner title="Starter module selection detected" tone="info">
                   <p>
                     Your store is currently using the{" "}
-                    <strong>{currentStarterModule}</strong> Starter module. Upgrade
+                    <strong>{starterLabel ?? currentStarterModule}</strong> Starter module. Upgrade
                     or switch the Starter module to access this workflow.
                   </p>
                 </Banner>

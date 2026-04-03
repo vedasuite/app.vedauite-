@@ -14,63 +14,20 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { useSubscriptionPlan, type StarterModule } from "../../hooks/useSubscriptionPlan";
 import {
   buildOptimisticSubscription,
   fallbackSubscription,
 } from "../../lib/subscriptionState";
-import { useAppBridge } from "../../shopifyAppBridge";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { useAppBridge } from "../../shopifyAppBridge";
 
-function getApiErrorMessage(error: unknown, fallback: string) {
-  const candidate = error as {
-    message?: string;
-    response?: {
-      data?: {
-        error?: string | { message?: string };
-        message?: string;
-      };
-    };
-  };
-
-  const responseError = candidate.response?.data?.error;
-  if (typeof responseError === "string" && responseError.trim()) {
-    return responseError;
-  }
-
-  if (
-    responseError &&
-    typeof responseError === "object" &&
-    typeof responseError.message === "string" &&
-    responseError.message.trim()
-  ) {
-    return responseError.message;
-  }
-
-  const responseMessage = candidate.response?.data?.message;
-  if (typeof responseMessage === "string" && responseMessage.trim()) {
-    return responseMessage;
-  }
-
-  if (typeof candidate.message === "string" && candidate.message.trim()) {
-    return candidate.message;
-  }
-
-  return fallback;
-}
-
-function getApiReauthorizeUrl(error: unknown) {
-  const candidate = error as {
-    response?: {
-      data?: {
-        error?: {
-          reauthorizeUrl?: string;
-        };
-      };
-    };
-  };
-
-  return candidate.response?.data?.error?.reauthorizeUrl ?? null;
+function starterLabel(moduleKey: StarterModule) {
+  return moduleKey === "trustAbuse"
+    ? "Trust & Abuse Intelligence"
+    : moduleKey === "competitor"
+    ? "Competitor Intelligence"
+    : "Starter module";
 }
 
 function redirectTopLevel(url: string) {
@@ -78,265 +35,136 @@ function redirectTopLevel(url: string) {
     window.top.location.href = url;
     return;
   }
-
   window.location.href = url;
 }
 
 export function SubscriptionPage() {
   const { shop, host } = useAppBridge();
-  const {
-    subscription,
-    refresh: refreshSubscriptionContext,
-    applyOptimistic,
-  } = useSubscriptionPlan();
+  const { subscription, refresh, applyOptimistic } = useSubscriptionPlan();
   const [searchParams] = useSearchParams();
   const [toast, setToast] = useState<string | null>(null);
-  const [actionBanner, setActionBanner] = useState<{
-    title: string;
-    detail: string;
-    reauthorizeUrl?: string | null;
-  } | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [starterModule, setStarterModule] = useState<"fraud" | "competitor">(
-    "fraud"
-  );
+  const [starterModule, setStarterModule] = useState<StarterModule>("trustAbuse");
   const billingStatus = searchParams.get("billing");
   const activatedPlan = searchParams.get("plan");
   const activatedStarterModule = searchParams.get("starterModule");
-  const billingError = searchParams.get("billingError");
-  const fallbackReauthorizeUrl = shop
-    ? `/auth/install?shop=${encodeURIComponent(shop)}`
-    : null;
-  const sub = subscription ?? fallbackSubscription;
+  const current = subscription ?? fallbackSubscription;
 
   useEffect(() => {
-    if (!subscription) {
-      refreshSubscriptionContext().catch(() => undefined);
+    if (current.starterModule) {
+      setStarterModule(current.starterModule);
     }
-  }, [refreshSubscriptionContext, subscription]);
-
-  useEffect(() => {
-    if (subscription?.starterModule) {
-      setStarterModule(subscription.starterModule);
-    }
-  }, [subscription?.starterModule]);
+  }, [current.starterModule]);
 
   useEffect(() => {
     if (billingStatus !== "activated" || !activatedPlan) {
       return;
     }
 
-    const optimisticSubscription = buildOptimisticSubscription({
+    const optimistic = buildOptimisticSubscription({
       planName: activatedPlan,
       starterModule:
-        activatedStarterModule === "fraud" || activatedStarterModule === "competitor"
+        activatedStarterModule === "trustAbuse" ||
+        activatedStarterModule === "competitor"
           ? activatedStarterModule
           : null,
     });
-    applyOptimistic(optimisticSubscription);
-    if (optimisticSubscription.starterModule) {
-      setStarterModule(optimisticSubscription.starterModule);
-    }
-    refreshSubscriptionContext().catch(() => undefined);
+    applyOptimistic(optimistic);
+    setBanner(
+      optimistic.starterModule
+        ? `Plan activated: ${optimistic.planName} with ${starterLabel(
+            optimistic.starterModule
+          )}.`
+        : `Plan activated: ${optimistic.planName}.`
+    );
+    void refresh();
   }, [
     activatedPlan,
     activatedStarterModule,
     applyOptimistic,
     billingStatus,
-    refreshSubscriptionContext,
+    refresh,
   ]);
 
-  useEffect(() => {
-    if (billingError) {
-      setActionBanner({
-        title: "Billing needs attention",
-        detail: billingError,
-        reauthorizeUrl:
-          /reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|session token/i.test(
-            billingError
-          )
-            ? fallbackReauthorizeUrl
-            : null,
-      });
-      setToast(billingError);
-    }
-  }, [billingError, fallbackReauthorizeUrl]);
-
-  const changePlan = (planName: string) => {
-    setBusyAction(planName);
-    setActionBanner(null);
-    const currentParams = new URLSearchParams(window.location.search);
-    const shopParam = currentParams.get("shop") || shop;
-    const hostParam = currentParams.get("host") || host;
-    if (!shopParam) {
-      setActionBanner({
-        title: "Billing action needs attention",
-        detail: "Missing Shopify shop context. Reopen the embedded app and retry.",
-      });
-      setToast("Missing Shopify shop context.");
-      setBusyAction(null);
-      return;
-    }
-
+  const createPlanCheckout = (planName: string) => {
     const url = new URL("/billing/start", window.location.origin);
-    url.searchParams.set("shop", shopParam);
+    url.searchParams.set("shop", shop);
     url.searchParams.set("planName", planName);
-    if (hostParam) {
-      url.searchParams.set("host", hostParam);
+    if (host) {
+      url.searchParams.set("host", host);
     }
-    if (planName === "STARTER") {
+    if (planName === "STARTER" && starterModule) {
       url.searchParams.set("starterModule", starterModule);
     }
-
     redirectTopLevel(url.toString());
   };
 
-  const refreshSubscription = () => {
-    refreshSubscriptionContext()
-      .catch(() => applyOptimistic(fallbackSubscription))
-      .finally(() => setBusyAction(null));
+  const changePlan = (planName: string) => {
+    setBusyAction(planName);
+    createPlanCheckout(planName);
   };
 
   const updateStarterSelection = async () => {
-    try {
-      setBusyAction("starter-module");
-      setActionBanner(null);
-      await embeddedShopRequest("/api/subscription/starter-module", {
-        method: "POST",
-        body: { starterModule },
-        timeoutMs: 60000,
-      });
-      applyOptimistic(
-        buildOptimisticSubscription({
-          planName: "STARTER",
-          starterModule,
-        })
-      );
-      setToast(`Starter module switched to ${starterModule}.`);
-      refreshSubscription();
-    } catch (error) {
-      const message = getApiErrorMessage(error, "Unable to update Starter module.");
-      setActionBanner({
-        title: "Starter module update needs attention",
-        detail: message,
-      });
-      setToast(message);
-      setBusyAction(null);
+    if (!starterModule) {
+      return;
     }
+    setBusyAction("starter-module");
+    await embeddedShopRequest("/api/subscription/starter-module", {
+      method: "POST",
+      body: { starterModule },
+      timeoutMs: 30000,
+    });
+    applyOptimistic(buildOptimisticSubscription({ planName: "STARTER", starterModule }));
+    setToast(`Starter now uses ${starterLabel(starterModule)}.`);
+    await refresh();
+    setBusyAction(null);
   };
 
-  const cancelPlan = async () => {
-    try {
-      setBusyAction("cancel");
-      setActionBanner(null);
-      await embeddedShopRequest("/api/subscription/cancel", {
-        method: "POST",
-        timeoutMs: 60000,
-      });
-      applyOptimistic(fallbackSubscription);
-      setToast("Subscription marked as cancelled.");
-      refreshSubscription();
-    } catch (error) {
-      const message = getApiErrorMessage(
-        error,
-        "Unable to cancel the subscription."
-      );
-      setActionBanner({
-        title: "Cancellation needs attention",
-        detail: message,
-      });
-      setToast(message);
-      setBusyAction(null);
-    }
+  const changeToTrial = async () => {
+    setBusyAction("TRIAL");
+    await embeddedShopRequest("/api/subscription/downgrade-to-trial", {
+      method: "POST",
+      timeoutMs: 30000,
+    });
+    applyOptimistic(fallbackSubscription);
+    setToast("Store is back on the Trial plan.");
+    await refresh();
+    setBusyAction(null);
   };
 
-  const downgradeToTrial = async () => {
-    try {
-      setBusyAction("trial");
-      setActionBanner(null);
-      await embeddedShopRequest("/api/subscription/downgrade-to-trial", {
-        method: "POST",
-        timeoutMs: 60000,
-      });
-      applyOptimistic(fallbackSubscription);
-      setToast("Store downgraded to the Trial plan.");
-      refreshSubscription();
-    } catch (error) {
-      const message = getApiErrorMessage(
-        error,
-        "Unable to downgrade to Trial right now."
-      );
-      setActionBanner({
-        title: "Trial downgrade needs attention",
-        detail: message,
-      });
-      setToast(message);
-      setBusyAction(null);
-    }
-  };
-
-  const planFit =
-    sub?.planName === "PRO"
-      ? "Full-suite merchants with margin and intelligence teams"
-      : sub?.planName === "GROWTH"
-      ? "Operators actively responding to fraud and market movement"
-      : sub?.planName === "STARTER"
-      ? "Focused merchants starting with one operational module"
-      : "Stores evaluating the suite before committing";
+  const enabledModuleCount = [
+    current.enabledModules.trustAbuse,
+    current.enabledModules.competitor,
+    current.enabledModules.pricingProfit,
+  ].filter(Boolean).length;
+  const coverageItems: Array<{ label: string; enabled: boolean }> = [
+    { label: "Trust & Abuse", enabled: current.enabledModules.trustAbuse },
+    { label: "Competitor", enabled: current.enabledModules.competitor },
+    { label: "Pricing & Profit", enabled: current.enabledModules.pricingProfit },
+    { label: "Reports", enabled: current.enabledModules.reports },
+    { label: "Settings", enabled: current.enabledModules.settings },
+  ];
 
   return (
     <Page
       title="Subscription plans"
-      subtitle="Monetize the suite with module-aware plans and embedded Shopify billing."
+      subtitle="Billing and access control for Trust & Abuse, Competitor Intelligence, and Pricing & Profit."
     >
       <Layout>
-        <Layout.Section>
-          {billingStatus === "activated" ? (
-            <Banner title="Plan activated successfully" tone="success">
-              <p>
-                Your store is now on <strong>{activatedPlan ?? sub?.planName ?? "the selected plan"}</strong>
-                {activatedStarterModule
-                  ? ` with ${activatedStarterModule} as the active Starter module.`
-                  : "."}
-              </p>
+        {banner ? (
+          <Layout.Section>
+            <Banner title="Plan activation recorded" tone="success">
+              <p>{banner}</p>
             </Banner>
-          ) : null}
-        </Layout.Section>
+          </Layout.Section>
+        ) : null}
         <Layout.Section>
-          {actionBanner ? (
-            <Banner
-              title={actionBanner.title}
-              tone={actionBanner.reauthorizeUrl ? "warning" : "critical"}
-            >
-              <BlockStack gap="300">
-                <p>{actionBanner.detail}</p>
-                <InlineStack gap="300">
-                  {actionBanner.reauthorizeUrl ? (
-                    <Button
-                      onClick={() =>
-                        redirectTopLevel(actionBanner.reauthorizeUrl ?? "")
-                      }
-                    >
-                      Reconnect Shopify
-                    </Button>
-                  ) : (
-                    <Button onClick={refreshSubscription}>Retry plan refresh</Button>
-                  )}
-                  <Button variant="secondary" onClick={() => changePlan("STARTER")}>
-                    Retry Starter checkout
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </Banner>
-          ) : null}
-        </Layout.Section>
-        <Layout.Section>
-          <Banner title="Current subscription" tone="success">
+          <Banner title="Current subscription" tone="info">
             <p>
-              Active plan: <strong>{sub?.planName ?? "TRIAL"}</strong> at $
-              {sub?.price ?? 0}/month.
-              {sub?.endsAt
-                ? ` Scheduled end: ${new Date(sub.endsAt).toLocaleDateString()}.`
+              Active plan: <strong>{current.planName}</strong> at ${current.price}/month.
+              {current.starterModule
+                ? ` Starter module: ${starterLabel(current.starterModule)}.`
                 : ""}
             </p>
           </Banner>
@@ -345,121 +173,42 @@ export function SubscriptionPage() {
           <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Best fit
-                </Text>
-                <Text as="p">{planFit}</Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Enabled modules
-                </Text>
-                <Text as="p">
-                  {
-                    [
-                      sub?.enabledModules.fraud,
-                      sub?.enabledModules.competitor,
-                      sub?.enabledModules.pricing,
-                      sub?.enabledModules.creditScore,
-                      sub?.enabledModules.profitOptimization,
-                    ].filter(Boolean).length
-                  }
-                </Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Upgrade reason
-                </Text>
+                <Text as="h3" variant="headingMd">Visible modules</Text>
+                <Text as="p" variant="headingLg">{enabledModuleCount}</Text>
                 <Text as="p" tone="subdued">
-                  {sub?.planName === "TRIAL"
-                    ? "Unlock durable workflows and live module access."
-                    : sub?.planName === "STARTER"
-                    ? "Expand beyond one core module into weekly reporting and multi-signal decisions."
-                    : sub?.planName === "GROWTH"
-                    ? "Add pricing, shopper credit, and profit intelligence."
-                    : "You already have the full suite."}
+                  Settings and Reports stay available across every plan.
+                </Text>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">Starter chooser</Text>
+                <Text as="p" tone="subdued">
+                  Starter merchants activate exactly one core module.
+                </Text>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">Premium features</Text>
+                <Text as="p" tone="subdued">
+                  Pro unlocks full profit automation, evidence exports, and the strongest decision support.
                 </Text>
               </BlockStack>
             </Card>
           </InlineGrid>
         </Layout.Section>
         <Layout.Section>
-          <InlineStack gap="300">
-            {sub?.planName === "STARTER" ? (
-              <Button
-                onClick={updateStarterSelection}
-                disabled={busyAction === "starter-module"}
-              >
-                {busyAction === "starter-module"
-                  ? "Updating Starter..."
-                  : "Apply Starter module choice"}
-              </Button>
-            ) : null}
-            {sub?.planName !== "TRIAL" ? (
-              <Button
-                tone="critical"
-                onClick={cancelPlan}
-                disabled={busyAction === "cancel"}
-              >
-                {busyAction === "cancel" ? "Cancelling..." : "Cancel subscription"}
-              </Button>
-            ) : null}
-            {sub?.planName !== "TRIAL" ? (
-              <Button
-                onClick={downgradeToTrial}
-                disabled={busyAction === "trial"}
-              >
-                {busyAction === "trial" ? "Downgrading..." : "Downgrade to Trial"}
-              </Button>
-            ) : null}
-          </InlineStack>
-        </Layout.Section>
-        <Layout.Section>
           <Card>
             <BlockStack gap="300">
-              <Text as="h3" variant="headingMd">
-                Plan coverage
-              </Text>
-              {sub?.planName === "STARTER" && sub.starterModule ? (
-                <Text as="p" tone="subdued">
-                  Starter is currently configured for the{" "}
-                  <strong>{sub.starterModule}</strong> module.
-                </Text>
-              ) : null}
+              <Text as="h3" variant="headingMd">Plan coverage</Text>
               <InlineGrid columns={{ xs: 1, md: 5 }} gap="300">
-                {[
-                  {
-                    label: "Fraud",
-                    enabled: sub?.enabledModules.fraud ?? true,
-                  },
-                  {
-                    label: "Competitor",
-                    enabled: sub?.enabledModules.competitor ?? true,
-                  },
-                  {
-                    label: "Pricing",
-                    enabled: sub?.enabledModules.pricing ?? false,
-                  },
-                  {
-                    label: "Credit score",
-                    enabled: sub?.enabledModules.creditScore ?? false,
-                  },
-                  {
-                    label: "Profit engine",
-                    enabled: sub?.enabledModules.profitOptimization ?? false,
-                  },
-                ].map((item) => (
-                  <div key={item.label} className="vs-signal-stat">
+                {coverageItems.map(({ label, enabled }) => (
+                  <div key={label} className="vs-signal-stat">
                     <BlockStack gap="100">
-                      <Text as="p" variant="bodyMd">
-                        {item.label}
-                      </Text>
-                      <Badge tone={item.enabled ? "success" : "attention"}>
-                        {item.enabled ? "Included" : "Locked"}
+                      <Text as="p">{label}</Text>
+                      <Badge tone={enabled ? "success" : "attention"}>
+                        {enabled ? "Included" : "Locked"}
                       </Badge>
                     </BlockStack>
                   </div>
@@ -472,83 +221,81 @@ export function SubscriptionPage() {
           <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
             <Card>
               <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">
-                    Trial
-                  </Text>
+                <InlineStack align="space-between">
+                  <Text as="h3" variant="headingMd">Trial</Text>
                   <Badge tone="info">3 days</Badge>
                 </InlineStack>
                 <Text as="p">
-                  Full-suite preview with limited usage so merchants can validate
-                  the product before committing.
+                  Full access to all three visible product modules for onboarding and evaluation.
                 </Text>
-                <Text as="p" tone="subdued">
-                  Best for onboarding and first-time evaluation.
-                </Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">
-                    Starter
-                  </Text>
-                  <Badge tone="warning">$19/month</Badge>
-                </InlineStack>
-                <Text as="p">
-                  Choose one core module: Fraud Intelligence or Competitor
-                  Intelligence.
-                </Text>
-                <Text as="p" tone="subdued">
-                  Basic alerts and lighter operating controls for lean teams.
-                </Text>
-                <BlockStack gap="200">
-                  <RadioButton
-                    label="Starter with Fraud Intelligence"
-                    checked={starterModule === "fraud"}
-                    id="starter-fraud"
-                    name="starter-module"
-                    onChange={() => setStarterModule("fraud")}
-                  />
-                  <RadioButton
-                    label="Starter with Competitor Intelligence"
-                    checked={starterModule === "competitor"}
-                    id="starter-competitor"
-                    name="starter-module"
-                    onChange={() => setStarterModule("competitor")}
-                  />
-                </BlockStack>
                 <Button
-                  variant="primary"
-                  disabled={busyAction === "STARTER"}
-                  onClick={() => changePlan("STARTER")}
+                  disabled={busyAction === "TRIAL" || current.planName === "TRIAL"}
+                  onClick={changeToTrial}
                 >
-                  {sub?.planName === "STARTER" ? "Update Starter selection" : "Switch to Starter"}
+                  {current.planName === "TRIAL" ? "Current Trial plan" : "Return to Trial"}
                 </Button>
               </BlockStack>
             </Card>
             <Card>
               <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">
-                    Growth
-                  </Text>
+                <InlineStack align="space-between">
+                  <Text as="h3" variant="headingMd">Starter</Text>
+                  <Badge tone="warning">$19/month</Badge>
+                </InlineStack>
+                <Text as="p">
+                  Activate exactly one core module: Trust & Abuse or Competitor Intelligence.
+                </Text>
+                <RadioButton
+                  label="Trust & Abuse Intelligence"
+                  id="starter-trust-abuse"
+                  name="starter-module"
+                  checked={starterModule === "trustAbuse"}
+                  onChange={() => setStarterModule("trustAbuse")}
+                />
+                <RadioButton
+                  label="Competitor Intelligence"
+                  id="starter-competitor"
+                  name="starter-module"
+                  checked={starterModule === "competitor"}
+                  onChange={() => setStarterModule("competitor")}
+                />
+                <InlineStack gap="300">
+                  <Button
+                    variant="primary"
+                    disabled={busyAction === "STARTER"}
+                    onClick={() => changePlan("STARTER")}
+                  >
+                    {current.planName === "STARTER" ? "Restart Starter checkout" : "Switch to Starter"}
+                  </Button>
+                  {current.planName === "STARTER" ? (
+                    <Button
+                      disabled={busyAction === "starter-module"}
+                      onClick={updateStarterSelection}
+                    >
+                      Apply Starter choice
+                    </Button>
+                  ) : null}
+                </InlineStack>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between">
+                  <Text as="h3" variant="headingMd">Growth</Text>
                   <Badge tone="success">$49/month</Badge>
                 </InlineStack>
                 <Text as="p">
-                  Fraud scoring, competitor alerts, and weekly intelligence
-                  reporting in one plan.
+                  Includes Trust & Abuse, Competitor Intelligence, and the basic Pricing & Profit Engine.
                 </Text>
                 <Text as="p" tone="subdued">
-                  Best fit for merchants actively responding to market movement.
+                  Full profit automation remains reserved for Pro.
                 </Text>
                 <Button
                   variant="primary"
-                  disabled={sub?.planName === "GROWTH"}
-                  loading={busyAction === "GROWTH"}
+                  disabled={busyAction === "GROWTH" || current.planName === "GROWTH"}
                   onClick={() => changePlan("GROWTH")}
                 >
-                  {sub?.planName === "GROWTH" ? "Current Growth plan" : "Switch to Growth"}
+                  {current.planName === "GROWTH" ? "Current Growth plan" : "Switch to Growth"}
                 </Button>
               </BlockStack>
             </Card>
@@ -557,62 +304,23 @@ export function SubscriptionPage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingMd">
-                  Pro
-                </Text>
+              <InlineStack align="space-between">
+                <Text as="h3" variant="headingMd">Pro</Text>
                 <Badge tone="attention">$99/month</Badge>
               </InlineStack>
               <Text as="p">
-                Includes AI Pricing Strategy, Shopper Credit Score, Wardrobing
-                Detection AI, and AI Profit Optimization Engine.
+                Full Trust & Abuse Intelligence, Competitor Intelligence, and the complete Pricing & Profit Engine.
               </Text>
               <Text as="p" tone="subdued">
-                Unlocks the full AI commerce intelligence suite and advanced margin tooling.
+                Unlocks advanced automation, full profit leak detection, support copilot, and evidence packs.
               </Text>
               <Button
                 variant="primary"
-                disabled={sub?.planName === "PRO"}
-                loading={busyAction === "PRO"}
+                disabled={busyAction === "PRO" || current.planName === "PRO"}
                 onClick={() => changePlan("PRO")}
               >
-                {sub?.planName === "PRO" ? "Current Pro plan" : "Switch to Pro"}
+                {current.planName === "PRO" ? "Current Pro plan" : "Switch to Pro"}
               </Button>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingMd">
-                Decision guide
-              </Text>
-              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Starter
-                  </Text>
-                  <Text as="p">
-                    Best for lean teams choosing either fraud or competitor response first.
-                  </Text>
-                </div>
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Growth
-                  </Text>
-                  <Text as="p">
-                    Best for stores that need active intelligence reporting and coordinated operator workflows.
-                  </Text>
-                </div>
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Pro
-                  </Text>
-                  <Text as="p">
-                    Best for merchants optimizing pricing, customer trust, and margin in one operating system.
-                  </Text>
-                </div>
-              </InlineGrid>
             </BlockStack>
           </Card>
         </Layout.Section>

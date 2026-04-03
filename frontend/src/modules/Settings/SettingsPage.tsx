@@ -27,7 +27,7 @@ type Settings = {
   sharedFraudNetwork: boolean;
   pricingBias: number;
   profitGuardrail: number;
-  competitorDomains: { id: string; domain: string; label?: string | null }[];
+  competitorDomains: { id?: string; domain: string; label?: string | null }[];
 };
 
 const fallbackSettings: Settings = {
@@ -43,19 +43,18 @@ export function SettingsPage() {
   const { subscription } = useSubscriptionPlan();
   const [settings, setSettings] = useState<Settings>(fallbackSettings);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [hasLiveSettings, setHasLiveSettings] = useState(false);
   const [serviceOffline, setServiceOffline] = useState(false);
-  const [domainsInput, setDomainsInput] = useState(
-    fallbackSettings.competitorDomains.map((domain) => domain.domain).join(", ")
-  );
+  const [domainsInput, setDomainsInput] = useState("");
   const [selectedTab, setSelectedTab] = useState(0);
-  const [pricingBias, setPricingBias] = useState(55);
-  const [profitGuardrail, setProfitGuardrail] = useState(18);
+  const [pricingBias, setPricingBias] = useState(fallbackSettings.pricingBias);
+  const [profitGuardrail, setProfitGuardrail] = useState(fallbackSettings.profitGuardrail);
   const [toast, setToast] = useState<string | null>(null);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
-  const pricingEnabled = !!subscription?.enabledModules.pricing;
-  const profitEnabled = !!subscription?.enabledModules.profitOptimization;
+
+  const pricingProfitEnabled = !!subscription?.enabledModules.pricingProfit;
+  const fullProfitEngineEnabled = !!subscription?.featureAccess.fullProfitEngine;
   const competitorEnabled = !!subscription?.enabledModules.competitor;
   const connectedDomains = domainsInput
     .split(",")
@@ -68,39 +67,29 @@ export function SettingsPage() {
       : pricingBias <= 35
       ? "Growth-first"
       : "Balanced";
-  const fraudAutomationPosture =
-    settings?.sharedFraudNetwork && settings.fraudSensitivity === "high"
-      ? "Review-first automation is ready for repeated fraud patterns."
-      : settings?.sharedFraudNetwork
-      ? "Shared network is collecting evidence for stronger fraud rules."
-      : "Fraud automation is local-only until shared network is enabled.";
-  const pricingAutomationPosture = pricingEnabled
-    ? pricingBias >= 70
-      ? "Pricing automation should stay approval-led and margin-protective."
-      : pricingBias <= 35
-      ? "Pricing automation can be more responsive, but still needs merchant guardrails."
-      : "Balanced pricing posture is best for controlled approval-led automation."
-    : "Unlock pricing strategy to enable pricing automations.";
 
   useEffect(() => {
     let mounted = true;
-
     setSyncing(true);
-    embeddedShopRequest<{ settings: Settings }>("/api/settings", { timeoutMs: 12000 })
+
+    embeddedShopRequest<{ settings: Settings }>("/api/settings", {
+      timeoutMs: 30000,
+    })
       .then((res) => {
         if (!mounted) return;
         setSettings(res.settings);
         setHasLiveSettings(true);
         setServiceOffline(false);
-        setPricingBias(res.settings.pricingBias ?? 55);
-        setProfitGuardrail(res.settings.profitGuardrail ?? 18);
+        setPricingBias(res.settings.pricingBias ?? fallbackSettings.pricingBias);
+        setProfitGuardrail(
+          res.settings.profitGuardrail ?? fallbackSettings.profitGuardrail
+        );
         setDomainsInput(
-          res.settings.competitorDomains.map((domain) => domain.domain).join(", ")
+          (res.settings.competitorDomains ?? []).map((domain) => domain.domain).join(", ")
         );
       })
       .catch(() => {
         if (!mounted) return;
-        setSettings((prev) => prev ?? fallbackSettings);
         setHasLiveSettings(false);
         setServiceOffline(true);
       })
@@ -115,11 +104,6 @@ export function SettingsPage() {
   }, []);
 
   const save = async () => {
-    if (competitorEnabled && connectedDomains === 0) {
-      setToast("Add at least one competitor domain before saving competitor tracking.");
-      return;
-    }
-
     const competitorDomains = domainsInput
       .split(",")
       .map((domain) => domain.trim())
@@ -128,6 +112,7 @@ export function SettingsPage() {
 
     try {
       setLoading(true);
+      setSaveBanner(null);
       const payload = {
         fraudSensitivity: settings.fraudSensitivity,
         sharedFraudNetwork: settings.sharedFraudNetwork,
@@ -138,20 +123,45 @@ export function SettingsPage() {
       const response = await embeddedShopRequest<{ settings: Settings }>("/api/settings", {
         method: "POST",
         body: { settings: payload },
-        timeoutMs: 15000,
+        timeoutMs: 30000,
       });
+
       setSettings(response.settings);
       setHasLiveSettings(true);
       setServiceOffline(false);
+      setDomainsInput(
+        (response.settings.competitorDomains ?? []).map((domain) => domain.domain).join(", ")
+      );
       setToast("Settings saved.");
       setSaveBanner("Merchant settings updated successfully.");
     } catch {
       setServiceOffline(true);
-      setToast("Unable to save settings right now. Your current changes are still kept on this screen.");
+      setToast("Unable to save settings right now. Your current changes are still visible on this screen.");
     } finally {
       setLoading(false);
     }
   };
+
+  const fraudAutomationPosture =
+    settings.sharedFraudNetwork && settings.fraudSensitivity === "high"
+      ? "Review-first automation is ready for repeated fraud patterns."
+      : settings.sharedFraudNetwork
+      ? "Shared network is collecting evidence for stronger fraud rules."
+      : "Fraud automation is local-only until shared network is enabled.";
+
+  const pricingAutomationPosture = pricingProfitEnabled
+    ? pricingBias >= 70
+      ? "Pricing automation should stay approval-led and margin-protective."
+      : pricingBias <= 35
+      ? "Pricing automation can be more responsive, but still needs merchant guardrails."
+      : "Balanced pricing posture is best for controlled approval-led automation."
+    : "Pricing & Profit is not active on this plan, so AI pricing controls stay view-only.";
+  const activePlanLabel = subscription?.planName ?? "TRIAL";
+  const settingsSourceLabel = hasLiveSettings
+    ? "Live merchant settings"
+    : serviceOffline
+    ? "Fallback profile"
+    : "Ready-to-edit defaults";
 
   return (
     <Page
@@ -162,20 +172,16 @@ export function SettingsPage() {
         <Layout.Section>
           <Banner title="Merchant controls" tone="info">
             <p>
-              These controls help merchants adapt VedaSuite to store risk,
-              category behavior, and profitability goals.
+              Settings stay available on every plan. The controls shown here adapt to the modules
+              currently enabled for the store.
             </p>
           </Banner>
         </Layout.Section>
         {syncing ? (
           <Layout.Section>
-            <Banner
-              title="Refreshing merchant controls"
-              tone="info"
-            >
+            <Banner title="Refreshing merchant controls" tone="info">
               <p>
-                VedaSuite is syncing the latest merchant settings in the background.
-                You can review and adjust controls immediately while live values load.
+                VedaSuite is syncing saved merchant preferences in the background. The page stays usable while live values load.
               </p>
             </Banner>
           </Layout.Section>
@@ -185,58 +191,58 @@ export function SettingsPage() {
             <Banner
               title="Using ready-to-edit default controls"
               tone="warning"
-              action={{
-                content: "Refresh settings",
-                onAction: () => window.location.reload(),
-              }}
+              action={{ content: "Refresh settings", onAction: () => window.location.reload() }}
             >
               <p>
-                Live merchant settings could not be loaded right now, so VedaSuite
-                is using a safe default operating profile. You can still review and
-                adjust controls from this page.
+                Live merchant settings could not be loaded right now, so this page is using a safe fallback profile.
+                You can still review settings structure and retry saving once the service reconnects.
               </p>
             </Banner>
           </Layout.Section>
         ) : null}
         {saveBanner ? (
           <Layout.Section>
-            <Banner
-              title="Settings saved"
-              tone="success"
-              onDismiss={() => setSaveBanner(null)}
-            >
+            <Banner title="Settings saved" tone="success" onDismiss={() => setSaveBanner(null)}>
               <p>{saveBanner}</p>
             </Banner>
           </Layout.Section>
         ) : null}
+
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+          <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">
             <Card>
               <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">
-                    Active plan
-                  </Text>
-                  <Badge tone="success">{subscription?.planName ?? "TRIAL"}</Badge>
+                  <Text as="h3" variant="headingMd">Active plan</Text>
+                  <Badge tone="success">{activePlanLabel}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  Settings adapt to the modules enabled on the current subscription.
+                  Settings remain available on every plan and adapt to active modules.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Operating profile: {operatingProfile}
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Source: {hasLiveSettings ? "Live merchant settings" : "Default fallback profile"}
+                  Source: {settingsSourceLabel}
                 </Text>
               </BlockStack>
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Pricing controls
+                <Text as="h3" variant="headingMd">Competitor controls</Text>
+                <Badge tone={competitorEnabled ? "success" : "info"}>
+                  {competitorEnabled ? "Enabled" : "Visible but inactive"}
+                </Badge>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Tracked domains: {connectedDomains}
                 </Text>
-                <Badge tone={pricingEnabled ? "success" : "attention"}>
-                  {pricingEnabled ? "Enabled" : "Upgrade needed"}
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">Pricing controls</Text>
+                <Badge tone={pricingProfitEnabled ? "success" : "info"}>
+                  {pricingProfitEnabled ? "Enabled" : "Visible but inactive"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Bias: {pricingBias}/100
@@ -245,54 +251,33 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Profit controls
-                </Text>
-                <Badge tone={profitEnabled ? "success" : "attention"}>
-                  {profitEnabled ? "Enabled" : "Upgrade needed"}
+                <Text as="h3" variant="headingMd">Profit controls</Text>
+                <Badge tone={fullProfitEngineEnabled ? "success" : "attention"}>
+                  {fullProfitEngineEnabled ? "Enabled" : "Pro-only active"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Guardrail: {profitGuardrail}%
                 </Text>
               </BlockStack>
             </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Automation posture
-                </Text>
-                <Badge tone="info">Hardening</Badge>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {fraudAutomationPosture}
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {pricingAutomationPosture}
-                </Text>
-              </BlockStack>
-            </Card>
           </InlineGrid>
         </Layout.Section>
+
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Risk operations preset
-                </Text>
+                <Text as="h3" variant="headingMd">Risk operations preset</Text>
                 <Text as="p" tone="subdued">
                   Higher fraud sensitivity with shared network enabled for stores battling abuse.
                 </Text>
                 <Button
                   onClick={() =>
-                    setSettings((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            fraudSensitivity: "high",
-                            sharedFraudNetwork: true,
-                          }
-                        : prev
-                    )
+                    setSettings((prev) => ({
+                      ...prev,
+                      fraudSensitivity: "high",
+                      sharedFraudNetwork: true,
+                    }))
                   }
                 >
                   Apply risk preset
@@ -301,9 +286,7 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Balanced growth preset
-                </Text>
+                <Text as="h3" variant="headingMd">Balanced growth preset</Text>
                 <Text as="p" tone="subdued">
                   Balanced pricing bias with moderate guardrails for steady expansion.
                 </Text>
@@ -319,9 +302,7 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Margin protection preset
-                </Text>
+                <Text as="h3" variant="headingMd">Margin protection preset</Text>
                 <Text as="p" tone="subdued">
                   Push the AI stack toward profit protection and tighter decision thresholds.
                 </Text>
@@ -337,13 +318,14 @@ export function SettingsPage() {
             </Card>
           </InlineGrid>
         </Layout.Section>
+
         <Layout.Section>
           <Card>
             <Tabs
               tabs={[
-                { id: "fraud", content: "Fraud" },
+                { id: "trust", content: "Trust & Abuse" },
                 { id: "competitors", content: "Competitors" },
-                { id: "ai", content: "AI preferences" },
+                { id: "pricingProfit", content: "Pricing & Profit" },
               ]}
               selected={selectedTab}
               onSelect={setSelectedTab}
@@ -358,35 +340,31 @@ export function SettingsPage() {
                         { label: "Medium", value: "medium" },
                         { label: "High", value: "high" },
                       ]}
-                      value={settings?.fraudSensitivity ?? "medium"}
+                      value={settings.fraudSensitivity}
                       onChange={(value) =>
-                        setSettings(
-                          (prev) =>
-                            prev && {
-                              ...prev,
-                              fraudSensitivity: value as Settings["fraudSensitivity"],
-                            }
-                        )
+                        setSettings((prev) => ({
+                          ...prev,
+                          fraudSensitivity: value as Settings["fraudSensitivity"],
+                        }))
                       }
                     />
                     <Checkbox
                       label="Join shared fraud intelligence network"
-                      checked={settings?.sharedFraudNetwork ?? false}
+                      checked={settings.sharedFraudNetwork}
                       onChange={(checked) =>
-                        setSettings(
-                          (prev) =>
-                            prev && { ...prev, sharedFraudNetwork: checked }
-                        )
+                        setSettings((prev) => ({ ...prev, sharedFraudNetwork: checked }))
                       }
                     />
+                    <Text as="p" tone="subdued">
+                      {fraudAutomationPosture}
+                    </Text>
                   </BlockStack>
                 ) : selectedTab === 1 ? (
                   <BlockStack gap="300">
                     {!competitorEnabled ? (
-                      <Banner title="Competitor controls are limited on this plan" tone="info">
+                      <Banner title="Competitor controls are visible but not active on this plan" tone="info">
                         <p>
-                          Upgrade to a plan with Competitor Intelligence to unlock
-                          richer tracking workflows and market alerts.
+                          You can prepare tracked domains now. Live competitor monitoring activates once a plan with Competitor Intelligence is active.
                         </p>
                       </Banner>
                     ) : null}
@@ -396,46 +374,17 @@ export function SettingsPage() {
                       onChange={setDomainsInput}
                       autoComplete="off"
                       multiline={4}
-                      disabled={!competitorEnabled}
                     />
                     <Text as="p" tone="subdued">
-                      Add domains separated by commas to monitor websites,
-                      promotions, and launch activity.
+                      Add domains separated by commas to monitor websites, promotions, and launch activity.
                     </Text>
-                    <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
-                      <div className="vs-signal-stat">
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Tracked domains
-                        </Text>
-                        <Text as="p" variant="headingLg">
-                          {connectedDomains}
-                        </Text>
-                      </div>
-                      <div className="vs-signal-stat">
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Coverage posture
-                        </Text>
-                        <Text as="p" variant="headingLg">
-                          {connectedDomains >= 3 ? "Broad" : connectedDomains >= 1 ? "Focused" : "None"}
-                        </Text>
-                      </div>
-                      <div className="vs-signal-stat">
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Readiness
-                        </Text>
-                        <Text as="p" variant="headingLg">
-                          {connectedDomains > 0 ? "Ready" : "Setup"}
-                        </Text>
-                      </div>
-                    </InlineGrid>
                   </BlockStack>
                 ) : (
                   <BlockStack gap="400">
-                    {!pricingEnabled || !profitEnabled ? (
-                      <Banner title="AI preference controls expand on higher plans" tone="warning">
+                    {!pricingProfitEnabled ? (
+                      <Banner title="Pricing & Profit controls are view-only on this plan" tone="warning">
                         <p>
-                          Pricing strategy preferences require Pricing Strategy access,
-                          and profit guardrails unlock fully on the Pro plan.
+                          This plan can still show the operating profile, but AI pricing changes and profit guardrails activate on Growth and above.
                         </p>
                       </Banner>
                     ) : null}
@@ -446,14 +395,10 @@ export function SettingsPage() {
                       max={100}
                       onChange={(value) => setPricingBias(Number(value))}
                       output
-                      disabled={!pricingEnabled}
+                      disabled={!pricingProfitEnabled}
                     />
                     <Text as="p" tone="subdued">
-                      {pricingBias >= 70
-                        ? "The AI will prioritize margin retention over aggressive competitive pricing."
-                        : pricingBias <= 35
-                        ? "The AI will lean toward faster price response to capture market momentum."
-                        : "The AI will balance conversion and margin protection."}
+                      {pricingAutomationPosture}
                     </Text>
                     <RangeSlider
                       label="Profit guardrail"
@@ -462,19 +407,17 @@ export function SettingsPage() {
                       max={40}
                       onChange={(value) => setProfitGuardrail(Number(value))}
                       output
-                      disabled={!profitEnabled}
+                      disabled={!fullProfitEngineEnabled}
                     />
                     <Text as="p" tone="subdued">
-                      {profitGuardrail >= 25
-                        ? "Only high-confidence profit moves will be surfaced."
-                        : profitGuardrail <= 12
-                        ? "The engine will surface more experimental opportunities."
-                        : "The engine will recommend only measured, merchant-friendly optimizations."}
+                      {fullProfitEngineEnabled
+                        ? "Advanced profit guardrails are active for this store."
+                        : "Full profit guardrails become active on Pro."}
                     </Text>
-                    {!pricingEnabled || !profitEnabled ? (
+                    {!pricingProfitEnabled || !fullProfitEngineEnabled ? (
                       <InlineStack>
                         <Button onClick={() => navigateEmbedded("/subscription")}>
-                          Upgrade plan
+                          Review plan access
                         </Button>
                       </InlineStack>
                     ) : null}
@@ -484,6 +427,7 @@ export function SettingsPage() {
             </Tabs>
           </Card>
         </Layout.Section>
+
         <Layout.Section>
           <Button variant="primary" onClick={save} loading={loading}>
             Save settings

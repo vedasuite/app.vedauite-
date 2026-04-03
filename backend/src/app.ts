@@ -12,17 +12,20 @@ import { getToken } from "./db/store";
 import { router } from "./routes";
 import { shopifyWebhookRouter } from "./routes/shopifyWebhookRoutes";
 import { ensureStoreBootstrapped } from "./services/bootstrapService";
+import { env } from "./config/env";
 
 const embeddedAppRoutes = [
   "/",
-  "/fraud",
+  "/trust-abuse",
   "/competitor",
-  "/pricing",
-  "/profit",
-  "/credit-score",
+  "/pricing-profit",
   "/reports",
   "/settings",
   "/subscription",
+  "/fraud",
+  "/pricing",
+  "/profit",
+  "/credit-score",
 ];
 
 export function createApp() {
@@ -161,7 +164,9 @@ export function createApp() {
         );
       }
 
-      await ensureStoreBootstrapped(shop);
+      if (env.enableDemoBootstrap) {
+        await ensureStoreBootstrapped(shop);
+      }
 
       return res.sendFile(frontendIndexPath);
     } catch (err) {

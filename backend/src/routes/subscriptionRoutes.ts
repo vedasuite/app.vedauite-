@@ -47,7 +47,7 @@ subscriptionRouter.post("/downgrade-to-trial", verifyShopifySessionToken, async 
 subscriptionRouter.post("/starter-module", verifyShopifySessionToken, async (req, res) => {
   const body = req.body as {
     shop?: string;
-    starterModule?: "fraud" | "competitor";
+    starterModule?: "trustAbuse" | "competitor";
   };
   const shop =
     body.shop ??

@@ -52,10 +52,10 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "fraud_order",
       title: `Review order ${highRiskOrder.shopifyOrderId}`,
-      module: "Fraud Intelligence",
+      module: "Trust & Abuse",
       severity: highRiskOrder.fraudScore >= 71 ? "High" : "Medium",
       rationale: `Fraud score is ${highRiskOrder.fraudScore} with status ${highRiskOrder.status}.`,
-      route: "/fraud?focus=high-risk",
+      route: "/trust-abuse?focus=high-risk",
       confidence: Math.max(52, Math.min(97, highRiskOrder.fraudScore)),
       recommendedAction:
         highRiskOrder.fraudScore >= 85 ? "Block or send to review" : "Manual review",
@@ -75,10 +75,10 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "trust_customer",
       title: `Check shopper trust for ${riskyCustomer.email ?? "customer"}`,
-      module: "Shopper Credit Score",
+      module: "Trust & Abuse",
       severity: riskyCustomer.creditScore < 50 ? "High" : "Medium",
       rationale: `Credit score is ${riskyCustomer.creditScore} with ${(riskyCustomer.refundRate * 100).toFixed(1)}% refund rate.`,
-      route: "/credit-score?focus=risky",
+      route: "/trust-abuse?focus=timeline",
       confidence: Math.max(
         48,
         Math.min(
@@ -133,11 +133,11 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "pricing_move",
       title: `Approve pricing on ${pricingMove.productHandle}`,
-      module: "AI Pricing Strategy",
+      module: "Pricing & Profit",
       severity:
         (pricingMove.expectedProfitGain ?? 0) >= 100 ? "High" : "Medium",
       rationale: `Recommended move from ${pricingMove.currentPrice.toFixed(2)} to ${pricingMove.recommendedPrice.toFixed(2)}.`,
-      route: "/pricing?focus=approvals",
+      route: "/pricing-profit?focus=pricing",
       confidence: Math.max(
         56,
         Math.min(
@@ -163,11 +163,11 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "profit_move",
       title: `Protect margin on ${profitMove.productHandle}`,
-      module: "AI Profit Optimization",
+      module: "Pricing & Profit",
       severity:
         (profitMove.projectedMonthlyProfit ?? 0) >= 1000 ? "High" : "Medium",
       rationale: `Projected monthly profit gain is $${(profitMove.projectedMonthlyProfit ?? 0).toFixed(2)}.`,
-      route: "/profit?focus=opportunities",
+      route: "/pricing-profit?focus=profit",
       confidence: Math.max(
         54,
         Math.min(

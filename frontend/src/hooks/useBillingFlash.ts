@@ -42,8 +42,15 @@ export function useBillingFlash() {
   const message = useMemo(() => {
     if (!flash) return null;
 
+    const starterLabel =
+      flash.starterModule === "trustAbuse"
+        ? "Trust & Abuse Intelligence"
+        : flash.starterModule === "competitor"
+        ? "Competitor Intelligence"
+        : flash.starterModule;
+
     return flash.starterModule
-      ? `Billing activated: ${flash.plan} plan is live with ${flash.starterModule} as the Starter module.`
+      ? `Billing activated: ${flash.plan} plan is live with ${starterLabel} as the Starter module.`
       : `Billing activated: ${flash.plan} plan is now live for your store.`;
   }, [flash]);
 

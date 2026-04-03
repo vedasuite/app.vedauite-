@@ -350,7 +350,7 @@ export function FraudPage() {
                         </Text>
                         <InlineStack gap="300">
                           {focus ? (
-                            <Button onClick={() => navigateEmbedded("/fraud")}>
+                            <Button onClick={() => navigateEmbedded("/trust-abuse")}>
                               Show full review queue
                             </Button>
                           ) : null}

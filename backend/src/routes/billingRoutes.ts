@@ -35,7 +35,7 @@ function buildBillingReturnUrl(params: {
   shop: string;
   host?: string;
   planName: string;
-  starterModule?: "fraud" | "competitor";
+  starterModule?: "trustAbuse" | "competitor";
 }) {
   const returnUrl = new URL(`${env.shopifyAppUrl}/billing/activate`);
   returnUrl.searchParams.set("shop", params.shop);
@@ -75,7 +75,7 @@ async function createBillingRedirect(params: {
   shop: string;
   host?: string;
   planName: string;
-  starterModule?: "fraud" | "competitor";
+  starterModule?: "trustAbuse" | "competitor";
 }): Promise<string> {
   const store = await prisma.store.findUnique({
     where: { shop: params.shop },
@@ -116,7 +116,7 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
     shop: string;
     host?: string;
     planName: string;
-    starterModule?: "fraud" | "competitor";
+    starterModule?: "trustAbuse" | "competitor";
   };
 
   if (!shop || !planName) {
@@ -165,7 +165,7 @@ billingRouter.get("/start", async (req, res) => {
     shop?: string;
     host?: string;
     planName?: string;
-    starterModule?: "fraud" | "competitor";
+    starterModule?: "trustAbuse" | "competitor";
   };
 
   if (!shop || !planName) {

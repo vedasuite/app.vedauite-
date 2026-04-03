@@ -11,10 +11,13 @@ async function assertProPlan(shopDomain: string) {
 
   if (!store) throw new Error("Store not found");
 
-  if (
-    subscription.planName !== "PRO" ||
-    !subscription.enabledModules.profitOptimization
-  ) {
+  const hasFullProfitAccess =
+    subscription.planName === "TRIAL" ||
+    (subscription.planName === "PRO" &&
+      subscription.enabledModules.pricingProfit &&
+      subscription.featureAccess.fullProfitEngine);
+
+  if (!hasFullProfitAccess) {
     throw new Error("AI Profit Optimization Engine is available only on PRO.");
   }
 

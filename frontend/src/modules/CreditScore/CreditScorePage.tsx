@@ -282,8 +282,8 @@ export function CreditScorePage() {
                     </div>
                   </InlineGrid>
                   <InlineStack gap="300">
-                    <Button onClick={() => navigateEmbedded("/fraud")}>
-                      Open fraud intelligence
+                    <Button onClick={() => navigateEmbedded("/trust-abuse")}>
+                      Open trust & abuse
                     </Button>
                     <Button onClick={() => navigateEmbedded("/reports")}>
                       Open reports
@@ -567,7 +567,7 @@ export function CreditScorePage() {
               </BlockStack>
               <InlineStack gap="300">
                 <Button
-                  onClick={() => navigateEmbedded("/fraud?focus=return-abuse")}
+                  onClick={() => navigateEmbedded("/trust-abuse?focus=return-abuse")}
                 >
                   Review fraud signals
                 </Button>

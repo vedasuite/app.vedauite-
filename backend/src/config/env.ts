@@ -36,6 +36,9 @@ export const env = {
       (process.env.SHOPIFY_BILLING_TEST_MODE || "true").toLowerCase() !==
       "false",
   },
+  enableDemoBootstrap:
+    (process.env.VEDASUITE_ENABLE_DEMO_BOOTSTRAP || "false").toLowerCase() ===
+    "true",
 };
 
 if (!env.shopifyApiKey || !env.shopifyApiSecret || !env.shopifyAppUrl) {

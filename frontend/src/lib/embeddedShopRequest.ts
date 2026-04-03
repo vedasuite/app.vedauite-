@@ -1,7 +1,7 @@
 import { withRequestTimeout } from "./requestTimeout";
 
 type EmbeddedRequestOptions = {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   body?: Record<string, unknown>;
   timeoutMs?: number;
 };

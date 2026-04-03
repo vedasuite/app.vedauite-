@@ -16,10 +16,12 @@ export async function getSettings(shopDomain: string) {
   if (!store) throw new Error("Store not found");
 
   return {
-    fraudSensitivity: store.fraudSensitivity,
-    sharedFraudNetwork: store.sharedFraudNetwork,
-    pricingBias: store.pricingBias,
-    profitGuardrail: store.profitGuardrail,
+    fraudSensitivity:
+      (store.fraudSensitivity as "low" | "medium" | "high" | null) ?? "medium",
+    sharedFraudNetwork: store.sharedFraudNetwork ?? false,
+    pricingBias: typeof store.pricingBias === "number" ? store.pricingBias : 55,
+    profitGuardrail:
+      typeof store.profitGuardrail === "number" ? store.profitGuardrail : 18,
     competitorDomains: store.competitorDomains,
   };
 }
