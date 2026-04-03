@@ -287,10 +287,7 @@ export function DashboardPage() {
     { id: "signals", content: "Signals" },
     { id: "actions", content: "Action plan" },
   ];
-  const reportsEnabled =
-    subscription?.planName === "TRIAL" ||
-    subscription?.planName === "GROWTH" ||
-    subscription?.planName === "PRO";
+  const reportsEnabled = !!subscription?.capabilities["reports.view"];
 
   const onboardingChecklist = useMemo(
     () => [

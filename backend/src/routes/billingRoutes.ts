@@ -1,4 +1,11 @@
 import { Router, type Response } from "express";
+import {
+  getPlanPrice,
+  normalizePlanName,
+  normalizeStarterModule,
+  type BillingPlanName,
+  type StarterModule,
+} from "../billing/capabilities";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
@@ -50,7 +57,7 @@ function buildBillingReturnUrl(params: {
   return returnUrl;
 }
 
-async function resolvePlanRecord(planName: string) {
+async function resolvePlanRecord(planName: BillingPlanName) {
   return (
     (await prisma.subscriptionPlan.findFirst({
       where: { name: planName },
@@ -58,12 +65,7 @@ async function resolvePlanRecord(planName: string) {
     (await prisma.subscriptionPlan.create({
       data: {
         name: planName,
-        price:
-          planName === "STARTER"
-            ? env.billing.starterPrice
-            : planName === "GROWTH"
-            ? env.billing.growthPrice
-            : env.billing.proPrice,
+        price: getPlanPrice(planName),
         trialDays: env.billing.trialDays,
         features: JSON.stringify({ planName }),
       },
@@ -74,8 +76,8 @@ async function resolvePlanRecord(planName: string) {
 async function createBillingRedirect(params: {
   shop: string;
   host?: string;
-  planName: string;
-  starterModule?: "trustAbuse" | "competitor";
+  planName: BillingPlanName;
+  starterModule?: StarterModule;
 }): Promise<string> {
   const store = await prisma.store.findUnique({
     where: { shop: params.shop },
@@ -116,14 +118,19 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
     shop: string;
     host?: string;
     planName: string;
-    starterModule?: "trustAbuse" | "competitor";
+    starterModule?: StarterModule;
   };
 
   if (!shop || !planName) {
     return res.status(400).json({ error: "Missing shop or planName" });
   }
 
-  if (planName === "STARTER" && !starterModule) {
+  const normalizedPlanName = normalizePlanName(planName);
+  if (!normalizedPlanName || normalizedPlanName === "TRIAL" || normalizedPlanName === "NONE") {
+    return res.status(400).json({ error: "Unsupported billing plan." });
+  }
+
+  if (normalizedPlanName === "STARTER" && !starterModule) {
     return res
       .status(400)
       .json({ error: "Starter plan requires a starterModule selection." });
@@ -133,8 +140,8 @@ billingRouter.post("/create-recurring", verifyShopifySessionToken, async (req, r
     const confirmationUrl = await createBillingRedirect({
       shop,
       host,
-      planName,
-      starterModule,
+      planName: normalizedPlanName,
+      starterModule: normalizeStarterModule(starterModule) ?? undefined,
     });
 
     return res.json({
@@ -165,14 +172,19 @@ billingRouter.get("/start", async (req, res) => {
     shop?: string;
     host?: string;
     planName?: string;
-    starterModule?: "trustAbuse" | "competitor";
+    starterModule?: StarterModule;
   };
 
   if (!shop || !planName) {
     return res.status(400).send("Missing shop or planName.");
   }
 
-  if (planName === "STARTER" && !starterModule) {
+  const normalizedPlanName = normalizePlanName(planName);
+  if (!normalizedPlanName || normalizedPlanName === "TRIAL" || normalizedPlanName === "NONE") {
+    return res.status(400).send("Unsupported billing plan.");
+  }
+
+  if (normalizedPlanName === "STARTER" && !starterModule) {
     return res.status(400).send("Starter plan requires a starterModule selection.");
   }
 
@@ -180,8 +192,8 @@ billingRouter.get("/start", async (req, res) => {
     const confirmationUrl = await createBillingRedirect({
       shop,
       host,
-      planName,
-      starterModule,
+      planName: normalizedPlanName,
+      starterModule: normalizeStarterModule(starterModule) ?? undefined,
     });
 
     return res.redirect(confirmationUrl);
@@ -212,8 +224,13 @@ billingRouter.get("/activate", async (req, res) => {
     return res.status(404).send("Store not found.");
   }
 
+  const normalizedPlan = normalizePlanName(String(plan));
+  if (!normalizedPlan || normalizedPlan === "TRIAL" || normalizedPlan === "NONE") {
+    return res.status(400).send("Unsupported billing plan.");
+  }
+
   const planRecord = await prisma.subscriptionPlan.findFirst({
-    where: { name: String(plan) },
+    where: { name: normalizedPlan },
   });
   if (!planRecord) {
     return res.status(404).send("Plan not found.");
@@ -232,17 +249,30 @@ billingRouter.get("/activate", async (req, res) => {
     where: { storeId: store.id },
     update: {
       planId: planRecord.id,
-      starterModule: typeof starterModule === "string" ? starterModule : null,
+      starterModule:
+        typeof starterModule === "string"
+          ? normalizeStarterModule(starterModule)
+          : null,
       shopifyChargeId: activeSubscription.id,
       active: true,
+      billingStatus: activeSubscription.status?.toUpperCase() ?? "ACTIVE",
+      planActivatedAt: new Date(),
+      cancelledAt: null,
+      lastBillingSyncAt: new Date(),
       endsAt: currentPeriodEnd,
     },
     create: {
       storeId: store.id,
       planId: planRecord.id,
-      starterModule: typeof starterModule === "string" ? starterModule : null,
+      starterModule:
+        typeof starterModule === "string"
+          ? normalizeStarterModule(starterModule)
+          : null,
       shopifyChargeId: activeSubscription.id,
       active: true,
+      billingStatus: activeSubscription.status?.toUpperCase() ?? "ACTIVE",
+      planActivatedAt: new Date(),
+      lastBillingSyncAt: new Date(),
       endsAt: currentPeriodEnd,
     },
   });
@@ -250,7 +280,7 @@ billingRouter.get("/activate", async (req, res) => {
   const redirectUrl = new URL(`${env.shopifyAppUrl}/subscription`);
   redirectUrl.searchParams.set("shop", String(shop));
   redirectUrl.searchParams.set("billing", "activated");
-  redirectUrl.searchParams.set("plan", String(plan));
+  redirectUrl.searchParams.set("plan", normalizedPlan);
   if (typeof host === "string" && host) {
     redirectUrl.searchParams.set("host", host);
   }

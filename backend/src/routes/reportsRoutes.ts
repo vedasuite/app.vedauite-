@@ -1,9 +1,10 @@
 import { Router } from "express";
+import { requireCapability } from "../middleware/requireCapability";
 import { getWeeklyReport } from "../services/reportsService";
 
 export const reportsRouter = Router();
 
-reportsRouter.get("/weekly", async (req, res) => {
+reportsRouter.get("/weekly", requireCapability("reports.view"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });
@@ -13,7 +14,7 @@ reportsRouter.get("/weekly", async (req, res) => {
   return res.json({ report });
 });
 
-reportsRouter.get("/weekly/export", async (req, res) => {
+reportsRouter.get("/weekly/export", requireCapability("reports.export"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });

@@ -12,6 +12,9 @@ model Store {
   shop        String @unique
   accessToken String
 
+  trialStartedAt DateTime?
+  trialEndsAt    DateTime?
+
   fraudSensitivity   String  @default("medium")
   sharedFraudNetwork Boolean @default(false)
   pricingBias        Int     @default(55)
@@ -26,6 +29,7 @@ model Store {
   competitorData    CompetitorData[]
   priceHistory      PriceHistory[]
   profitData        ProfitOptimizationData[]
+  billingAuditLogs  BillingAuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -52,8 +56,31 @@ model StoreSubscription {
   starterModule   String?
   shopifyChargeId String? // link to Shopify Billing
   active          Boolean          @default(true)
+  billingStatus   String           @default("ACTIVE")
   startedAt       DateTime         @default(now())
+  planActivatedAt DateTime         @default(now())
+  cancelledAt     DateTime?
   endsAt          DateTime?
+  lastBillingSyncAt DateTime?
+  moduleSwitchedAt  DateTime?
+
+  auditLogs BillingAuditLog[]
+}
+
+model BillingAuditLog {
+  id                  String             @id @default(cuid())
+  store               Store              @relation(fields: [storeId], references: [id])
+  storeId             String
+  subscription        StoreSubscription? @relation(fields: [subscriptionId], references: [id])
+  subscriptionId      String?
+  eventType           String
+  previousPlanName    String?
+  nextPlanName        String?
+  previousStarterModule String?
+  nextStarterModule   String?
+  billingStatus       String?
+  metadataJson        String?
+  createdAt           DateTime           @default(now())
 }
 
 model Customer {

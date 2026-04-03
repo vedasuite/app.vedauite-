@@ -35,8 +35,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
       price: 0,
       trialDays: 3,
       starterModule: null,
-      active: false,
+      active: true,
       endsAt: null,
+      trialStartedAt: null,
+      trialEndsAt: null,
+      status: "trial_active",
+      billingStatus: null,
+      starterModuleSwitchAvailableAt: null,
       enabledModules: {
         trustAbuse: true,
         competitor: true,
@@ -58,12 +63,51 @@ export async function getPricingProfitOverview(shopDomain: string) {
         competitorStrategyDetection: true,
         weeklyCompetitorReports: true,
         pricingRecommendations: true,
+        explainableRecommendations: true,
         scenarioSimulator: true,
         profitLeakDetector: true,
         marginAtRisk: true,
         dailyActionBoard: true,
         advancedAutomation: true,
         fullProfitEngine: true,
+      },
+      capabilities: {
+        "module.trustAbuse": true,
+        "module.competitorIntel": true,
+        "module.pricingProfit": true,
+        "reports.view": true,
+        "reports.export": true,
+        "settings.view": true,
+        "settings.manage": true,
+        "trust.score": true,
+        "trust.timeline": true,
+        "trust.returnAbuse": true,
+        "trust.refundOutcomeSimulator": true,
+        "trust.smartPolicyEngine": true,
+        "trust.trustRecoveryEngine": true,
+        "trust.supportCopilot": true,
+        "trust.evidencePackExport": true,
+        "trust.advancedAutomation": true,
+        "competitor.moveFeed": true,
+        "competitor.impactScore": true,
+        "competitor.actionSuggestions": true,
+        "competitor.strategyDetection": true,
+        "competitor.weeklyReports": true,
+        "competitor.advancedReports": true,
+        "pricing.basicRecommendations": true,
+        "pricing.explainableRecommendations": true,
+        "pricing.advancedModes": true,
+        "pricing.doNothingRecommendation": true,
+        "pricing.profitLeakDetector": true,
+        "pricing.dailyActionBoard": true,
+        "pricing.scenarioSimulator": true,
+        "pricing.marginAtRisk": true,
+        "pricing.advancedAutomation": true,
+        "billing.moduleSelectionStarter": false,
+        "billing.planManagement": true,
+        "billing.upgrade": true,
+        "billing.downgrade": true,
+        "billing.trialActive": true,
       },
     },
     5000
@@ -146,7 +190,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       description:
         "Protect contribution margin and approve only the strongest price changes.",
       recommended:
-        subscription.planName === "PRO" &&
+        subscription.capabilities["pricing.advancedModes"] &&
         competitorResponse.summary.responseMode === "Defend margin",
     },
     {
@@ -155,8 +199,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       description:
         "Blend conversion support with controlled margin protection across the catalog.",
       recommended:
-        subscription.planName === "TRIAL" ||
-        subscription.planName === "GROWTH" ||
+        subscription.capabilities["pricing.basicRecommendations"] ||
         competitorResponse.summary.responseMode === "Hold and monitor",
     },
     {

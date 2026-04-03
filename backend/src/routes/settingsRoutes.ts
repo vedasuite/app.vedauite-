@@ -1,9 +1,10 @@
 import { Router } from "express";
+import { requireCapability } from "../middleware/requireCapability";
 import { getSettings, updateSettings } from "../services/settingsService";
 
 export const settingsRouter = Router();
 
-settingsRouter.get("/", async (req, res) => {
+settingsRouter.get("/", requireCapability("settings.view"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });
@@ -12,7 +13,7 @@ settingsRouter.get("/", async (req, res) => {
   return res.json({ settings });
 });
 
-settingsRouter.post("/", async (req, res) => {
+settingsRouter.post("/", requireCapability("settings.manage"), async (req, res) => {
   const { shop, settings } = req.body as {
     shop: string;
     settings: Parameters<typeof updateSettings>[1];

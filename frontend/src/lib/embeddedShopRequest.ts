@@ -1,4 +1,5 @@
 import { withRequestTimeout } from "./requestTimeout";
+import { getEmbeddedSessionToken } from "../shopifyAppBridge";
 
 type EmbeddedRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -43,6 +44,7 @@ export async function embeddedShopRequest<T = unknown>(
           ...(host ? { host } : {}),
         }
       : body;
+  const sessionToken = await getEmbeddedSessionToken();
 
   const response = await withRequestTimeout(
     fetch(url.toString(), {
@@ -51,6 +53,7 @@ export async function embeddedShopRequest<T = unknown>(
       headers: {
         "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest",
+        Authorization: `Bearer ${sessionToken}`,
       },
       body: requestBody ? JSON.stringify(requestBody) : undefined,
     }),

@@ -89,12 +89,17 @@ authRouter.get("/callback", async (req, res) => {
   const accessToken = tokenResponse.data.access_token as string;
 
   const shopDomain = String(shop);
+  const trialStartedAt = new Date();
+  const trialEndsAt = new Date(trialStartedAt);
+  trialEndsAt.setDate(trialEndsAt.getDate() + env.billing.trialDays);
 
   await prisma.store.upsert({
     where: { shop: shopDomain },
     create: {
       shop: shopDomain,
       accessToken,
+      trialStartedAt,
+      trialEndsAt,
     },
     update: {
       accessToken,

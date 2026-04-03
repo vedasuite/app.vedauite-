@@ -38,6 +38,14 @@ function request(server, pathname) {
 
 test("reports router returns weekly report payload", async () => {
   const servicesPath = path.resolve(__dirname, "../dist/services/reportsService.js");
+  const middlewarePath = path.resolve(
+    __dirname,
+    "../dist/middleware/requireCapability.js"
+  );
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
+  );
   const routesPath = path.resolve(__dirname, "../dist/routes/reportsRoutes.js");
 
   resetModule(servicesPath);
@@ -62,10 +70,22 @@ test("reports router returns weekly report payload", async () => {
     profitHighlights: [],
     competitorHighlights: [],
   });
+  resetModule(subscriptionServicePath);
+  const subscriptionService = require(subscriptionServicePath);
+  subscriptionService.getCurrentSubscription = async () => ({
+    capabilities: {
+      "reports.view": true,
+    },
+  });
+  resetModule(middlewarePath);
 
   resetModule(routesPath);
   const { reportsRouter } = require(routesPath);
   const app = express();
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
   app.use("/reports", reportsRouter);
   const server = app.listen(0);
 
@@ -83,6 +103,14 @@ test("competitor router returns connector payload", async () => {
   const servicesPath = path.resolve(
     __dirname,
     "../dist/services/competitorService.js"
+  );
+  const middlewarePath = path.resolve(
+    __dirname,
+    "../dist/middleware/requireCapability.js"
+  );
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
   );
   const routesPath = path.resolve(__dirname, "../dist/routes/competitorRoutes.js");
 
@@ -106,10 +134,22 @@ test("competitor router returns connector payload", async () => {
     trackedDomains: 3,
   });
   competitorService.listTrackedCompetitorProducts = async () => [];
+  resetModule(subscriptionServicePath);
+  const subscriptionService = require(subscriptionServicePath);
+  subscriptionService.getCurrentSubscription = async () => ({
+    capabilities: {
+      "module.competitorIntel": true,
+    },
+  });
+  resetModule(middlewarePath);
 
   resetModule(routesPath);
   const { competitorRouter } = require(routesPath);
   const app = express();
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
   app.use("/competitor", competitorRouter);
   const server = app.listen(0);
 

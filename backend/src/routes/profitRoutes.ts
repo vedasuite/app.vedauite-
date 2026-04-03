@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireCapability } from "../middleware/requireCapability";
 import {
   getProfitOpportunities,
   getProfitRecommendations,
@@ -6,7 +7,10 @@ import {
 
 export const profitRouter = Router();
 
-profitRouter.get("/recommendations", async (req, res) => {
+profitRouter.get(
+  "/recommendations",
+  requireCapability("pricing.profitLeakDetector"),
+  async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });
@@ -15,7 +19,10 @@ profitRouter.get("/recommendations", async (req, res) => {
   return res.json({ recommendations: recs });
 });
 
-profitRouter.get("/opportunities", async (req, res) => {
+profitRouter.get(
+  "/opportunities",
+  requireCapability("pricing.profitLeakDetector"),
+  async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });

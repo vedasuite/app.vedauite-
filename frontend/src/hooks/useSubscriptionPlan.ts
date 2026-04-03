@@ -1,47 +1,25 @@
 import { useContext } from "react";
 import { SubscriptionContext } from "../providers/SubscriptionProvider";
+import type {
+  BillingPlanName,
+  Capability,
+  CapabilityMap,
+  FeatureAccess,
+  ModuleAccess,
+  StarterModule,
+  SubscriptionInfo,
+  SubscriptionLifecycleStatus,
+} from "../lib/billingCapabilities";
 
-export type StarterModule = "trustAbuse" | "competitor" | null;
-
-export type ModuleAccess = {
-  trustAbuse: boolean;
-  competitor: boolean;
-  pricingProfit: boolean;
-  reports: boolean;
-  settings: boolean;
-  fraud: boolean;
-  pricing: boolean;
-  creditScore: boolean;
-  profitOptimization: boolean;
-};
-
-export type FeatureAccess = {
-  shopperTrustScore: boolean;
-  returnAbuseIntelligence: boolean;
-  fraudReviewQueue: boolean;
-  supportCopilot: boolean;
-  evidencePackExport: boolean;
-  competitorMoveFeed: boolean;
-  competitorStrategyDetection: boolean;
-  weeklyCompetitorReports: boolean;
-  pricingRecommendations: boolean;
-  scenarioSimulator: boolean;
-  profitLeakDetector: boolean;
-  marginAtRisk: boolean;
-  dailyActionBoard: boolean;
-  advancedAutomation: boolean;
-  fullProfitEngine: boolean;
-};
-
-export type SubscriptionInfo = {
-  planName: string;
-  price: number;
-  trialDays: number;
-  starterModule: StarterModule;
-  active?: boolean;
-  endsAt?: string | null;
-  enabledModules: ModuleAccess;
-  featureAccess: FeatureAccess;
+export type {
+  BillingPlanName,
+  Capability,
+  CapabilityMap,
+  FeatureAccess,
+  ModuleAccess,
+  StarterModule,
+  SubscriptionInfo,
+  SubscriptionLifecycleStatus,
 };
 
 export function useSubscriptionPlan() {

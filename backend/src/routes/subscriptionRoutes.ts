@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
+import { requireCapability } from "../middleware/requireCapability";
 import {
   cancelSubscription,
   downgradeToTrial,
@@ -9,7 +9,7 @@ import {
 
 export const subscriptionRouter = Router();
 
-subscriptionRouter.get("/plan", async (req, res) => {
+subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop." });
@@ -18,7 +18,7 @@ subscriptionRouter.get("/plan", async (req, res) => {
   return res.json({ subscription: plan });
 });
 
-subscriptionRouter.post("/cancel", verifyShopifySessionToken, async (req, res) => {
+subscriptionRouter.post("/cancel", requireCapability("billing.downgrade"), async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
@@ -31,7 +31,7 @@ subscriptionRouter.post("/cancel", verifyShopifySessionToken, async (req, res) =
   return res.json({ subscription });
 });
 
-subscriptionRouter.post("/downgrade-to-trial", verifyShopifySessionToken, async (req, res) => {
+subscriptionRouter.post("/downgrade-to-trial", requireCapability("billing.downgrade"), async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
@@ -44,7 +44,7 @@ subscriptionRouter.post("/downgrade-to-trial", verifyShopifySessionToken, async 
   return res.json({ result });
 });
 
-subscriptionRouter.post("/starter-module", verifyShopifySessionToken, async (req, res) => {
+subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSelectionStarter"), async (req, res) => {
   const body = req.body as {
     shop?: string;
     starterModule?: "trustAbuse" | "competitor";

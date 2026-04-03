@@ -89,10 +89,7 @@ export function ReportsPage() {
   const [selectedTab, setSelectedTab] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
-  const reportsEnabled =
-    subscription?.planName === "TRIAL" ||
-    subscription?.planName === "GROWTH" ||
-    subscription?.planName === "PRO";
+  const reportsEnabled = !!subscription?.capabilities["reports.view"];
 
   useEffect(() => {
     withRequestTimeout(api.get<{ report: WeeklyReport }>("/api/reports/weekly"))

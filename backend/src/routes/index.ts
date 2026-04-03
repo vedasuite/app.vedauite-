@@ -23,10 +23,10 @@ router.use("/auth", authRouter);
 router.use("/billing", billingRouter);
 router.use(publicRouter);
 router.use(launchRouter);
-router.use("/api/subscription", subscriptionRouter);
 
 router.use("/api", verifyShopifySessionToken);
 
+router.use("/api/subscription", subscriptionRouter);
 router.use("/api/dashboard", dashboardRouter);
 router.use("/api/trust-abuse", trustAbuseRouter);
 router.use("/api/fraud", fraudRouter);

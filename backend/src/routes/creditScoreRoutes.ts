@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireCapability } from "../middleware/requireCapability";
 import {
   getCustomerScore,
   getTrustOperatingLayer,
@@ -7,6 +8,7 @@ import {
 } from "../services/creditScoreService";
 
 export const creditScoreRouter = Router();
+creditScoreRouter.use(requireCapability("module.trustAbuse"));
 
 creditScoreRouter.get("/customers", async (req, res) => {
   const { shop } = req.query;

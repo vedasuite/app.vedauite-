@@ -1,10 +1,11 @@
 import { Router } from "express";
+import { requireCapability } from "../middleware/requireCapability";
 import { getUnifiedDecisionCenter } from "../services/decisionCenterService";
 import { getDashboardMetrics } from "../services/dashboardService";
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get("/metrics", async (req, res) => {
+dashboardRouter.get("/metrics", requireCapability("reports.view"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop query parameter." });
@@ -18,7 +19,7 @@ dashboardRouter.get("/metrics", async (req, res) => {
   return res.json(metrics);
 });
 
-dashboardRouter.get("/decision-center", async (req, res) => {
+dashboardRouter.get("/decision-center", requireCapability("reports.view"), async (req, res) => {
   const { shop } = req.query;
   if (!shop || typeof shop !== "string") {
     return res.status(400).json({ error: "Missing shop query parameter." });
