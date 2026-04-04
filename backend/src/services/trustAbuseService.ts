@@ -130,6 +130,82 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     },
   ];
 
+  const refundOutcomeOptions = [
+    {
+      channel: "Instant refund",
+      marginImpact:
+        trustLayer.segments.trusted > trustLayer.segments.risky
+          ? "Lower retention, fastest resolution"
+          : "Use selectively for the highest-trust lane",
+      confidence:
+        trustLayer.segments.trusted > 0 ? "High for trusted buyers" : "Needs more history",
+      recommendedWhen: "High trust, low abuse, low fraud pressure",
+    },
+    {
+      channel: "Store credit",
+      marginImpact: "Best margin protection while preserving recovery potential",
+      confidence:
+        trustLayer.segments.normal > 0 ? "Strong for medium-trust profiles" : "Requires more mixed trust traffic",
+      recommendedWhen: "Medium trust or rising refund frequency",
+    },
+    {
+      channel: "Exchange",
+      marginImpact: "Protects revenue and retains the order value",
+      confidence:
+        queue.some((order) => !order.refundRequested)
+          ? "Best when order-quality friction is moderate"
+          : "Use when support can redirect to replacement",
+      recommendedWhen: "Low fraud pressure with product-fit issues",
+    },
+  ];
+
+  const supportCopilotCases = [
+    highestRiskOrder
+      ? {
+          title: `Handle ${highestRiskOrder.shopifyOrderId}`,
+          reason:
+            highestRiskOrder.riskLevel === "High"
+              ? "High fraud score plus refund pressure suggests review-first handling."
+              : "Manual review can confirm the next safest merchant action.",
+          recommendedHandling:
+            highestRiskOrder.riskLevel === "High"
+              ? "Pause refund, review signals, offer store credit only after confirmation."
+              : "Use trust-aware handling and document reasons before support responds.",
+        }
+      : null,
+    behaviorTimeline[0]
+      ? {
+          title: `Coach support on ${behaviorTimeline[0].shopper}`,
+          reason: behaviorTimeline[0].eventSummary,
+          recommendedHandling:
+            behaviorTimeline[0].trustScore >= 80
+              ? "Use low-friction handling and preserve the trusted buyer experience."
+              : behaviorTimeline[0].trustScore < 50
+              ? "Move into manual review and request more context before exceptions."
+              : "Offer exchange or store credit first and monitor repeat behavior.",
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    title: string;
+    reason: string;
+    recommendedHandling: string;
+  }>;
+
+  const evidencePackTemplates = [
+    {
+      title: "Refund decision pack",
+      detail: "Timeline, trust reasons, and order behavior summary for support review.",
+    },
+    {
+      title: "Chargeback support pack",
+      detail: "Order risk rationale, payment behavior, and refund posture snapshot.",
+    },
+    {
+      title: "Return abuse evidence pack",
+      detail: "Refund-rate summary, repeat pattern indicators, and policy recommendation trail.",
+    },
+  ];
+
   return {
     subscription,
     summary: {
@@ -162,9 +238,14 @@ export async function getTrustAbuseOverview(shopDomain: string) {
         highestRiskOrder?.riskLevel === "High"
           ? "Hold and review the current high-risk order before allowing a refund exception."
           : "Use trust tiers to route refunds automatically when possible.",
+      options: refundOutcomeOptions,
     },
     smartPolicyRecommendations,
     trustRecoveryActions,
+    automationRules: [
+      ...trustLayer.automationRules,
+      ...fraudOverview.automationRules,
+    ],
     supportCopilot: {
       status: subscription.featureAccess.supportCopilot ? "active" : "restricted",
       playbooks: [
@@ -172,6 +253,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
         "Summarize the behavior timeline before a CX agent responds.",
         "Flag policy exceptions when return-abuse signals are rising.",
       ],
+      cases: supportCopilotCases,
     },
     evidencePack: {
       status: subscription.featureAccess.evidencePackExport ? "ready" : "preview",
@@ -180,6 +262,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
         "Refund and abuse timeline",
         "Stored fraud-signal summary",
       ],
+      templates: evidencePackTemplates,
     },
     behaviorTimeline,
   };
