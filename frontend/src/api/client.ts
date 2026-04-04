@@ -3,6 +3,7 @@ import { getSessionToken } from "@shopify/app-bridge/utilities/session-token";
 import { useMemo } from "react";
 import { useAppBridge } from "../shopifyAppBridge";
 import { withRequestTimeout } from "../lib/requestTimeout";
+import { getEmbeddedContext } from "../lib/shopifyEmbeddedContext";
 
 const backendUrl =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) || "";
@@ -73,25 +74,29 @@ export function useApiClient() {
       withCredentials: true,
     });
     client.interceptors.request.use(async (config) => {
-      const sessionToken = await getStableSessionToken(cacheKey, () =>
-        getSessionToken(app)
-      );
+      const resolvedContext = getEmbeddedContext();
+      const sessionToken =
+        app && resolvedContext.host
+          ? await getStableSessionToken(cacheKey, () => getSessionToken(app))
+          : null;
       if (config.headers && typeof config.headers.set === "function") {
-        config.headers.set("Authorization", `Bearer ${sessionToken}`);
+        if (sessionToken) {
+          config.headers.set("Authorization", `Bearer ${sessionToken}`);
+        }
         config.headers.set("X-Requested-With", "XMLHttpRequest");
       } else {
         config.headers = {
           ...(config.headers ?? {}),
-          Authorization: `Bearer ${sessionToken}`,
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
           "X-Requested-With": "XMLHttpRequest",
         } as any;
       }
 
       if (!config.params) config.params = {};
-      if (shop) {
-        config.params.shop = shop;
-        if (host) {
-          config.params.host = host;
+      if (resolvedContext.shop || shop) {
+        config.params.shop = resolvedContext.shop || shop;
+        if (resolvedContext.host || host) {
+          config.params.host = resolvedContext.host || host;
         }
         const method = config.method?.toLowerCase();
         if (
@@ -104,8 +109,10 @@ export function useApiClient() {
         ) {
           config.data = {
             ...config.data,
-            shop,
-            ...(host ? { host } : {}),
+            shop: resolvedContext.shop || shop,
+            ...((resolvedContext.host || host)
+              ? { host: resolvedContext.host || host }
+              : {}),
           };
         }
       }

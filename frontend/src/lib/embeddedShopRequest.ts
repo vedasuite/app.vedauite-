@@ -1,5 +1,6 @@
 import { withRequestTimeout } from "./requestTimeout";
 import { getEmbeddedSessionToken } from "../shopifyAppBridge";
+import { getEmbeddedContext } from "./shopifyEmbeddedContext";
 
 type EmbeddedRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -9,9 +10,7 @@ type EmbeddedRequestOptions = {
 
 function buildUrl(path: string) {
   const url = new URL(path, window.location.origin);
-  const currentParams = new URLSearchParams(window.location.search);
-  const shop = currentParams.get("shop");
-  const host = currentParams.get("host");
+  const { shop, host } = getEmbeddedContext();
 
   if (shop) {
     url.searchParams.set("shop", shop);
@@ -29,9 +28,7 @@ export async function embeddedShopRequest<T = unknown>(
 ) {
   const { method = "GET", body, timeoutMs = 30000 } = options;
   const url = buildUrl(path);
-  const currentParams = new URLSearchParams(window.location.search);
-  const shop = currentParams.get("shop");
-  const host = currentParams.get("host");
+  const { shop, host } = getEmbeddedContext();
   const shouldAttachContext =
     method !== "GET" &&
     method !== "HEAD" &&
@@ -45,16 +42,19 @@ export async function embeddedShopRequest<T = unknown>(
         }
       : body;
   const sessionToken = await getEmbeddedSessionToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+  };
+  if (sessionToken) {
+    headers.Authorization = `Bearer ${sessionToken}`;
+  }
 
   const response = await withRequestTimeout(
     fetch(url.toString(), {
       method,
       credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Requested-With": "XMLHttpRequest",
-        Authorization: `Bearer ${sessionToken}`,
-      },
+      headers,
       body: requestBody ? JSON.stringify(requestBody) : undefined,
     }),
     timeoutMs

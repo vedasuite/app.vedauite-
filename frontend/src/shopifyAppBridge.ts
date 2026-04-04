@@ -1,6 +1,7 @@
 import { getSessionToken } from "@shopify/app-bridge/utilities/session-token";
 import { useMemo } from "react";
 import createApp, { AppConfig } from "@shopify/app-bridge";
+import { getEmbeddedContext } from "./lib/shopifyEmbeddedContext";
 
 const apiKey =
   (import.meta.env.VITE_SHOPIFY_API_KEY as string | undefined) || "";
@@ -10,12 +11,11 @@ const sessionTokenCache = new Map<
   { token: string; expiresAt: number; inflight?: Promise<string> }
 >();
 
-function resolveHostFromWindow() {
-  const searchParams = new URLSearchParams(window.location.search);
-  return searchParams.get("host") || "";
-}
-
 function getCachedApp(host: string) {
+  if (!apiKey || !host) {
+    return null;
+  }
+
   const cacheKey = `${apiKey}|${host || "default"}`;
   const existingApp = appCache.get(cacheKey);
   if (existingApp) {
@@ -33,11 +33,16 @@ function getCachedApp(host: string) {
 }
 
 export function getEmbeddedAppBridge() {
-  return getCachedApp(resolveHostFromWindow());
+  const { host } = getEmbeddedContext();
+  return getCachedApp(host);
 }
 
 export async function getEmbeddedSessionToken() {
-  const host = resolveHostFromWindow();
+  const { host } = getEmbeddedContext();
+  if (!apiKey || !host) {
+    return null;
+  }
+
   const cacheKey = `${apiKey}|${host || "default"}`;
   const now = Date.now();
   const cached = sessionTokenCache.get(cacheKey);
@@ -50,7 +55,12 @@ export async function getEmbeddedSessionToken() {
     return cached.inflight;
   }
 
-  const inflight = getSessionToken(getCachedApp(host)).then((token) => {
+  const app = getCachedApp(host);
+  if (!app) {
+    return null;
+  }
+
+  const inflight = getSessionToken(app).then((token) => {
     sessionTokenCache.set(cacheKey, {
       token,
       expiresAt: Date.now() + 30_000,
@@ -78,9 +88,7 @@ export async function getEmbeddedSessionToken() {
 }
 
 export function useAppBridge() {
-  const searchParams = new URLSearchParams(window.location.search);
-  const shop = searchParams.get("shop") || "";
-  const host = searchParams.get("host") || "";
+  const { shop, host } = getEmbeddedContext();
 
   const config: AppConfig = useMemo(
     () => ({
@@ -95,6 +103,11 @@ export function useAppBridge() {
     return getCachedApp(config.host);
   }, [config, host]);
 
-  return { app: cachedApp, shop, host };
+  return {
+    app: cachedApp,
+    shop,
+    host,
+    ready: !!apiKey && !!host,
+  };
 }
 
