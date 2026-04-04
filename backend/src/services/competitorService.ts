@@ -5,6 +5,50 @@ function normalizeCompetitorName(domain: string, label?: string | null) {
   return label ?? domain.replace(/\..+$/, "").replace(/[-_]/g, " ");
 }
 
+function formatSourceLabel(source: string) {
+  if (source === "google_shopping") return "Google Shopping";
+  if (source === "meta_ads") return "Meta Ad Library";
+  if (source.startsWith("website")) return "Website monitoring";
+  return source;
+}
+
+function inferMoveType(row: {
+  promotion: string | null;
+  stockStatus: string | null;
+  source: string;
+  adCopy: string | null;
+  price: number | null;
+}) {
+  if (row.stockStatus === "out_of_stock") return "Stock outage";
+  if (row.stockStatus === "low_stock") return "Stock pressure";
+  if (row.promotion) return "Promotion change";
+  if (row.source === "meta_ads" || row.adCopy) return "Ad pressure";
+  if (row.source === "google_shopping") return "Shopping surface shift";
+  if (row.price != null) return "Price move";
+  return "Market signal";
+}
+
+function scorePriority(impactScore: number) {
+  if (impactScore >= 75) return "High";
+  if (impactScore >= 45) return "Medium";
+  return "Low";
+}
+
+function inferSuggestedAction(args: {
+  priceDelta: number;
+  promotion: string | null;
+  stockStatus: string | null;
+  source: string;
+}) {
+  if (args.stockStatus === "out_of_stock") return "Promote availability and hold price";
+  if (args.stockStatus === "low_stock") return "Monitor margin and avoid unnecessary discounting";
+  if (args.promotion) return "Bundle or selectively respond";
+  if (args.source === "meta_ads") return "Increase watch frequency";
+  if (args.priceDelta <= -2) return "Consider selective price defense";
+  if (args.priceDelta >= 2) return "Hold price and protect margin";
+  return "Wait and monitor";
+}
+
 function buildGoogleShoppingSignal(
   domain: string,
   productHandle: string,
@@ -184,6 +228,126 @@ export async function getCompetitorOverview(shopDomain: string) {
       collection.filter((candidate) => candidate.productHandle === row.productHandle).length >= 3
   ).slice(0, 5);
 
+  const moveFeed = recentRows.slice(0, 10).map((row) => {
+    const bucket = productSignals.get(row.productHandle);
+    const priceDelta =
+      bucket?.latest != null && bucket?.earliest != null
+        ? Number((bucket.latest - bucket.earliest).toFixed(2))
+        : 0;
+    const impactScore = Math.max(
+      18,
+      Math.min(
+        96,
+        Math.round(
+          Math.abs(priceDelta) * 16 +
+            (row.promotion ? 22 : 0) +
+            (row.stockStatus === "out_of_stock"
+              ? 28
+              : row.stockStatus === "low_stock"
+              ? 16
+              : 0) +
+            (row.source === "meta_ads" ? 14 : row.source === "google_shopping" ? 10 : 8)
+        )
+      )
+    );
+
+    return {
+      id: row.id,
+      headline: `${row.competitorName} changed ${row.productHandle}`,
+      moveType: inferMoveType(row),
+      source: formatSourceLabel(row.source),
+      priority: scorePriority(impactScore),
+      impactScore,
+      whyItMatters:
+        row.promotion ??
+        row.adCopy ??
+        (row.stockStatus
+          ? `Stock posture is now ${row.stockStatus.replace(/_/g, " ")}.`
+          : priceDelta !== 0
+          ? `Observed competitor price movement of ${priceDelta >= 0 ? "+" : "-"}$${Math.abs(priceDelta).toFixed(2)}.`
+          : "A fresh competitor signal was detected for this SKU."),
+      suggestedAction: inferSuggestedAction({
+        priceDelta,
+        promotion: row.promotion,
+        stockStatus: row.stockStatus,
+        source: row.source,
+      }),
+      collectedAt: row.collectedAt,
+    };
+  });
+
+  const strategyDetections = [
+    promoCount >= 8
+      ? {
+          strategy: "Aggressive discounting",
+          confidence: promoCount >= 15 ? "High" : "Medium",
+          why: "Promotion density is rising across the monitored competitor set.",
+        }
+      : null,
+    stockAlerts >= 4
+      ? {
+          strategy: "Inventory clearing",
+          confidence: stockAlerts >= 8 ? "High" : "Medium",
+          why: "Stock pressure and price movement suggest sell-through behavior.",
+        }
+      : null,
+    launchAlerts.length > 0
+      ? {
+          strategy: "Launch push",
+          confidence: launchAlerts.length >= 3 ? "High" : "Medium",
+          why: "Repeated fresh signals across new SKUs point to active launch activity.",
+        }
+      : null,
+    sourceBreakdown.metaAds >= 4
+      ? {
+          strategy: "Market-share capture",
+          confidence: sourceBreakdown.metaAds >= 8 ? "High" : "Medium",
+          why: "Ad pressure is increasing alongside pricing visibility across key surfaces.",
+        }
+      : null,
+  ].filter(
+    (
+      item
+    ): item is { strategy: string; confidence: string; why: string } => item !== null
+  );
+
+  const actionSuggestions = topMovers.slice(0, 4).map((mover) => ({
+    productHandle: mover.productHandle,
+    suggestion:
+      mover.promotionSignals >= 2
+        ? "Bundle or selectively match"
+        : mover.priceDelta <= -2
+        ? "Review hero SKU pricing"
+        : mover.stockSignals > 0
+        ? "Hold margin and monitor"
+        : "Wait and watch",
+    why:
+      mover.promotionSignals >= 2
+        ? "Promotions are clustering around this SKU."
+        : mover.priceDelta <= -2
+        ? "Competitor pricing dropped enough to affect conversion risk."
+        : mover.stockSignals > 0
+        ? "Competitor stock posture may ease pressure without immediate discounting."
+        : "Current movement does not yet justify a reactive pricing change.",
+  }));
+
+  const weeklyReport = {
+    headline:
+      recentChanges > 0
+        ? `${recentChanges} competitor movement signals detected in the last 24 hours`
+        : "No major competitor movement yet",
+    whyItMatters:
+      promoCount > 0
+        ? `${promoCount} active promotions and ${stockAlerts} stock alerts suggest pricing and inventory pressure is building.`
+        : "The market is quiet for now, so VedaSuite recommends monitoring instead of reacting.",
+    suggestedActions:
+      actionSuggestions.length > 0
+        ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+        : ["Run first ingestion to build your first weekly competitor brief."],
+    reportReadiness:
+      recentRows.length > 0 ? "Weekly report can be generated" : "Awaiting competitor ingestion",
+  };
+
   return {
     recentPriceChanges: recentChanges,
     promotionAlerts: promoCount,
@@ -202,6 +366,10 @@ export async function getCompetitorOverview(shopDomain: string) {
     })),
     sourceBreakdown,
     topMovers,
+    moveFeed,
+    strategyDetections,
+    actionSuggestions,
+    weeklyReport,
   };
 }
 
