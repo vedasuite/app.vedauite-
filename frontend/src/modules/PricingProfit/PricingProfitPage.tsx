@@ -130,7 +130,7 @@ export function PricingProfitPage() {
   );
   const [loading, setLoading] = useState(!cachedOverview);
   const [syncIssue, setSyncIssue] = useState(false);
-  const allowed = !!subscription?.enabledModules.pricingProfit;
+  const allowed = !!subscription?.enabledModules?.pricingProfit;
   const focus = searchParams.get("focus");
   const showingProfitFocus = focus === "profit";
 

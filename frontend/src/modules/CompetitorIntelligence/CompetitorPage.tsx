@@ -363,7 +363,7 @@ export function CompetitorPage() {
       title="Competitor Intelligence"
       subtitle="Track price moves, promotions, and stock posture across key competitor domains."
       requiredPlan="Starter, Growth, or Pro"
-      allowed={!!subscription?.enabledModules.competitor}
+      allowed={!!subscription?.enabledModules?.competitor}
     >
         <Page
           title="Competitor Intelligence"

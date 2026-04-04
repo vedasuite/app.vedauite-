@@ -160,7 +160,7 @@ export function PricingPage() {
       title="AI Pricing Strategy"
       subtitle="Review AI pricing guidance based on margin, competitor movement, and sales velocity."
       requiredPlan="Growth or Pro"
-      allowed={!!subscription?.enabledModules.pricing}
+      allowed={!!subscription?.enabledModules?.pricing}
     >
       {recs.length === 0 ? (
         <Page

@@ -197,7 +197,7 @@ export function CreditScorePage() {
       title="Shopper Credit Score"
       subtitle="See trust, refund behavior, and customer reliability at a glance."
       requiredPlan="Growth or Pro"
-      allowed={!!subscription?.enabledModules.creditScore}
+      allowed={!!subscription?.enabledModules?.creditScore}
     >
       {filteredCustomers.length === 0 ? (
         <Page

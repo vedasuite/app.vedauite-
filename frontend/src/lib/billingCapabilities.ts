@@ -100,6 +100,19 @@ export type SubscriptionInfo = {
   capabilities: CapabilityMap;
 };
 
+function normalizeBillingPlanName(value?: string | null): BillingPlanName {
+  if (!value) {
+    return "TRIAL";
+  }
+
+  const normalized = value.toUpperCase();
+  if ((BILLING_PLANS as readonly string[]).includes(normalized)) {
+    return normalized as BillingPlanName;
+  }
+
+  return "TRIAL";
+}
+
 export function normalizeStarterModule(value?: string | null): StarterModule {
   if (value === "trustAbuse" || value === "competitor") {
     return value;
@@ -262,14 +275,57 @@ export const fallbackSubscription: SubscriptionInfo = {
   capabilities: buildCapabilities("TRIAL", null),
 };
 
+export function normalizeSubscriptionInfo(
+  value: Partial<SubscriptionInfo> | null | undefined
+): SubscriptionInfo {
+  if (!value) {
+    return fallbackSubscription;
+  }
+
+  const planName = normalizeBillingPlanName(value.planName);
+  const starterModule = normalizeStarterModule(value.starterModule);
+  const capabilities =
+    value.capabilities ?? buildCapabilities(planName, starterModule);
+  const enabledModules =
+    value.enabledModules ?? buildModuleAccess(planName, starterModule);
+  const featureAccess =
+    value.featureAccess ?? buildFeatureAccess(planName, starterModule);
+  const status =
+    value.status ??
+    (planName === "TRIAL"
+      ? "trial_active"
+      : planName === "NONE"
+      ? "inactive"
+      : "active_paid");
+  const billingStatus =
+    value.billingStatus ?? (planName === "NONE" ? "INACTIVE" : "ACTIVE");
+
+  return {
+    planName,
+    price: typeof value.price === "number" ? value.price : getPlanPrice(planName),
+    trialDays: typeof value.trialDays === "number" ? value.trialDays : planName === "TRIAL" ? 3 : 0,
+    starterModule,
+    active: typeof value.active === "boolean" ? value.active : planName !== "NONE",
+    endsAt: value.endsAt ?? null,
+    trialStartedAt: value.trialStartedAt ?? null,
+    trialEndsAt: value.trialEndsAt ?? null,
+    status,
+    billingStatus,
+    starterModuleSwitchAvailableAt: value.starterModuleSwitchAvailableAt ?? null,
+    enabledModules,
+    featureAccess,
+    capabilities,
+  };
+}
+
 export function buildOptimisticSubscription(params: {
   planName: string;
   starterModule?: StarterModule | "fraud" | "creditScore" | null;
 }) {
-  const normalizedPlan = (params.planName.toUpperCase() as BillingPlanName);
+  const normalizedPlan = normalizeBillingPlanName(params.planName);
   const starterModule = normalizeStarterModule(params.starterModule);
 
-  return {
+  return normalizeSubscriptionInfo({
     planName: normalizedPlan,
     price: getPlanPrice(normalizedPlan),
     trialDays: normalizedPlan === "TRIAL" ? 3 : 0,
@@ -289,7 +345,7 @@ export function buildOptimisticSubscription(params: {
     enabledModules: buildModuleAccess(normalizedPlan, starterModule),
     featureAccess: buildFeatureAccess(normalizedPlan, starterModule),
     capabilities: buildCapabilities(normalizedPlan, starterModule),
-  } satisfies SubscriptionInfo;
+  });
 }
 
 export function readOptimisticSubscriptionFromSearch(search: string) {

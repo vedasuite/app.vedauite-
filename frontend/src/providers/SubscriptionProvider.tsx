@@ -8,6 +8,7 @@ import {
 import { embeddedShopRequest } from "../lib/embeddedShopRequest";
 import {
   fallbackSubscription,
+  normalizeSubscriptionInfo,
   readOptimisticSubscriptionFromSearch,
 } from "../lib/subscriptionState";
 
@@ -30,7 +31,11 @@ type Props = {
 };
 
 export function SubscriptionProvider({ children }: Props) {
-  const cachedSubscription = readModuleCache<SubscriptionInfo>("subscription-plan");
+  const rawCachedSubscription =
+    readModuleCache<SubscriptionInfo>("subscription-plan");
+  const cachedSubscription = rawCachedSubscription
+    ? normalizeSubscriptionInfo(rawCachedSubscription)
+    : null;
   const optimisticSubscription = readOptimisticSubscriptionFromSearch(
     window.location.search
   );
@@ -40,8 +45,9 @@ export function SubscriptionProvider({ children }: Props) {
   const [loading, setLoading] = useState(!cachedSubscription && !optimisticSubscription);
 
   const applyOptimistic = useCallback((nextSubscription: SubscriptionInfo) => {
-    setSubscription(nextSubscription);
-    writeModuleCache("subscription-plan", nextSubscription);
+    const normalizedSubscription = normalizeSubscriptionInfo(nextSubscription);
+    setSubscription(normalizedSubscription);
+    writeModuleCache("subscription-plan", normalizedSubscription);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -49,15 +55,16 @@ export function SubscriptionProvider({ children }: Props) {
       "/api/subscription/plan",
       { timeoutMs: 45000 }
     );
+    const normalizedSubscription = normalizeSubscriptionInfo(res.subscription);
 
     setSubscription((currentSubscription) => {
       const shouldPreserveOptimisticPaidPlan =
         isPaidSubscription(currentSubscription) &&
-        res.subscription.planName === "TRIAL";
+        normalizedSubscription.planName === "TRIAL";
 
       const nextSubscription = shouldPreserveOptimisticPaidPlan
         ? currentSubscription
-        : res.subscription;
+        : normalizedSubscription;
 
       if (nextSubscription) {
         writeModuleCache("subscription-plan", nextSubscription);
@@ -89,7 +96,10 @@ export function SubscriptionProvider({ children }: Props) {
       })
       .catch(() => {
         if (!mounted) return;
-        if (!cachedSubscription && !optimisticSubscription) {
+        if (
+          !cachedSubscription &&
+          !optimisticSubscription
+        ) {
           applyOptimistic(fallbackSubscription);
           clearModuleCache("subscription-plan");
         }

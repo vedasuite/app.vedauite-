@@ -63,9 +63,9 @@ export function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
-  const pricingProfitEnabled = !!subscription?.enabledModules.pricingProfit;
-  const fullProfitEngineEnabled = !!subscription?.featureAccess.fullProfitEngine;
-  const competitorEnabled = !!subscription?.enabledModules.competitor;
+  const pricingProfitEnabled = !!subscription?.enabledModules?.pricingProfit;
+  const fullProfitEngineEnabled = !!subscription?.featureAccess?.fullProfitEngine;
+  const competitorEnabled = !!subscription?.enabledModules?.competitor;
   const connectedDomains = domainsInput
     .split(",")
     .map((domain) => domain.trim())

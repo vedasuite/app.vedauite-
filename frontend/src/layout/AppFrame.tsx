@@ -31,11 +31,11 @@ export function AppFrame({ children }: Props) {
 
   const activePlan = subscription?.planName ?? "TRIAL";
   const moduleStatus = {
-    trustAbuse: subscription?.enabledModules.trustAbuse ?? true,
-    competitor: subscription?.enabledModules.competitor ?? true,
-    pricingProfit: subscription?.enabledModules.pricingProfit ?? false,
-    reports: subscription?.enabledModules.reports ?? true,
-    settings: subscription?.enabledModules.settings ?? true,
+    trustAbuse: subscription?.enabledModules?.trustAbuse ?? true,
+    competitor: subscription?.enabledModules?.competitor ?? true,
+    pricingProfit: subscription?.enabledModules?.pricingProfit ?? false,
+    reports: subscription?.enabledModules?.reports ?? true,
+    settings: subscription?.enabledModules?.settings ?? true,
   };
 
   const dismissToast = useCallback(() => setToast(null), []);

@@ -120,7 +120,7 @@ export function TrustAbusePage() {
   const [overview, setOverview] = useState<TrustAbuseOverview>(fallbackOverview);
   const [loading, setLoading] = useState(false);
   const [syncIssue, setSyncIssue] = useState(false);
-  const allowed = !!subscription?.enabledModules.trustAbuse;
+  const allowed = !!subscription?.enabledModules?.trustAbuse;
 
   useEffect(() => {
     if (!allowed) {

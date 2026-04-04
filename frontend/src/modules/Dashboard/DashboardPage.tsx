@@ -287,7 +287,7 @@ export function DashboardPage() {
     { id: "signals", content: "Signals" },
     { id: "actions", content: "Action plan" },
   ];
-  const reportsEnabled = !!subscription?.capabilities["reports.view"];
+  const reportsEnabled = !!subscription?.capabilities?.["reports.view"];
 
   const onboardingChecklist = useMemo(
     () => [
@@ -309,7 +309,7 @@ export function DashboardPage() {
       },
       {
         label: "Pricing and profit modules are enabled",
-        done: !!subscription?.enabledModules.pricingProfit,
+        done: !!subscription?.enabledModules?.pricingProfit,
         action: "Unlock Pro",
         route: "/subscription",
       },
@@ -323,7 +323,7 @@ export function DashboardPage() {
     [
       launchAudit?.checks,
       reportsEnabled,
-      subscription?.enabledModules.pricingProfit,
+      subscription?.enabledModules?.pricingProfit,
       webhookStatus,
     ]
   );
@@ -349,7 +349,7 @@ export function DashboardPage() {
       route: "/pricing-profit?focus=simulation",
       cta: "Open pricing & profit",
       tone: "success" as const,
-      locked: !subscription?.enabledModules.pricingProfit,
+      locked: !subscription?.enabledModules?.pricingProfit,
     },
   ];
 
@@ -536,9 +536,9 @@ export function DashboardPage() {
                     <Text as="p" variant="headingLg">
                       {
                         [
-                          subscription?.enabledModules.trustAbuse,
-                          subscription?.enabledModules.competitor,
-                          subscription?.enabledModules.pricingProfit,
+                          subscription?.enabledModules?.trustAbuse,
+                          subscription?.enabledModules?.competitor,
+                          subscription?.enabledModules?.pricingProfit,
                         ].filter(Boolean).length
                       }
                     </Text>
@@ -775,13 +775,13 @@ export function DashboardPage() {
                           <Button
                             onClick={() =>
                               navigateEmbedded(
-                                subscription?.enabledModules.pricingProfit
+                                subscription?.enabledModules?.pricingProfit
                                   ? "/pricing-profit?focus=simulation"
                                   : "/subscription"
                               )
                             }
                           >
-                            {subscription?.enabledModules.pricingProfit
+                            {subscription?.enabledModules?.pricingProfit
                               ? "Open pricing & profit"
                               : "Unlock pricing & profit"}
                           </Button>
@@ -842,13 +842,13 @@ export function DashboardPage() {
                           <Button
                             onClick={() =>
                               navigateEmbedded(
-                                subscription?.enabledModules.pricingProfit
+                                subscription?.enabledModules?.pricingProfit
                                   ? "/pricing-profit?focus=profit"
                                   : "/subscription"
                               )
                             }
                           >
-                            {subscription?.enabledModules.pricingProfit
+                            {subscription?.enabledModules?.pricingProfit
                               ? "Review pricing & profit"
                               : "Unlock pricing & profit"}
                           </Button>
