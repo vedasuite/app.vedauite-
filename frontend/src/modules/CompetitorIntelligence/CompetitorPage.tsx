@@ -66,17 +66,43 @@ type CompetitorOverview = {
     source: string;
     priority: string;
     impactScore: number;
+    actionWindow?: string;
+    eventCluster?: string;
     whyItMatters: string;
     suggestedAction: string;
     collectedAt: string;
   }>;
-  strategyDetections?: Array<{ strategy: string; confidence: string; why: string }>;
-  actionSuggestions?: Array<{ productHandle: string; suggestion: string; why: string }>;
+  strategyDetections?: Array<{
+    strategy: string;
+    confidence: string;
+    why: string;
+    implication: string;
+    recommendedMove: string;
+  }>;
+  actionSuggestions?: Array<{
+    productHandle: string;
+    suggestion: string;
+    why: string;
+    urgency?: string;
+    expectedOutcome?: string;
+  }>;
   weeklyReport?: {
     headline: string;
     whyItMatters: string;
     suggestedActions: string[];
     reportReadiness: string;
+    biggestMoves?: Array<{
+      headline: string;
+      impactScore: number;
+      suggestedAction: string;
+    }>;
+    merchantBrief?: string;
+    nextBestAction?: string;
+  };
+  coverageSummary?: {
+    domainsConfigured: number;
+    channelsReady: string[];
+    monitoringPosture: string;
   };
 };
 
@@ -140,6 +166,15 @@ const fallbackOverview: CompetitorOverview = {
       "Review the move feed before reacting.",
     ],
     reportReadiness: "Awaiting competitor ingestion",
+    biggestMoves: [],
+    merchantBrief:
+      "The weekly brief will explain why competitor moves matter for your store once signals are live.",
+    nextBestAction: "Add competitor domains and run your first ingestion.",
+  },
+  coverageSummary: {
+    domainsConfigured: 0,
+    channelsReady: [],
+    monitoringPosture: "Needs setup",
   },
 };
 
@@ -206,6 +241,26 @@ function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
       reportReadiness:
         input.weeklyReport?.reportReadiness ??
         fallbackOverview.weeklyReport!.reportReadiness,
+      biggestMoves:
+        input.weeklyReport?.biggestMoves ??
+        fallbackOverview.weeklyReport!.biggestMoves,
+      merchantBrief:
+        input.weeklyReport?.merchantBrief ??
+        fallbackOverview.weeklyReport!.merchantBrief,
+      nextBestAction:
+        input.weeklyReport?.nextBestAction ??
+        fallbackOverview.weeklyReport!.nextBestAction,
+    },
+    coverageSummary: {
+      domainsConfigured:
+        input.coverageSummary?.domainsConfigured ??
+        fallbackOverview.coverageSummary!.domainsConfigured,
+      channelsReady:
+        input.coverageSummary?.channelsReady ??
+        fallbackOverview.coverageSummary!.channelsReady,
+      monitoringPosture:
+        input.coverageSummary?.monitoringPosture ??
+        fallbackOverview.coverageSummary!.monitoringPosture,
     },
   };
 }
@@ -253,7 +308,7 @@ function BulletList({ items, empty }: { items: string[]; empty: string }) {
   return (
     <BlockStack gap="100">
       {items.map((item) => (
-        <Text key={item} as="p" variant="bodySm">• {item}</Text>
+        <Text key={item} as="p" variant="bodySm">- {item}</Text>
       ))}
     </BlockStack>
   );
@@ -460,6 +515,75 @@ export function CompetitorPage() {
           </Layout.Section>
 
           <Layout.Section>
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingMd">Monitoring coverage</Text>
+                    <Badge
+                      tone={
+                        overview.coverageSummary?.monitoringPosture === "Live monitoring"
+                          ? "success"
+                          : "attention"
+                      }
+                    >
+                      {overview.coverageSummary?.monitoringPosture}
+                    </Badge>
+                  </InlineStack>
+                  <Text as="p" tone="subdued">
+                    VedaSuite turns website, shopping-surface, and ad-pressure signals into one event-driven market view.
+                  </Text>
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                    <div className="vs-action-card">
+                      <Text as="p" variant="headingSm">Configured domains</Text>
+                      <Text as="p" variant="headingLg">
+                        {overview.coverageSummary?.domainsConfigured ?? 0}
+                      </Text>
+                    </div>
+                    <div className="vs-action-card">
+                      <Text as="p" variant="headingSm">Channels ready</Text>
+                      <BulletList
+                        items={overview.coverageSummary?.channelsReady ?? []}
+                        empty="Website monitoring, Google Shopping signals, and ad pressure watch will show up here after setup."
+                      />
+                    </div>
+                  </InlineGrid>
+                </BlockStack>
+              </Card>
+
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingMd">Weekly competitor brief</Text>
+                    <Badge tone={canSeeWeeklyReports ? "success" : "attention"}>
+                      {canSeeWeeklyReports ? "Included" : "Growth+"}
+                    </Badge>
+                  </InlineStack>
+                  <Text as="p" variant="headingSm">
+                    {overview.weeklyReport?.headline}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {overview.weeklyReport?.merchantBrief}
+                  </Text>
+                  <div className="vs-action-card">
+                    <Text as="p" variant="headingSm">Next best action</Text>
+                    <Text as="p" tone="subdued">
+                      {overview.weeklyReport?.nextBestAction}
+                    </Text>
+                  </div>
+                  <BulletList
+                    items={(overview.weeklyReport?.biggestMoves ?? []).map(
+                      (item) =>
+                        `${item.headline} (${item.impactScore}/100): ${item.suggestedAction}`
+                    )}
+                    empty="The weekly brief will highlight the biggest competitor moves once the first ingest completes."
+                  />
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </Layout.Section>
+
+          <Layout.Section>
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
@@ -481,8 +605,18 @@ export function CompetitorPage() {
                               <Badge tone={toneForPriority(item.priority)}>{`${item.priority} impact`}</Badge>
                             </InlineStack>
                             <Text as="p" tone="subdued">{`${item.moveType} via ${item.source}`}</Text>
+                            {item.eventCluster ? (
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {item.eventCluster}
+                              </Text>
+                            ) : null}
                             <Text as="p">{item.whyItMatters}</Text>
                             <Text as="p" variant="bodySm">{`What should I do? ${item.suggestedAction}`}</Text>
+                            {item.actionWindow ? (
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {`Action window: ${item.actionWindow}`}
+                              </Text>
+                            ) : null}
                           </BlockStack>
                           <Badge tone="info">{`${item.impactScore}/100`}</Badge>
                         </InlineStack>
@@ -539,6 +673,24 @@ export function CompetitorPage() {
                     </BlockStack>
                   </div>
                 </InlineGrid>
+                {(overview.weeklyReport?.biggestMoves ?? []).length > 0 ? (
+                  <Card>
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingMd">Biggest moves this week</Text>
+                      {(overview.weeklyReport?.biggestMoves ?? []).map((item) => (
+                        <InlineStack key={`${item.headline}-${item.impactScore}`} align="space-between" blockAlign="center">
+                          <BlockStack gap="100">
+                            <Text as="p">{item.headline}</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {item.suggestedAction}
+                            </Text>
+                          </BlockStack>
+                          <Badge tone="attention">{`${item.impactScore}/100`}</Badge>
+                        </InlineStack>
+                      ))}
+                    </BlockStack>
+                  </Card>
+                ) : null}
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -636,6 +788,36 @@ export function CompetitorPage() {
                       </Card>
                       <Card>
                         <BlockStack gap="200">
+                          <Text as="h3" variant="headingMd">Move feed detail</Text>
+                          {(overview.moveFeed ?? []).length === 0 ? (
+                            <Text as="p" tone="subdued">
+                              Detailed event explanations will appear once competitor ingestion is active.
+                            </Text>
+                          ) : (
+                            (overview.moveFeed ?? []).slice(0, 5).map((item) => (
+                              <div key={`${item.id}-detail`} className="vs-action-card">
+                                <InlineStack align="space-between" blockAlign="start">
+                                  <BlockStack gap="100">
+                                    <Text as="p" variant="headingSm">{item.moveType}</Text>
+                                    <Text as="p" tone="subdued">{item.eventCluster}</Text>
+                                    <Text as="p" variant="bodySm">
+                                      Why this matters: {item.whyItMatters}
+                                    </Text>
+                                    <Text as="p" variant="bodySm">
+                                      Action window: {item.actionWindow ?? "Monitor"}
+                                    </Text>
+                                  </BlockStack>
+                                  <Badge tone={toneForPriority(item.priority)}>
+                                    {item.priority}
+                                  </Badge>
+                                </InlineStack>
+                              </div>
+                            ))
+                          )}
+                        </BlockStack>
+                      </Card>
+                      <Card>
+                        <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Product launch alerts</Text>
                           {(overview.launchAlerts ?? []).length === 0 ? (
                             <Text as="p" tone="subdued">Launch watch alerts will appear once repeated new-product signals are detected.</Text>
@@ -695,6 +877,14 @@ export function CompetitorPage() {
                                     <Badge tone="info">{item.suggestion}</Badge>
                                   </InlineStack>
                                   <Text as="p" tone="subdued">{item.why}</Text>
+                                  {item.expectedOutcome ? (
+                                    <Text as="p" variant="bodySm">
+                                      Expected outcome: {item.expectedOutcome}
+                                    </Text>
+                                  ) : null}
+                                  {item.urgency ? (
+                                    <Badge tone="attention">{item.urgency}</Badge>
+                                  ) : null}
                                 </BlockStack>
                               </div>
                             ))
@@ -752,6 +942,12 @@ export function CompetitorPage() {
                                   <BlockStack gap="100">
                                     <Text as="p" variant="headingSm">{detection.strategy}</Text>
                                     <Text as="p" tone="subdued">{detection.why}</Text>
+                                    <Text as="p" variant="bodySm">
+                                      Why this matters: {detection.implication}
+                                    </Text>
+                                    <Text as="p" variant="bodySm">
+                                      Recommended move: {detection.recommendedMove}
+                                    </Text>
                                   </BlockStack>
                                   <Badge tone="attention">{detection.confidence}</Badge>
                                 </InlineStack>

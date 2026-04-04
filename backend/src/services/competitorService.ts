@@ -49,6 +49,62 @@ function inferSuggestedAction(args: {
   return "Wait and monitor";
 }
 
+function inferActionWindow(priority: string) {
+  if (priority === "High") return "Today";
+  if (priority === "Medium") return "This week";
+  return "Monitor";
+}
+
+function inferStrategyLabel(args: {
+  promotionCount: number;
+  stockAlerts: number;
+  adPressure: number;
+  launchAlerts: number;
+  averagePriceDelta: number;
+}) {
+  if (args.launchAlerts >= 2 && args.adPressure >= 3) {
+    return {
+      strategy: "Launch push",
+      confidence: args.launchAlerts >= 4 ? "High" : "Medium",
+      why: "Repeated launch-style signals are appearing with rising visibility pressure.",
+      implication: "A new competitor push can distract hero-SKU demand in the short term.",
+      recommendedMove: "Hold hero SKU margin, watch conversion, and reinforce merchandising.",
+    };
+  }
+
+  if (args.promotionCount >= 8 && args.averagePriceDelta < 0) {
+    return {
+      strategy: "Aggressive discounting",
+      confidence: args.promotionCount >= 14 ? "High" : "Medium",
+      why: "Promotion density is rising while competitor pricing trends downward.",
+      implication: "The competitor may be trying to pull demand with discount-led conversion.",
+      recommendedMove: "Respond selectively on exposed SKUs instead of broad matching.",
+    };
+  }
+
+  if (args.stockAlerts >= 4 && args.averagePriceDelta <= -1) {
+    return {
+      strategy: "Inventory clearing",
+      confidence: args.stockAlerts >= 8 ? "High" : "Medium",
+      why: "Stock pressure and lower prices suggest sell-through behavior.",
+      implication: "The window may be temporary if the competitor is clearing inventory.",
+      recommendedMove: "Wait or bundle unless your hero SKUs show repeated pressure.",
+    };
+  }
+
+  if (args.adPressure >= 4 && args.promotionCount >= 4) {
+    return {
+      strategy: "Market-share capture",
+      confidence: args.adPressure >= 8 ? "High" : "Medium",
+      why: "Visibility and promotion pressure are rising together across tracked signals.",
+      implication: "The competitor may be seeking broader reach, not just tactical conversion.",
+      recommendedMove: "Protect premium SKUs and reinforce value props before discounting.",
+    };
+  }
+
+  return null;
+}
+
 function buildGoogleShoppingSignal(
   domain: string,
   productHandle: string,
@@ -207,6 +263,16 @@ export async function getCompetitorOverview(shopDomain: string) {
     )
     .slice(0, 5);
 
+  const averagePriceDelta =
+    topMovers.length > 0
+      ? Number(
+          (
+            topMovers.reduce((sum, mover) => sum + mover.priceDelta, 0) /
+            topMovers.length
+          ).toFixed(2)
+        )
+      : 0;
+
   const lastIngestedAt = allRows[0]?.collectedAt ?? null;
   const freshnessHours = lastIngestedAt
     ? Number(
@@ -258,6 +324,13 @@ export async function getCompetitorOverview(shopDomain: string) {
       source: formatSourceLabel(row.source),
       priority: scorePriority(impactScore),
       impactScore,
+      actionWindow: inferActionWindow(scorePriority(impactScore)),
+      eventCluster:
+        row.promotion || row.adCopy
+          ? "Promotion and visibility"
+          : row.stockStatus === "out_of_stock" || row.stockStatus === "low_stock"
+          ? "Inventory and availability"
+          : "Pricing and market posture",
       whyItMatters:
         row.promotion ??
         row.adCopy ??
@@ -277,11 +350,20 @@ export async function getCompetitorOverview(shopDomain: string) {
   });
 
   const strategyDetections = [
+    inferStrategyLabel({
+      promotionCount: promoCount,
+      stockAlerts,
+      adPressure: sourceBreakdown.metaAds,
+      launchAlerts: launchAlerts.length,
+      averagePriceDelta,
+    }),
     promoCount >= 8
       ? {
           strategy: "Aggressive discounting",
           confidence: promoCount >= 15 ? "High" : "Medium",
           why: "Promotion density is rising across the monitored competitor set.",
+          implication: "Selective price defense may be needed on exposed products.",
+          recommendedMove: "Bundle or selectively respond rather than broad discounting.",
         }
       : null,
     stockAlerts >= 4
@@ -289,6 +371,8 @@ export async function getCompetitorOverview(shopDomain: string) {
           strategy: "Inventory clearing",
           confidence: stockAlerts >= 8 ? "High" : "Medium",
           why: "Stock pressure and price movement suggest sell-through behavior.",
+          implication: "Pressure may ease after inventory clears, so reactive discounting could be temporary.",
+          recommendedMove: "Monitor high-pressure SKUs and protect margin where signals soften.",
         }
       : null,
     launchAlerts.length > 0
@@ -296,6 +380,8 @@ export async function getCompetitorOverview(shopDomain: string) {
           strategy: "Launch push",
           confidence: launchAlerts.length >= 3 ? "High" : "Medium",
           why: "Repeated fresh signals across new SKUs point to active launch activity.",
+          implication: "The competitor may be seeking short-term visibility and conversion around launches.",
+          recommendedMove: "Reinforce hero product merchandising and avoid blanket repricing.",
         }
       : null,
     sourceBreakdown.metaAds >= 4
@@ -303,12 +389,20 @@ export async function getCompetitorOverview(shopDomain: string) {
           strategy: "Market-share capture",
           confidence: sourceBreakdown.metaAds >= 8 ? "High" : "Medium",
           why: "Ad pressure is increasing alongside pricing visibility across key surfaces.",
+          implication: "A sustained visibility push can pressure click-through and conversion on overlapping SKUs.",
+          recommendedMove: "Promote differentiated offers before broad price changes.",
         }
       : null,
   ].filter(
     (
       item
-    ): item is { strategy: string; confidence: string; why: string } => item !== null
+    ): item is {
+      strategy: string;
+      confidence: string;
+      why: string;
+      implication: string;
+      recommendedMove: string;
+    } => item !== null
   );
 
   const actionSuggestions = topMovers.slice(0, 4).map((mover) => ({
@@ -329,6 +423,18 @@ export async function getCompetitorOverview(shopDomain: string) {
         : mover.stockSignals > 0
         ? "Competitor stock posture may ease pressure without immediate discounting."
         : "Current movement does not yet justify a reactive pricing change.",
+    urgency:
+      mover.promotionSignals >= 2 || Math.abs(mover.priceDelta) >= 2
+        ? "Act this week"
+        : "Monitor",
+    expectedOutcome:
+      mover.promotionSignals >= 2
+        ? "Protect conversion without broad margin erosion."
+        : mover.priceDelta <= -2
+        ? "Reduce demand leakage on exposed SKUs."
+        : mover.stockSignals > 0
+        ? "Preserve margin while the competitor availability story develops."
+        : "Avoid unnecessary reactions and preserve pricing discipline.",
   }));
 
   const weeklyReport = {
@@ -346,6 +452,17 @@ export async function getCompetitorOverview(shopDomain: string) {
         : ["Run first ingestion to build your first weekly competitor brief."],
     reportReadiness:
       recentRows.length > 0 ? "Weekly report can be generated" : "Awaiting competitor ingestion",
+    biggestMoves: moveFeed.slice(0, 3).map((item) => ({
+      headline: item.headline,
+      impactScore: item.impactScore,
+      suggestedAction: item.suggestedAction,
+    })),
+    merchantBrief:
+      strategyDetections[0]?.implication ??
+      "The competitor brief will summarize why the biggest changes matter for your catalog.",
+    nextBestAction:
+      actionSuggestions[0]?.suggestion ??
+      "Add competitor domains and run ingestion to unlock the first action brief.",
   };
 
   return {
@@ -370,6 +487,20 @@ export async function getCompetitorOverview(shopDomain: string) {
     strategyDetections,
     actionSuggestions,
     weeklyReport,
+    coverageSummary: {
+      domainsConfigured: domains,
+      channelsReady: [
+        sourceBreakdown.website > 0 ? "Website monitoring" : null,
+        sourceBreakdown.googleShopping > 0 ? "Google Shopping" : null,
+        sourceBreakdown.metaAds > 0 ? "Ad pressure watch" : null,
+      ].filter((item): item is string => item !== null),
+      monitoringPosture:
+        recentRows.length > 0
+          ? "Live monitoring"
+          : domains > 0
+          ? "Configured, awaiting ingestion"
+          : "Needs setup",
+    },
   };
 }
 
