@@ -39,7 +39,12 @@ class FrontendErrorBoundary extends React.Component<
       return this.props.children;
     }
 
-    const { shop } = getEmbeddedContext();
+    const { shop, host } = getEmbeddedContext();
+    const reconnectPath = shop
+      ? `/auth/install?shop=${encodeURIComponent(shop)}${
+          host ? `&host=${encodeURIComponent(host)}` : ""
+        }&returnTo=${encodeURIComponent(window.location.pathname)}`
+      : null;
 
     return (
       <Page title="VedaSuite AI">
@@ -64,14 +69,10 @@ class FrontendErrorBoundary extends React.Component<
                 ) : null}
                 <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem" }}>
                   <Button onClick={() => window.location.reload()}>Refresh app</Button>
-                  {shop ? (
+                  {reconnectPath ? (
                     <Button
                       variant="primary"
-                      onClick={() =>
-                        (window.top ?? window).location.assign(
-                          `/auth/install?shop=${encodeURIComponent(shop)}`
-                        )
-                      }
+                      onClick={() => (window.top ?? window).location.assign(reconnectPath)}
                     >
                       Reconnect Shopify
                     </Button>

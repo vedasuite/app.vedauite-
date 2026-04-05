@@ -12,6 +12,7 @@ import {
 import { logEvent } from "../services/observabilityService";
 
 function sendAuthError(
+  req: Request,
   res: Response,
   status: number,
   code:
@@ -21,11 +22,24 @@ function sendAuthError(
   message: string,
   shop?: string | null
 ) {
+  const host =
+    typeof req.query.host === "string"
+      ? req.query.host
+      : typeof req.body?.host === "string"
+      ? req.body.host
+      : undefined;
+  const returnTo =
+    typeof req.query.returnTo === "string"
+      ? req.query.returnTo
+      : typeof req.body?.returnTo === "string"
+      ? req.body.returnTo
+      : req.path;
+
   return res.status(status).json({
     error: {
       code,
       message,
-      reauthorizeUrl: buildReauthorizeUrl(shop),
+      reauthorizeUrl: buildReauthorizeUrl(shop, returnTo, host),
     },
   });
 }
@@ -45,6 +59,7 @@ export function verifyShopifySessionToken(
 
   if (!requestedShop && !cookieShop) {
     return sendAuthError(
+      req,
       res,
       401,
       "MISSING_SHOP",
@@ -59,6 +74,7 @@ export function verifyShopifySessionToken(
 
     if (requestedShop && cookieShop !== requestedShop) {
       return sendAuthError(
+        req,
         res,
         403,
         "INVALID_SHOPIFY_SESSION_TOKEN",
@@ -93,6 +109,7 @@ export function verifyShopifySessionToken(
 
     if (requestedShop && tokenShop && requestedShop !== tokenShop) {
       return sendAuthError(
+        req,
         res,
         403,
         "INVALID_SHOPIFY_SESSION_TOKEN",
@@ -120,6 +137,7 @@ export function verifyShopifySessionToken(
 
     clearShopifySessionCookie(res);
     return sendAuthError(
+      req,
       res,
       401,
       "INVALID_SHOPIFY_SESSION_TOKEN",

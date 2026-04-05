@@ -2,6 +2,8 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { env } from "../config/env";
+import { prisma } from "../db/prismaClient";
+import { normalizeShopDomain } from "../services/shopifyConnectionService";
 
 export const launchRouter = Router();
 
@@ -9,11 +11,29 @@ function routeUrl(route: string) {
   return new URL(route, env.shopifyAppUrl).toString();
 }
 
-launchRouter.get("/launch/audit", (_req, res) => {
+launchRouter.get("/launch/audit", async (req, res) => {
   const appTomlPath = path.resolve(process.cwd(), "shopify.app.toml");
   const appTomlContents = fs.existsSync(appTomlPath)
     ? fs.readFileSync(appTomlPath, "utf8")
     : "";
+  const requestedShop =
+    typeof req.query.shop === "string" ? normalizeShopDomain(req.query.shop) : null;
+
+  const store = requestedShop
+    ? await prisma.store.findUnique({
+        where: { shop: requestedShop },
+        select: {
+          shop: true,
+          accessToken: true,
+          lastSyncStatus: true,
+          lastSyncAt: true,
+          webhooksRegisteredAt: true,
+          lastWebhookRegistrationStatus: true,
+          uninstalledAt: true,
+        },
+      })
+    : null;
+
   const checks = [
     {
       key: "shopify_app_url",
@@ -28,8 +48,60 @@ launchRouter.get("/launch/audit", (_req, res) => {
       detail: env.shopifyAppUrl || "Missing SHOPIFY_APP_URL",
     },
     {
-      key: "billing_scope",
-      ok: env.shopifyScopes.includes("write_own_subscription"),
+      key: "redirect_url_configured",
+      ok: appTomlContents.includes("/auth/callback"),
+      detail: routeUrl("/auth/callback"),
+    },
+    {
+      key: "application_url_matches_production",
+      ok: appTomlContents.includes(`application_url = "${env.shopifyAppUrl}"`),
+      detail: env.shopifyAppUrl,
+    },
+    {
+      key: "webhook_routes_match_backend",
+      ok:
+        appTomlContents.includes('/webhooks/shopify/app_uninstalled') &&
+        appTomlContents.includes('/webhooks/shopify/orders_create') &&
+        appTomlContents.includes('/webhooks/shopify/orders_updated') &&
+        appTomlContents.includes('/webhooks/shopify/customers_create') &&
+        appTomlContents.includes('/webhooks/shopify/customers_update') &&
+        appTomlContents.includes('/webhooks/shopify/app_subscriptions_update'),
+      detail: "/webhooks/shopify/* routes present in shopify.app.toml",
+    },
+    {
+      key: "offline_token_present",
+      ok: !!store?.accessToken && !store?.uninstalledAt,
+      detail: store?.accessToken
+        ? `Offline token stored for ${store.shop}`
+        : requestedShop
+        ? `No offline token stored for ${requestedShop}`
+        : "Add ?shop=<shop>.myshopify.com to audit a store installation.",
+    },
+    {
+      key: "last_sync_status",
+      ok: !!store?.lastSyncStatus && store.lastSyncStatus !== "FAILED",
+      detail:
+        store?.lastSyncStatus != null
+          ? `${store.lastSyncStatus}${store.lastSyncAt ? ` at ${store.lastSyncAt.toISOString()}` : ""}`
+          : requestedShop
+          ? "No sync has completed yet."
+          : "No shop selected for sync status.",
+    },
+    {
+      key: "required_webhooks_registered",
+      ok:
+        !!store?.webhooksRegisteredAt &&
+        store.lastWebhookRegistrationStatus !== "FAILED",
+      detail:
+        store?.webhooksRegisteredAt != null
+          ? `Registered at ${store.webhooksRegisteredAt.toISOString()}`
+          : requestedShop
+          ? "Mandatory webhooks are not registered yet."
+          : "No shop selected for webhook status.",
+    },
+    {
+      key: "orders_scope",
+      ok: env.shopifyScopes.includes("read_orders"),
       detail: env.shopifyScopes,
     },
     {
@@ -53,11 +125,6 @@ launchRouter.get("/launch/audit", (_req, res) => {
       detail: env.publicContact.supportUrl,
     },
     {
-      key: "compliance_export_dir",
-      ok: Boolean(env.complianceExportDir),
-      detail: path.resolve(process.cwd(), env.complianceExportDir),
-    },
-    {
       key: "shopify_app_toml",
       ok: fs.existsSync(appTomlPath),
       detail: appTomlPath,
@@ -75,35 +142,25 @@ launchRouter.get("/launch/audit", (_req, res) => {
       ok: appTomlContents.includes("app/uninstalled"),
       detail: "app/uninstalled",
     },
-    {
-      key: "shared_fraud_network_review_safe",
-      ok: true,
-      detail:
-        "Shared fraud logic is merchant opt-in and currently limited to anonymized hashing; no raw cross-merchant PII exchange is enabled in-app.",
-    },
   ];
 
   res.json({
     app: "VedaSuite AI",
     generatedAt: new Date().toISOString(),
-    readinessScore: {
-      productBuild: 80,
-      shopifyIntegration: 89,
-      appReviewReadiness: 87,
-      repoSideCompletion: 97,
-    },
+    shop: requestedShop,
     publicRoutes: {
       privacy: routeUrl("/legal/privacy"),
       terms: routeUrl("/legal/terms"),
       support: routeUrl("/support"),
       readiness: routeUrl("/launch/readiness"),
       audit: routeUrl("/launch/audit"),
+      diagnosticsHint: "Open /api/shopify/diagnostics from an authenticated embedded app session.",
     },
     checks,
     externalActions: [
       "Complete protected customer data declarations in Shopify Partner Dashboard",
       "Upload app icon, screenshots, and review/demo video",
-      "Run final production-app QA against the linked Shopify app",
+      "Run final production QA against the connected Shopify store",
     ],
   });
 });

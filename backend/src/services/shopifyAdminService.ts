@@ -598,7 +598,14 @@ export async function fetchCompetitorSnapshot(
   domain: string,
   productHandle: string,
   fallbackPrice: number
-) {
+): Promise<{
+  competitorUrl: string;
+  price: number;
+  promotion: string | null;
+  stockStatus: string;
+  source: string;
+  adCopy: string | null;
+} | null> {
   try {
     return await withRetry(
       async () => {
@@ -630,6 +637,7 @@ export async function fetchCompetitorSnapshot(
             );
 
           return {
+            competitorUrl: `https://${domain}/products/${productHandle}`,
             price: priceMatch ? Number(priceMatch[1]) : fallbackPrice,
             promotion: /sale|discount|bundle|offer/.test(lowerHtml)
               ? "Live promo detected"
@@ -640,6 +648,7 @@ export async function fetchCompetitorSnapshot(
               ? "low_stock"
               : "in_stock",
             source: "website_live",
+            adCopy: null,
           };
         } finally {
           clearTimeout(timeout);

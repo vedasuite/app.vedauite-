@@ -1,13 +1,13 @@
-import { type Response, Router } from "express";
+import { type Request, type Response, Router } from "express";
+import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
 import {
-  assertHealthyOfflineAccess,
   buildReauthorizeUrl,
   getConnectionHealth,
-  normalizeShopDomain,
   ShopifyConnectionError,
   type ShopifyConnectionCode,
 } from "../services/shopifyConnectionService";
+import { getCurrentSubscription } from "../services/subscriptionService";
 import {
   getSyncWebhookStatus,
   registerSyncWebhooks,
@@ -19,9 +19,34 @@ import {
 
 export const shopifyRouter = Router();
 
+type ShopifyRequest = Request & { shopifySession?: { shop?: string } };
+
+function resolveShopFromRequest(req: ShopifyRequest) {
+  return (
+    req.shopifySession?.shop ??
+    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
+    (typeof req.body?.shop === "string" ? req.body.shop : undefined)
+  );
+}
+
+function resolveEmbeddedContext(req: ShopifyRequest) {
+  const queryHost = typeof req.query.host === "string" ? req.query.host : undefined;
+  const bodyHost = typeof req.body?.host === "string" ? req.body.host : undefined;
+  const queryReturnTo =
+    typeof req.query.returnTo === "string" ? req.query.returnTo : undefined;
+  const bodyReturnTo =
+    typeof req.body?.returnTo === "string" ? req.body.returnTo : undefined;
+
+  return {
+    host: queryHost ?? bodyHost ?? null,
+    returnTo: queryReturnTo ?? bodyReturnTo ?? req.path ?? "/",
+  };
+}
+
 function sendStructuredConnectionError(
   res: Response,
   shop: string | undefined,
+  context: { host?: string | null; returnTo?: string | null },
   error: unknown,
   fallbackMessage: string
 ) {
@@ -37,7 +62,7 @@ function sendStructuredConnectionError(
   const reauthorizeUrl =
     error instanceof ShopifyConnectionError && error.reauthorizeUrl
       ? error.reauthorizeUrl
-      : buildReauthorizeUrl(shop);
+      : buildReauthorizeUrl(shop, context.returnTo, context.host);
 
   return res.status(401).json({
     error: {
@@ -48,23 +73,117 @@ function sendStructuredConnectionError(
   });
 }
 
+shopifyRouter.get("/diagnostics", async (req, res) => {
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+  const context = resolveEmbeddedContext(request);
+
+  if (!shop) {
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
+  }
+
+  const [health, store, latestSyncJob, subscription] = await Promise.all([
+    getConnectionHealth(shop, {
+      probeApi: true,
+      host: context.host,
+      returnTo: context.returnTo,
+    }),
+    prisma.store.findUnique({
+      where: { shop },
+      select: {
+        shop: true,
+        installedAt: true,
+        reauthorizedAt: true,
+        uninstalledAt: true,
+        grantedScopes: true,
+        isOffline: true,
+        accessToken: true,
+        webhooksRegisteredAt: true,
+        lastWebhookRegistrationStatus: true,
+        lastSyncAt: true,
+        lastSyncStatus: true,
+        lastConnectionCheckAt: true,
+        lastConnectionStatus: true,
+        authErrorCode: true,
+        authErrorMessage: true,
+      },
+    }),
+    getLatestSyncJob(shop),
+    getCurrentSubscription(shop).catch(() => null),
+  ]);
+
+  let webhookStatus: Awaited<ReturnType<typeof getSyncWebhookStatus>> | null = null;
+  if (health.hasOfflineToken && !health.reauthRequired && !health.shop?.includes(" ")) {
+    try {
+      webhookStatus = await getSyncWebhookStatus(shop, env.shopifyAppUrl);
+    } catch {
+      webhookStatus = null;
+    }
+  }
+
+  return res.json({
+    generatedAt: new Date().toISOString(),
+    shop,
+    installation: {
+      found: !!store,
+      installedAt: store?.installedAt?.toISOString() ?? null,
+      reauthorizedAt: store?.reauthorizedAt?.toISOString() ?? null,
+      uninstalledAt: store?.uninstalledAt?.toISOString() ?? null,
+      grantedScopes: store?.grantedScopes ?? null,
+      offlineTokenPresent: !!store?.accessToken,
+      isOffline: store?.isOffline ?? false,
+      authErrorCode: store?.authErrorCode ?? null,
+      authErrorMessage: store?.authErrorMessage ?? null,
+    },
+    connection: health,
+    webhooks: {
+      registeredAt: store?.webhooksRegisteredAt?.toISOString() ?? null,
+      lastStatus: store?.lastWebhookRegistrationStatus ?? null,
+      liveStatus: webhookStatus,
+    },
+    sync: {
+      lastSyncAt: store?.lastSyncAt?.toISOString() ?? null,
+      lastSyncStatus: store?.lastSyncStatus ?? null,
+      latestJob: latestSyncJob,
+    },
+    billing: subscription
+      ? {
+          planName: subscription.planName,
+          status: subscription.status,
+          billingStatus: subscription.billingStatus ?? null,
+          active: subscription.active,
+          starterModule: subscription.starterModule ?? null,
+          endsAt: subscription.endsAt,
+          trialEndsAt: subscription.trialEndsAt,
+        }
+      : null,
+  });
+});
+
 shopifyRouter.get("/connection-health", async (req, res) => {
-  const shop =
-    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
-    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+  const context = resolveEmbeddedContext(request);
   const result = await getConnectionHealth(
     shop,
-    { probeApi: true }
+    {
+      probeApi: true,
+      host: context.host,
+      returnTo: context.returnTo,
+    }
   );
   return res.json({ result });
 });
 
 shopifyRouter.post("/sync", async (req, res) => {
-  const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
-    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+  const context = resolveEmbeddedContext(request);
 
   if (!shop) {
     return res.status(400).json({
@@ -76,7 +195,17 @@ shopifyRouter.post("/sync", async (req, res) => {
   }
 
   try {
-    await assertHealthyOfflineAccess(shop);
+    await getConnectionHealth(shop, {
+      probeApi: true,
+      host: context.host,
+      returnTo: context.returnTo,
+    }).then((health) => {
+      if (!health.healthy) {
+        throw new ShopifyConnectionError(health.code, health.message, {
+          reauthorizeUrl: health.reauthorizeUrl,
+        });
+      }
+    });
     const result = await startStoreSyncJob(shop, "manual");
     return res.json({ result });
   } catch (error) {
@@ -84,6 +213,7 @@ shopifyRouter.post("/sync", async (req, res) => {
       return sendStructuredConnectionError(
         res,
         shop,
+        context,
         error,
         "Unable to sync Shopify data."
       );
@@ -102,9 +232,9 @@ shopifyRouter.post("/sync", async (req, res) => {
 });
 
 shopifyRouter.get("/sync-jobs/latest", async (req, res) => {
-  const { shop } = req.query;
+  const shop = resolveShopFromRequest(req as ShopifyRequest);
 
-  if (!shop || typeof shop !== "string") {
+  if (!shop) {
     return res.status(400).json({
       error: {
         code: "MISSING_SHOP",
@@ -118,11 +248,9 @@ shopifyRouter.get("/sync-jobs/latest", async (req, res) => {
 });
 
 shopifyRouter.post("/register-webhooks", async (req, res) => {
-  const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
-    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+  const context = resolveEmbeddedContext(request);
 
   if (!shop) {
     return res.status(400).json({
@@ -134,7 +262,17 @@ shopifyRouter.post("/register-webhooks", async (req, res) => {
   }
 
   try {
-    await assertHealthyOfflineAccess(shop);
+    await getConnectionHealth(shop, {
+      probeApi: true,
+      host: context.host,
+      returnTo: context.returnTo,
+    }).then((health) => {
+      if (!health.healthy) {
+        throw new ShopifyConnectionError(health.code, health.message, {
+          reauthorizeUrl: health.reauthorizeUrl,
+        });
+      }
+    });
     const result = await registerSyncWebhooks(shop, env.shopifyAppUrl);
     return res.json({ result });
   } catch (error) {
@@ -142,6 +280,7 @@ shopifyRouter.post("/register-webhooks", async (req, res) => {
       return sendStructuredConnectionError(
         res,
         shop,
+        context,
         error,
         "Unable to register Shopify sync webhooks."
       );
@@ -160,9 +299,9 @@ shopifyRouter.post("/register-webhooks", async (req, res) => {
 });
 
 shopifyRouter.get("/webhook-status", async (req, res) => {
-  const { shop } = req.query;
+  const shop = resolveShopFromRequest(req as ShopifyRequest);
 
-  if (!shop || typeof shop !== "string") {
+  if (!shop) {
     return res.status(400).json({
       error: {
         code: "MISSING_SHOP",

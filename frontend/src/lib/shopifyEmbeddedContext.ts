@@ -10,20 +10,55 @@ function canUseSessionStorage() {
   return typeof window !== "undefined" && !!window.sessionStorage;
 }
 
-function readStoredValue(key: string) {
-  if (!canUseSessionStorage()) {
+function canUseLocalStorage() {
+  return typeof window !== "undefined" && !!window.localStorage;
+}
+
+function normalizeShop(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(normalized)) {
     return "";
   }
 
-  return window.sessionStorage.getItem(key) ?? "";
+  return normalized;
+}
+
+function normalizeHost(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    return btoa(atob(trimmed)) === trimmed ? trimmed : "";
+  } catch {
+    return "";
+  }
+}
+
+function readStoredValue(key: string) {
+  if (!canUseSessionStorage() && !canUseLocalStorage()) {
+    return "";
+  }
+
+  return (
+    (canUseSessionStorage() ? window.sessionStorage.getItem(key) : null) ??
+    (canUseLocalStorage() ? window.localStorage.getItem(key) : null) ??
+    ""
+  );
 }
 
 function writeStoredValue(key: string, value: string) {
-  if (!canUseSessionStorage() || !value) {
+  if (!value) {
     return;
   }
 
-  window.sessionStorage.setItem(key, value);
+  if (canUseSessionStorage()) {
+    window.sessionStorage.setItem(key, value);
+  }
+  if (canUseLocalStorage()) {
+    window.localStorage.setItem(key, value);
+  }
 }
 
 function parseShopFromReferrer() {
@@ -50,11 +85,15 @@ export function getEmbeddedContext(): EmbeddedContext {
   }
 
   const params = new URLSearchParams(window.location.search);
-  const urlHost = params.get("host") ?? "";
-  const urlShop = params.get("shop") ?? "";
+  const urlHost = normalizeHost(params.get("host") ?? "");
+  const urlShop = normalizeShop(params.get("shop") ?? "");
 
-  const host = urlHost || readStoredValue(HOST_STORAGE_KEY);
-  const shop = urlShop || readStoredValue(SHOP_STORAGE_KEY) || parseShopFromReferrer();
+  const storedHost = normalizeHost(readStoredValue(HOST_STORAGE_KEY));
+  const storedShop = normalizeShop(readStoredValue(SHOP_STORAGE_KEY));
+  const referrerShop = normalizeShop(parseShopFromReferrer());
+
+  const host = urlHost || storedHost;
+  const shop = urlShop || storedShop || referrerShop;
 
   if (urlHost) {
     writeStoredValue(HOST_STORAGE_KEY, urlHost);

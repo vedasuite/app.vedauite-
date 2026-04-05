@@ -84,27 +84,17 @@ function buildInstallUrl(shop: string, state: string) {
   return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
 }
 
-function buildAdminAppUrl(shop: string) {
-  const storeHandle = shop.replace(".myshopify.com", "");
-  return `https://admin.shopify.com/store/${encodeURIComponent(
-    storeHandle
-  )}/apps/${encodeURIComponent(env.shopifyApiKey)}`;
-}
-
 function buildEmbeddedReturnUrl(options: {
   shop: string;
   host?: string | null;
   returnTo?: string | null;
 }) {
   const returnTo = normalizeReturnPath(options.returnTo);
-
-  if (!options.host) {
-    return buildAdminAppUrl(options.shop);
-  }
-
   const url = new URL(returnTo, env.shopifyAppUrl);
   url.searchParams.set("shop", options.shop);
-  url.searchParams.set("host", options.host);
+  if (options.host) {
+    url.searchParams.set("host", options.host);
+  }
   url.searchParams.set("embedded", "1");
   return url.toString();
 }

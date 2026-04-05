@@ -36,6 +36,11 @@ export type ShopifyConnectionHealth = {
   reauthorizeUrl?: string;
 };
 
+type ReauthorizeContext = {
+  host?: string | null;
+  returnTo?: string | null;
+};
+
 type InstallationRecord = Awaited<ReturnType<typeof getOfflineInstallation>>;
 
 type ConnectionDiagnosticUpdate = {
@@ -100,7 +105,23 @@ export function normalizeShopDomain(shop?: string | null) {
   return normalized;
 }
 
-export function buildReauthorizeUrl(shop?: string | null, returnTo?: string | null) {
+function normalizeReturnTo(returnTo?: string | null) {
+  if (!returnTo || typeof returnTo !== "string") {
+    return null;
+  }
+
+  if (!returnTo.startsWith("/") || returnTo.startsWith("//")) {
+    return null;
+  }
+
+  return returnTo;
+}
+
+export function buildReauthorizeUrl(
+  shop?: string | null,
+  returnTo?: string | null,
+  host?: string | null
+) {
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
     return undefined;
@@ -108,8 +129,12 @@ export function buildReauthorizeUrl(shop?: string | null, returnTo?: string | nu
 
   const url = new URL("/auth/reconnect", env.shopifyAppUrl);
   url.searchParams.set("shop", normalizedShop);
-  if (returnTo?.startsWith("/")) {
-    url.searchParams.set("returnTo", returnTo);
+  const normalizedReturnTo = normalizeReturnTo(returnTo);
+  if (normalizedReturnTo) {
+    url.searchParams.set("returnTo", normalizedReturnTo);
+  }
+  if (host && typeof host === "string" && host.trim()) {
+    url.searchParams.set("host", host.trim());
   }
   return url.toString();
 }
@@ -402,7 +427,7 @@ async function probeShopApi(shop: string, accessToken: string) {
 
 export async function getConnectionHealth(
   shop?: string | null,
-  options: { probeApi?: boolean } = {}
+  options: { probeApi?: boolean } & ReauthorizeContext = {}
 ): Promise<ShopifyConnectionHealth> {
   const normalizedShop = normalizeShopDomain(shop);
 
@@ -447,7 +472,11 @@ export async function getConnectionHealth(
       authErrorMessage: `No Shopify installation record was found for ${normalizedShop}.`,
       reauthRequired: true,
       message: `No Shopify installation record was found for ${normalizedShop}.`,
-      reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
+      reauthorizeUrl: buildReauthorizeUrl(
+        normalizedShop,
+        options.returnTo,
+        options.host
+      ),
     };
   }
 
@@ -490,7 +519,11 @@ export async function getConnectionHealth(
       `This Shopify installation was previously uninstalled and must be reconnected.`,
       {
         reauthRequired: true,
-        reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
+        reauthorizeUrl: buildReauthorizeUrl(
+          normalizedShop,
+          options.returnTo,
+          options.host
+        ),
       }
     );
   }
@@ -501,7 +534,11 @@ export async function getConnectionHealth(
       `The stored Shopify offline access token is missing for ${normalizedShop}.`,
       {
         reauthRequired: true,
-        reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
+        reauthorizeUrl: buildReauthorizeUrl(
+          normalizedShop,
+          options.returnTo,
+          options.host
+        ),
       }
     );
   }
@@ -531,8 +568,14 @@ export async function getConnectionHealth(
         ? error
         : new ShopifyConnectionError(
             "STALE_CONNECTION",
-            error instanceof Error ? error.message : "Unable to verify Shopify connection.",
-            { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+          error instanceof Error ? error.message : "Unable to verify Shopify connection.",
+            {
+              reauthorizeUrl: buildReauthorizeUrl(
+                normalizedShop,
+                options.returnTo,
+                options.host
+              ),
+            }
           );
 
     await updateConnectionDiagnostics(normalizedShop, {
@@ -557,7 +600,7 @@ export async function getConnectionHealth(
         connectionError.code === "SHOPIFY_AUTH_REQUIRED" ||
         connectionError.code === "MISSING_OFFLINE_TOKEN" ||
         connectionError.code === "UNINSTALLED" ||
-        connectionError.code === "STALE_CONNECTION",
+        connectionError.code === "MISSING_INSTALLATION",
       message: connectionError.message,
       authErrorCode: connectionError.code,
       authErrorMessage: connectionError.message,

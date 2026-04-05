@@ -121,8 +121,12 @@ export function createApp() {
 
     const redirectUrl = new URL("/auth/reconnect", env.shopifyAppUrl);
     redirectUrl.searchParams.set("shop", shop);
-    if (typeof req.query.host === "string" && req.query.host) {
-      redirectUrl.searchParams.set("host", req.query.host);
+    const host =
+      typeof req.query.host === "string" && req.query.host
+        ? req.query.host
+        : undefined;
+    if (host) {
+      redirectUrl.searchParams.set("host", host);
     }
     if (typeof req.query.returnTo === "string" && req.query.returnTo.startsWith("/")) {
       redirectUrl.searchParams.set("returnTo", req.query.returnTo);
@@ -177,12 +181,14 @@ export function createApp() {
       const token = await getToken(shop);
 
       if (!token) {
-        return redirectTopLevel(
-          res,
-          `/auth?shop=${encodeURIComponent(shop)}&returnTo=${encodeURIComponent(
-            req.path
-          )}`
-        );
+        const reconnectUrl = new URL("/auth", env.shopifyAppUrl);
+        reconnectUrl.searchParams.set("shop", shop);
+        reconnectUrl.searchParams.set("returnTo", req.path);
+        if (typeof req.query.host === "string" && req.query.host) {
+          reconnectUrl.searchParams.set("host", req.query.host);
+        }
+
+        return redirectTopLevel(res, reconnectUrl.toString());
       }
 
       if (env.enableDemoBootstrap) {

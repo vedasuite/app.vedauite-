@@ -30,6 +30,9 @@ type Metrics = {
   promotionAlerts: number;
   aiPricingSuggestions: number;
   profitOptimizationOpportunities: number;
+  lastSyncStatus?: string;
+  lastSyncAt?: string | null;
+  timelineEventsGenerated?: number;
 };
 
 type WebhookStatus = {
@@ -173,7 +176,7 @@ const fallbackMetrics: Metrics = {
 
 export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const { shop } = useAppBridge();
+  const { shop, host } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
   const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
   const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? fallbackMetrics);
@@ -195,9 +198,9 @@ export function DashboardPage() {
   const [onboardingStep, setOnboardingStep] = useState(0);
 
   const fallbackReauthorizeUrl = shop
-    ? `/auth/reconnect?shop=${encodeURIComponent(shop)}&returnTo=${encodeURIComponent(
-        window.location.pathname
-      )}`
+    ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
+        host ? `&host=${encodeURIComponent(host)}` : ""
+      }&returnTo=${encodeURIComponent(window.location.pathname)}`
     : null;
 
   const pollSyncJob = async (jobId?: string | null) => {
@@ -265,7 +268,13 @@ export function DashboardPage() {
 
   const loadConnectionHealth = () => {
     embeddedShopRequest<{ result: ConnectionHealth }>(
-      "/api/shopify/connection-health",
+      `/api/shopify/connection-health${
+        host
+          ? `?host=${encodeURIComponent(host)}&returnTo=${encodeURIComponent(
+              window.location.pathname
+            )}`
+          : ""
+      }`,
       { timeoutMs: 20000 }
     )
       .then((res) => {
@@ -305,7 +314,7 @@ export function DashboardPage() {
     })
       .then((res) => setDecisionCenter(res))
       .catch(() => setDecisionCenter(null));
-  }, []);
+  }, [host]);
 
   useEffect(() => {
     if (!shop) {
@@ -348,6 +357,10 @@ export function DashboardPage() {
       setActionError(null);
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
         method: "POST",
+        body: {
+          host,
+          returnTo: window.location.pathname,
+        },
         timeoutMs: 20000,
       });
       loadConnectionHealth();
@@ -390,6 +403,10 @@ export function DashboardPage() {
         result: { created: string[]; totalTracked: number };
       }>("/api/shopify/register-webhooks", {
         method: "POST",
+        body: {
+          host,
+          returnTo: window.location.pathname,
+        },
         timeoutMs: 90000,
       });
       setToast(
@@ -632,10 +649,18 @@ export function DashboardPage() {
         </Layout.Section>
 
         <Layout.Section>
-          <Banner title="Weekly AI briefing ready" tone="info">
+          <Banner
+            title={
+              metrics.lastSyncStatus === "SUCCEEDED"
+                ? "Store signals are synced"
+                : "Run first sync to populate live intelligence"
+            }
+            tone={metrics.lastSyncStatus === "SUCCEEDED" ? "info" : "warning"}
+          >
             <p>
-              Fraud activity is contained, competitor movement is rising, and one
-              pricing recommendation is ready for review today.
+              {metrics.lastSyncStatus === "SUCCEEDED"
+                ? `VedaSuite is showing live order, pricing, and timeline outputs${metrics.lastSyncAt ? ` from the latest sync at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}.`
+                : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes."}
             </p>
             <Box paddingBlockStart="300">
               <Button onClick={() => setOnboardingOpen(true)}>Open onboarding guide</Button>
@@ -675,10 +700,10 @@ export function DashboardPage() {
                 <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
                   <div className="vs-signal-stat">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Protected revenue
+                        Timeline events
                     </Text>
                     <Text as="p" variant="headingLg">
-                      ${metrics.highRiskOrders * 340}
+                      {metrics.timelineEventsGenerated ?? 0}
                     </Text>
                   </div>
                   <div className="vs-signal-stat">
@@ -1035,8 +1060,7 @@ export function DashboardPage() {
                           Current suite posture
                         </Text>
                         <Text as="p" tone="subdued">
-                          Your store is connected, seeded with intelligence signals,
-                          and ready for deeper module configuration.
+                          Your store is connected. Live intelligence will deepen as syncs, webhooks, and competitor ingestion complete.
                         </Text>
                       </BlockStack>
                     </Card>

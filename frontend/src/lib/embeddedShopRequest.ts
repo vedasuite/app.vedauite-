@@ -1,5 +1,4 @@
 import { withRequestTimeout } from "./requestTimeout";
-import { getEmbeddedSessionToken } from "../shopifyAppBridge";
 import { getEmbeddedContext } from "./shopifyEmbeddedContext";
 
 type EmbeddedRequestOptions = {
@@ -10,12 +9,13 @@ type EmbeddedRequestOptions = {
 
 function buildUrl(path: string) {
   const url = new URL(path, window.location.origin);
+  const isProtectedApiRoute = path.startsWith("/api/");
   const { shop, host } = getEmbeddedContext();
 
-  if (shop) {
+  if (!isProtectedApiRoute && shop) {
     url.searchParams.set("shop", shop);
   }
-  if (host) {
+  if (!isProtectedApiRoute && host) {
     url.searchParams.set("host", host);
   }
 
@@ -23,12 +23,17 @@ function buildUrl(path: string) {
 }
 
 function buildRequestBody(
+  path: string,
   method: EmbeddedRequestOptions["method"],
   body: EmbeddedRequestOptions["body"]
 ) {
   const { shop, host } = getEmbeddedContext();
+  const isProtectedApiRoute = path.startsWith("/api/");
   const shouldAttachContext =
-    method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    !isProtectedApiRoute &&
+    method !== "GET" &&
+    method !== "HEAD" &&
+    method !== "OPTIONS";
 
   return shouldAttachContext
     ? {
@@ -100,37 +105,13 @@ export async function embeddedShopRequest<T = unknown>(
 ) {
   const { method = "GET", body, timeoutMs = 30000 } = options;
   const url = buildUrl(path);
-  const requestBody = buildRequestBody(method, body);
+  const requestBody = buildRequestBody(path, method, body);
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Requested-With": "XMLHttpRequest",
   };
 
-  let firstAttempt = await doFetch(url, method, requestBody, timeoutMs, baseHeaders);
-
-  if (
-    (firstAttempt.response.status === 401 || firstAttempt.response.status === 403) &&
-    firstAttempt.payload?.error?.code === "INVALID_SHOPIFY_SESSION_TOKEN"
-  ) {
-    try {
-      const sessionToken = await withRequestTimeout(
-        Promise.resolve(getEmbeddedSessionToken()),
-        Math.min(timeoutMs, 6000),
-        "Shopify session token request timed out."
-      );
-
-      if (sessionToken) {
-        firstAttempt = await doFetch(url, method, requestBody, timeoutMs, {
-          ...baseHeaders,
-          Authorization: `Bearer ${sessionToken}`,
-        });
-      }
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("[embeddedShopRequest] bearer retry unavailable", error);
-      }
-    }
-  }
+  const firstAttempt = await doFetch(url, method, requestBody, timeoutMs, baseHeaders);
 
   if (firstAttempt.response.status === 401 || firstAttempt.response.status === 403) {
     throw enrichError(
