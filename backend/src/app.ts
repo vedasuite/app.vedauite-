@@ -13,6 +13,7 @@ import { router } from "./routes";
 import { shopifyWebhookRouter } from "./routes/shopifyWebhookRoutes";
 import { ensureStoreBootstrapped } from "./services/bootstrapService";
 import { env } from "./config/env";
+import { setShopifySessionCookie } from "./lib/shopifySessionCookie";
 
 const embeddedAppRoutes = [
   "/",
@@ -167,6 +168,8 @@ export function createApp() {
       if (env.enableDemoBootstrap) {
         await ensureStoreBootstrapped(shop);
       }
+
+      setShopifySessionCookie(res, shop);
 
       return res.sendFile(frontendIndexPath);
     } catch (err) {

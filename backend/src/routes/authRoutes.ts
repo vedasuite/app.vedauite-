@@ -4,6 +4,7 @@ import crypto from "crypto";
 import axios from "axios";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
+import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
 import { runStoreSyncJob } from "../services/syncJobService";
@@ -106,6 +107,8 @@ authRouter.get("/callback", async (req, res) => {
       accessToken,
     },
   });
+
+  setShopifySessionCookie(res, shopDomain);
 
   await ensureStoreBootstrapped(shopDomain);
 
