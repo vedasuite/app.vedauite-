@@ -6,6 +6,7 @@ import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
+import { runStoreSyncJob } from "../services/syncJobService";
 
 export const authRouter = Router();
 
@@ -114,6 +115,10 @@ authRouter.get("/callback", async (req, res) => {
     // eslint-disable-next-line no-console
     console.warn("[auth] Unable to auto-register Shopify sync webhooks.", error);
   }
+
+  void runStoreSyncJob(shopDomain, "auth_install").catch((error) => {
+    console.warn("[auth] Unable to perform initial Shopify sync.", error);
+  });
 
   // After installation, redirect into the embedded app in Shopify Admin.
   const storeHandle = shopDomain.replace(".myshopify.com", "");

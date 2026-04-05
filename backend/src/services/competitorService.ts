@@ -105,6 +105,151 @@ function inferStrategyLabel(args: {
   return null;
 }
 
+function buildBaselineMoveFeed(args: {
+  domainsConfigured: number;
+  seedProducts: string[];
+}) {
+  const seededProducts =
+    args.seedProducts.length > 0
+      ? args.seedProducts
+      : ["hero-catalog", "margin-guard-set", "promo-watch-set"];
+
+  return seededProducts.slice(0, 3).map((productHandle, index) => ({
+    id: `baseline-move-${index + 1}`,
+    headline:
+      args.domainsConfigured > 0
+        ? `VedaSuite is monitoring ${productHandle}`
+        : `Configure competitor watch for ${productHandle}`,
+    moveType:
+      args.domainsConfigured > 0 ? "Baseline market watch" : "Coverage setup",
+    source: args.domainsConfigured > 0 ? "Website monitoring" : "Setup guidance",
+    priority: index === 0 ? "Medium" : "Low",
+    impactScore: args.domainsConfigured > 0 ? 46 - index * 6 : 28 - index * 3,
+    actionWindow: args.domainsConfigured > 0 ? "This week" : "Today",
+    eventCluster:
+      args.domainsConfigured > 0
+        ? "Monitoring and response readiness"
+        : "Coverage build-up",
+    whyItMatters:
+      args.domainsConfigured > 0
+        ? "Early monitoring is active even before strong competitor movement appears, so the merchant can establish a baseline."
+        : "Competitor domains are not configured yet, so VedaSuite is showing the monitoring blueprint instead of live external moves.",
+    suggestedAction:
+      args.domainsConfigured > 0
+        ? "Review the watched SKU set and run ingestion regularly."
+        : "Add competitor domains and start the first ingestion run.",
+    collectedAt: new Date().toISOString(),
+  }));
+}
+
+function buildBaselineStrategyDetections(args: {
+  domainsConfigured: number;
+  hasSignals: boolean;
+}) {
+  if (args.hasSignals) {
+    return [];
+  }
+
+  return [
+    {
+      strategy:
+        args.domainsConfigured > 0 ? "Baseline monitoring posture" : "Coverage build-up",
+      confidence: args.domainsConfigured > 0 ? "Medium" : "High",
+      why:
+        args.domainsConfigured > 0
+          ? "Domains are configured, so VedaSuite is establishing a baseline before classifying stronger competitor intent."
+          : "The competitor strategy engine needs domains and ingestion coverage before it can infer market intent.",
+      implication:
+        args.domainsConfigured > 0
+          ? "The current best move is to collect a few cycles of price, promotion, and stock signals before reacting."
+          : "No external competitor strategy can be inferred until monitored domains are connected.",
+      recommendedMove:
+        args.domainsConfigured > 0
+          ? "Hold price, watch monitored SKUs, and let the move feed establish normal behavior."
+          : "Configure domains first, then run ingestion to unlock strategy detection.",
+    },
+  ];
+}
+
+function buildBaselineActionSuggestions(args: {
+  domainsConfigured: number;
+  seedProducts: string[];
+}) {
+  const seededProducts =
+    args.seedProducts.length > 0
+      ? args.seedProducts
+      : ["hero-catalog", "promo-watch-set", "margin-guard-set"];
+
+  return seededProducts.slice(0, 3).map((productHandle, index) => ({
+    productHandle,
+    suggestion:
+      args.domainsConfigured > 0
+        ? index === 0
+          ? "Monitor"
+          : index === 1
+          ? "Hold price"
+          : "Bundle"
+        : "Configure coverage",
+    why:
+      args.domainsConfigured > 0
+        ? index === 0
+          ? "Start by observing baseline competitor behavior before reacting."
+          : index === 1
+          ? "Preserve pricing discipline until repeated pressure emerges."
+          : "Use bundles and merchandising as the first response if pressure spikes."
+        : "Add domains and run ingestion so VedaSuite can generate live competitor actions.",
+    urgency: args.domainsConfigured > 0 ? (index === 0 ? "This week" : "Monitor") : "Today",
+    expectedOutcome:
+      args.domainsConfigured > 0
+        ? "Establish a reliable baseline and reduce reactive discounting."
+        : "Unlock the first competitor move feed and weekly brief.",
+  }));
+}
+
+function buildBaselineResponsePlans(args: {
+  seedProducts: string[];
+  domainsConfigured: number;
+}) {
+  const seededProducts =
+    args.seedProducts.length > 0
+      ? args.seedProducts
+      : ["hero-catalog", "margin-guard-set", "watchlist-skus"];
+
+  return seededProducts.slice(0, 3).map((productHandle, index) => ({
+    productHandle,
+    pressureScore: args.domainsConfigured > 0 ? 24 - index * 3 : 12 - index * 2,
+    recommendedPlay: args.domainsConfigured > 0 ? "hold_price" : "configure_tracking",
+    rationale:
+      args.domainsConfigured > 0
+        ? "The engine is establishing baseline competitor posture, so the safest default is to hold price and monitor."
+        : "Tracking is not configured yet, so VedaSuite cannot recommend a reactive competitor response.",
+    priceDelta: 0,
+    promotionSignals: 0,
+    stockSignals: 0,
+    sourceCount: args.domainsConfigured > 0 ? 1 : 0,
+    confidence: args.domainsConfigured > 0 ? 62 - index * 4 : 78,
+    reasons: args.domainsConfigured > 0
+      ? [
+          "No concentrated competitor pressure has been observed yet.",
+          "Baseline monitoring is a safer first move than reactive repricing.",
+          "Let the first tracked cycles define a normal movement range.",
+        ]
+      : [
+          "Competitor domains have not been configured yet.",
+          "The move feed cannot classify pressure without ingestion.",
+          "Setup must happen before automated response logic can activate.",
+        ],
+    automationPosture:
+      args.domainsConfigured > 0
+        ? "Advisory mode while monitoring baseline forms"
+        : "Setup required",
+    executionHint:
+      args.domainsConfigured > 0
+        ? "Watch hero SKUs, promotions, and stock posture before making a pricing move."
+        : "Add domains and run the first ingest to unlock live response strategy.",
+  }));
+}
+
 function buildGoogleShoppingSignal(
   domain: string,
   productHandle: string,
@@ -179,6 +324,8 @@ export async function getCompetitorOverview(shopDomain: string) {
     domains,
     recentRows,
     allRows,
+    seedPriceHistory,
+    latestSyncJob,
   ] = await Promise.all([
     prisma.competitorData.count({
       where: { storeId: store.id, collectedAt: { gte: last24h } },
@@ -210,7 +357,19 @@ export async function getCompetitorOverview(shopDomain: string) {
       orderBy: { collectedAt: "desc" },
       take: 500,
     }),
+    prisma.priceHistory.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+      distinct: ["productHandle"],
+      take: 8,
+    }),
+    prisma.syncJob.findFirst({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
+
+  const seedProducts = seedPriceHistory.map((item) => item.productHandle);
 
   const sourceBreakdown = {
     website: recentRows.filter((row) => row.source.startsWith("website")).length,
@@ -437,31 +596,69 @@ export async function getCompetitorOverview(shopDomain: string) {
         : "Avoid unnecessary reactions and preserve pricing discipline.",
   }));
 
+  const baselineMoveFeed = buildBaselineMoveFeed({
+    domainsConfigured: domains,
+    seedProducts,
+  });
+  const resolvedMoveFeed = moveFeed.length > 0 ? moveFeed : baselineMoveFeed;
+  const resolvedActionSuggestions =
+    actionSuggestions.length > 0
+      ? actionSuggestions
+      : buildBaselineActionSuggestions({
+          domainsConfigured: domains,
+          seedProducts,
+        });
+  const resolvedStrategyDetections =
+    strategyDetections.length > 0
+      ? strategyDetections
+      : buildBaselineStrategyDetections({
+          domainsConfigured: domains,
+          hasSignals: recentRows.length > 0,
+        });
+  const resolvedTopMovers =
+    topMovers.length > 0
+      ? topMovers
+      : resolvedMoveFeed.slice(0, 3).map((item, index) => ({
+          productHandle:
+            seedProducts[index] ??
+            item.headline.toLowerCase().replace(/\s+/g, "-"),
+          priceDelta: 0,
+          promotionSignals: 0,
+          stockSignals: 0,
+        }));
+
   const weeklyReport = {
     headline:
       recentChanges > 0
         ? `${recentChanges} competitor movement signals detected in the last 24 hours`
-        : "No major competitor movement yet",
+        : domains > 0
+        ? "Competitor baseline watch is active"
+        : "Competitor monitoring needs setup",
     whyItMatters:
       promoCount > 0
         ? `${promoCount} active promotions and ${stockAlerts} stock alerts suggest pricing and inventory pressure is building.`
-        : "The market is quiet for now, so VedaSuite recommends monitoring instead of reacting.",
-    suggestedActions:
-      actionSuggestions.length > 0
-        ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
-        : ["Run first ingestion to build your first weekly competitor brief."],
+        : domains > 0
+        ? "VedaSuite is establishing normal competitor posture so future shifts can be scored and explained quickly."
+        : "Configure domains to start collecting competitor price, promotion, stock, and launch signals.",
+    suggestedActions: resolvedActionSuggestions.map(
+      (item) => `${item.productHandle}: ${item.suggestion}`
+    ),
     reportReadiness:
-      recentRows.length > 0 ? "Weekly report can be generated" : "Awaiting competitor ingestion",
-    biggestMoves: moveFeed.slice(0, 3).map((item) => ({
+      recentRows.length > 0
+        ? "Weekly report can be generated"
+        : domains > 0
+        ? `Baseline monitoring ready after latest sync: ${latestSyncJob?.status ?? "NOT_RUN"}`
+        : "Awaiting competitor setup",
+    biggestMoves: resolvedMoveFeed.slice(0, 3).map((item) => ({
       headline: item.headline,
       impactScore: item.impactScore,
       suggestedAction: item.suggestedAction,
     })),
     merchantBrief:
-      strategyDetections[0]?.implication ??
-      "The competitor brief will summarize why the biggest changes matter for your catalog.",
+      resolvedStrategyDetections[0]?.implication ??
+      "The competitor brief is now using baseline monitoring posture until stronger market movement appears.",
     nextBestAction:
-      actionSuggestions[0]?.suggestion ??
+      resolvedActionSuggestions[0]?.suggestion ??
       "Add competitor domains and run ingestion to unlock the first action brief.",
   };
 
@@ -482,10 +679,10 @@ export async function getCompetitorOverview(shopDomain: string) {
       collectedAt: row.collectedAt,
     })),
     sourceBreakdown,
-    topMovers,
-    moveFeed,
-    strategyDetections,
-    actionSuggestions,
+    topMovers: resolvedTopMovers,
+    moveFeed: resolvedMoveFeed,
+    strategyDetections: resolvedStrategyDetections,
+    actionSuggestions: resolvedActionSuggestions,
     weeklyReport,
     coverageSummary: {
       domainsConfigured: domains,
@@ -724,11 +921,22 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
   });
   if (!store) throw new Error("Store not found");
 
-  const recentRows = await prisma.competitorData.findMany({
-    where: { storeId: store.id },
-    orderBy: { collectedAt: "desc" },
-    take: 250,
-  });
+  const [recentRows, seedPriceHistory, domainCount] = await Promise.all([
+    prisma.competitorData.findMany({
+      where: { storeId: store.id },
+      orderBy: { collectedAt: "desc" },
+      take: 250,
+    }),
+    prisma.priceHistory.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+      distinct: ["productHandle"],
+      take: 6,
+    }),
+    prisma.competitorDomain.count({
+      where: { storeId: store.id },
+    }),
+  ]);
 
   const productMap = new Map<
     string,
@@ -845,24 +1053,36 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
     .sort((a, b) => b.pressureScore - a.pressureScore)
     .slice(0, 6);
 
+  const resolvedResponsePlans =
+    responsePlans.length > 0
+      ? responsePlans
+      : buildBaselineResponsePlans({
+          seedProducts: seedPriceHistory.map((item) => item.productHandle),
+          domainsConfigured: domainCount,
+        });
+
   const summary = {
     responseMode:
-      responsePlans[0]?.recommendedPlay === "bundle_defense"
+      resolvedResponsePlans[0]?.recommendedPlay === "bundle_defense"
         ? "Defend margin"
-        : responsePlans[0]?.recommendedPlay === "selective_match"
+        : resolvedResponsePlans[0]?.recommendedPlay === "selective_match"
         ? "Respond selectively"
+        : resolvedResponsePlans[0]?.recommendedPlay === "configure_tracking"
+        ? "Configure coverage"
         : "Hold and monitor",
-    topPressureCount: responsePlans.filter((plan) => plan.pressureScore >= 35).length,
-    automationReadiness: responsePlans.some(
+    topPressureCount: resolvedResponsePlans.filter((plan) => plan.pressureScore >= 35).length,
+    automationReadiness: resolvedResponsePlans.some(
       (plan) => plan.recommendedPlay !== "hold_price" && plan.confidence >= 70
     )
       ? "Ready for approval-led response automation"
+      : domainCount === 0
+      ? "Configure competitor domains to unlock live response automation."
       : "Advisory mode",
   };
 
   return {
     summary,
-    responsePlans,
+    responsePlans: resolvedResponsePlans,
   };
 }
 

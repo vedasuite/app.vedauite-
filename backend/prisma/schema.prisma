@@ -30,6 +30,8 @@ model Store {
   priceHistory      PriceHistory[]
   profitData        ProfitOptimizationData[]
   billingAuditLogs  BillingAuditLog[]
+  timelineEvents    TimelineEvent[]
+  syncJobs          SyncJob[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -101,6 +103,7 @@ model Customer {
 
   orders       Order[]
   fraudSignals FraudSignal[]
+  timelineEvents TimelineEvent[]
 }
 
 model Order {
@@ -121,6 +124,7 @@ model Order {
   updatedAt       DateTime  @updatedAt
 
   fraudSignals FraudSignal[]
+  timelineEvents TimelineEvent[]
 }
 
 model FraudSignal {
@@ -203,4 +207,43 @@ model ProfitOptimizationData {
   bundleSuggestionsJson   String?
   discountStrategyJson    String?
   createdAt               DateTime @default(now())
+}
+
+model TimelineEvent {
+  id           String    @id @default(cuid())
+  store        Store     @relation(fields: [storeId], references: [id])
+  storeId      String
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  customerId   String?
+  order        Order?    @relation(fields: [orderId], references: [id])
+  orderId      String?
+  category     String
+  eventType    String
+  title        String
+  detail       String
+  severity     String    @default("info")
+  scoreImpact  Int?
+  metadataJson String?
+  createdAt    DateTime  @default(now())
+
+  @@index([storeId, createdAt])
+  @@index([customerId, createdAt])
+}
+
+model SyncJob {
+  id           String   @id @default(cuid())
+  store        Store    @relation(fields: [storeId], references: [id])
+  storeId      String
+  jobType      String
+  triggerSource String
+  status       String   @default("PENDING")
+  summaryJson  String?
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
 }

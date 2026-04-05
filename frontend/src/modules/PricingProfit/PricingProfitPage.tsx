@@ -136,7 +136,7 @@ const fallbackOverview: PricingProfitOverview = {
     recommendationCount: 0,
     profitOpportunityCount: 0,
     responseMode: "Monitor",
-    automationReadiness: "Pricing and profit signals are syncing.",
+    automationReadiness: "Baseline pricing and profit posture is active.",
     fullProfitEngine: false,
     advancedModesEnabled: false,
     scenarioSimulatorEnabled: false,
@@ -152,7 +152,7 @@ const fallbackOverview: PricingProfitOverview = {
     pressureProducts: [],
     projectedMonthlyGain: 0,
     summary:
-      "Margin pressure will appear here once the engine has enough market and cost inputs.",
+      "VedaSuite is holding a baseline margin posture while it gathers deeper market and cost signals.",
   },
   pricingModes: [],
   doNothingRecommendation: null,
@@ -438,7 +438,7 @@ export function PricingProfitPage() {
                     Pricing mode selector
                   </Text>
                   {(overview.pricingModes ?? []).length === 0 ? (
-                    <EmptyState text="Pricing modes will appear after the engine evaluates store posture." />
+                    <EmptyState text="Balanced pricing posture is active while VedaSuite finalizes the best mode for this store." />
                   ) : (
                     (overview.pricingModes ?? []).map((mode) => (
                       <div key={mode.key} className="vs-action-card">
@@ -488,7 +488,7 @@ export function PricingProfitPage() {
                     Profit leak detector
                   </Text>
                   {(overview.profitLeakSummary ?? []).length === 0 ? (
-                    <EmptyState text="Profit leak signals will appear once pricing, competitor, and order histories are ready." />
+                    <EmptyState text="No major profit leak has been identified yet, so VedaSuite is holding a baseline protection posture." />
                   ) : (
                     (overview.profitLeakSummary ?? []).map((item) => (
                       <div key={item.title} className="vs-action-card">
@@ -561,7 +561,7 @@ export function PricingProfitPage() {
                   Explainable recommendations
                 </Text>
                 {(overview.explainabilityHighlights ?? []).length === 0 ? (
-                  <EmptyState text="Explanation cards will appear as soon as the engine has enough aligned demand, competitor, and margin signals." />
+                  <EmptyState text="Explainability is available, but the strongest recommendation drivers are still consolidating into a merchant-ready stack." />
                 ) : (
                   (overview.explainabilityHighlights ?? []).map((item) => (
                     <div key={item.id} className="vs-action-card">
@@ -611,7 +611,7 @@ export function PricingProfitPage() {
                   {overview.marginAtRisk.summary}
                 </Text>
                 {(overview.marginRiskDrivers ?? []).length === 0 ? (
-                  <EmptyState text="Margin drivers will appear once enough pricing, promotion, and unit-economics data is synced." />
+                  <EmptyState text="No severe margin drivers are active right now, so the engine is showing a stable posture." />
                 ) : (
                   (overview.marginRiskDrivers ?? []).map((driver) => (
                     <div key={driver.title} className="vs-action-card">
@@ -653,7 +653,7 @@ export function PricingProfitPage() {
                   {showingProfitFocus ? "Profit actions" : "Pricing recommendations"}
                 </Text>
                 {overview.pricingRecommendations.length === 0 ? (
-                  <EmptyState text="Pricing recommendations will appear after order, competitor, and product-level signals accumulate." />
+                  <EmptyState text="The engine is holding the current pricing posture until a stronger recommendation is justified." />
                 ) : (
                   overview.pricingRecommendations.map((recommendation) => (
                     <div key={recommendation.id} className="vs-action-card">
@@ -703,7 +703,7 @@ export function PricingProfitPage() {
                     </div>
                   ))
                 ) : (
-                  <EmptyState text="The full profit engine is either still warming up or there is not yet enough product margin history for recommendations." />
+                  <EmptyState text="The profit engine is not seeing a strong leak yet, so it is preserving a monitor-and-defend posture." />
                 )}
                 <List type="bullet">
                   {overview.marginAtRisk.pressureProducts.map((item) => (

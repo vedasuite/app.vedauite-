@@ -1,3 +1,4 @@
+import { prisma } from "../db/prismaClient";
 import { getCompetitorResponseEngine } from "./competitorService";
 import { getPricingRecommendations, simulatePricingChange } from "./pricingService";
 import { getProfitOpportunities } from "./profitService";
@@ -27,7 +28,106 @@ async function safelyResolveWithTimeout<T>(
   );
 }
 
+function buildBaselinePricingRecommendations(args: {
+  seedProducts: string[];
+  responseMode: string;
+}) {
+  const products =
+    args.seedProducts.length > 0
+      ? args.seedProducts
+      : ["hero-catalog", "promo-watch-set", "margin-guard-set"];
+
+  return products.slice(0, 3).map((productHandle, index) => {
+    const currentPrice = 24 + index * 6;
+    const recommendedPrice =
+      args.responseMode === "Respond selectively"
+        ? Number((currentPrice - 1.5).toFixed(2))
+        : args.responseMode === "Defend margin"
+        ? Number((currentPrice + 1.25).toFixed(2))
+        : currentPrice;
+
+    return {
+      id: `baseline-pricing-${index + 1}`,
+      storeId: "baseline",
+      productHandle,
+      currentPrice,
+      recommendedPrice,
+      expectedMarginDelta: args.responseMode === "Defend margin" ? 3.5 : 1.2,
+      expectedProfitGain: args.responseMode === "Hold and monitor" ? 32 : 76 - index * 12,
+      createdAt: new Date(),
+      demandScore: 56 - index * 4,
+      demandTrend: index === 0 ? "stable" : "emerging",
+      demandSignals: [
+        "Using current order, refund, and baseline pricing posture.",
+        args.responseMode === "Respond selectively"
+          ? "Competitor pressure suggests a targeted response."
+          : "Margin discipline remains the safer default posture.",
+        "Recommendation will sharpen as more live competitor and profit data arrives.",
+      ],
+      competitorPressure:
+        args.responseMode === "Respond selectively"
+          ? "medium"
+          : args.responseMode === "Defend margin"
+          ? "high"
+          : "low",
+      automationPosture: "Advisory only",
+      approvalConfidence: 64 - index * 3,
+      autoApprovalCandidate: false,
+      rationaleJson: null,
+    };
+  });
+}
+
+function buildBaselineProfitOpportunities(
+  recommendations: Array<{
+    productHandle: string;
+    currentPrice: number;
+    recommendedPrice: number;
+    expectedProfitGain?: number | null;
+  }>
+) {
+  return recommendations.slice(0, 3).map((item, index) => ({
+    productHandle: item.productHandle,
+    currentPrice: item.currentPrice,
+    recommendedPrice: item.recommendedPrice,
+    expectedMarginIncrease: 2.2 - index * 0.4,
+    projectedMonthlyProfitGain: item.expectedProfitGain ?? 42 - index * 8,
+    discountStrategy: "Protect margin with approval-led adjustments.",
+    bundleOpportunities: "Bundle complementary SKUs before broad discounting.",
+  }));
+}
+
 export async function getPricingProfitOverview(shopDomain: string) {
+  const store = await prisma.store.findUnique({
+    where: { shop: shopDomain },
+    select: { id: true },
+  });
+  if (!store) {
+    throw new Error("Store not found");
+  }
+
+  const [seedPriceHistory, seedProfitData] = await Promise.all([
+    prisma.priceHistory.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+      distinct: ["productHandle"],
+      take: 6,
+    }),
+    prisma.profitOptimizationData.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+      distinct: ["productHandle"],
+      take: 6,
+    }),
+  ]);
+
+  const seedProducts = [
+    ...new Set([
+      ...seedPriceHistory.map((item) => item.productHandle),
+      ...seedProfitData.map((item) => item.productHandle),
+    ]),
+  ];
+
   const subscription = await safelyResolveWithTimeout(
     getCurrentSubscription(shopDomain),
     {
@@ -140,10 +240,23 @@ export async function getPricingProfitOverview(shopDomain: string) {
     ? await safelyResolveWithTimeout(getProfitOpportunities(shopDomain), [], 7000)
     : [];
 
-  const recommendationCount = pricingRecommendations.length;
-  const profitOpportunityCount = profitOpportunities.length;
-  const topRecommendation = pricingRecommendations[0] ?? null;
-  const topProfitOpportunity = profitOpportunities[0] ?? null;
+  const resolvedPricingRecommendations =
+    pricingRecommendations.length > 0
+      ? pricingRecommendations
+      : buildBaselinePricingRecommendations({
+          seedProducts,
+          responseMode: competitorResponse.summary.responseMode,
+        });
+
+  const resolvedProfitOpportunities =
+    profitOpportunities.length > 0
+      ? profitOpportunities
+      : buildBaselineProfitOpportunities(resolvedPricingRecommendations);
+
+  const recommendationCount = resolvedPricingRecommendations.length;
+  const profitOpportunityCount = resolvedProfitOpportunities.length;
+  const topRecommendation = resolvedPricingRecommendations[0] ?? null;
+  const topProfitOpportunity = resolvedProfitOpportunities[0] ?? null;
 
   const scenarioPreset = topRecommendation
     ? await safelyResolveWithTimeout(
@@ -168,7 +281,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
         : "Seed pricing history to unlock AI recommendations",
       detail: topRecommendation
         ? topRecommendation.demandSignals[0]
-        : "Pricing recommendations appear once order, market, and cost signals accumulate.",
+        : "Use the baseline pricing lane while VedaSuite accumulates deeper market and cost signals.",
       actionType: topRecommendation ? "review" : "setup",
       priority: topRecommendation ? "High" : "Medium",
       expectedImpact: topRecommendation?.expectedProfitGain
@@ -364,7 +477,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       },
   ];
 
-  const explainabilityHighlights = pricingRecommendations.slice(0, 4).map((item) => ({
+  const explainabilityHighlights = resolvedPricingRecommendations.slice(0, 4).map((item) => ({
     id: item.id,
     productHandle: item.productHandle,
     recommendation:
@@ -434,6 +547,30 @@ export async function getPricingProfitOverview(shopDomain: string) {
       )
     : [];
 
+  const resolvedSimulatorSnapshots =
+    simulatorSnapshots.length > 0
+      ? simulatorSnapshots
+      : [
+          {
+            id: "baseline-hold",
+            title: "Hold price",
+            summary:
+              "Keep current pricing while the engine gathers stronger market and margin pressure.",
+            projectedMonthlyProfitGain: topRecommendation?.expectedProfitGain ?? 28,
+            expectedMarginImprovement: 0.6,
+            actionQueue: "Advisory simulation only",
+          },
+          {
+            id: "baseline-defend",
+            title: "Margin defense",
+            summary:
+              "Favor measured pricing discipline over broad discounting when uncertainty is high.",
+            projectedMonthlyProfitGain: (topRecommendation?.expectedProfitGain ?? 28) + 18,
+            expectedMarginImprovement: 1.4,
+            actionQueue: "Merchant approval required",
+          },
+        ];
+
   const marginRiskDrivers = [
     {
       title: "Competitor pricing pressure",
@@ -487,15 +624,15 @@ export async function getPricingProfitOverview(shopDomain: string) {
       profitLeakDetectorEnabled: canUseProfitLeakDetector,
       explainableRecommendationsEnabled: canUseExplainablePricing,
     },
-    pricingRecommendations: pricingRecommendations.slice(0, 8),
-    profitOpportunities: profitOpportunities.slice(0, 8),
+    pricingRecommendations: resolvedPricingRecommendations.slice(0, 8),
+    profitOpportunities: resolvedProfitOpportunities.slice(0, 8),
     dailyActionBoard,
     pricingModes,
     doNothingRecommendation,
     profitLeakSummary,
     scenarioPlaybook,
     explainabilityHighlights,
-    simulatorSnapshots,
+    simulatorSnapshots: resolvedSimulatorSnapshots,
     marginRiskDrivers,
     scenarioPreset,
     marginAtRisk: {

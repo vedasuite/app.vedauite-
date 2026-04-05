@@ -9,7 +9,7 @@ import {
   redactShopData,
 } from "../services/privacyService";
 import { reconcileStoreSubscriptionFromWebhook } from "../services/subscriptionService";
-import { syncShopifyStoreData } from "../services/shopifyAdminService";
+import { runStoreSyncJob, type SyncTriggerSource } from "../services/syncJobService";
 
 export const shopifyWebhookRouter = Router();
 
@@ -51,7 +51,9 @@ async function handleSyncWebhook(req: any, res: any) {
     shop: shopDomain,
   });
 
-  await withRetry(() => syncShopifyStoreData(shopDomain), {
+  const triggerSource = req.path.replace("/", "") as SyncTriggerSource;
+
+  await withRetry(() => runStoreSyncJob(shopDomain, triggerSource), {
     attempts: 3,
     delayMs: 300,
     operationName: "webhook.shopify_sync",

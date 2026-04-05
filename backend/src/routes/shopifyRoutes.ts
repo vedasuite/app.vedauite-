@@ -3,8 +3,8 @@ import { env } from "../config/env";
 import {
   getSyncWebhookStatus,
   registerSyncWebhooks,
-  syncShopifyStoreData,
 } from "../services/shopifyAdminService";
+import { getLatestSyncJob, runStoreSyncJob } from "../services/syncJobService";
 
 export const shopifyRouter = Router();
 
@@ -30,7 +30,7 @@ shopifyRouter.post("/sync", async (req, res) => {
   }
 
   try {
-    const result = await syncShopifyStoreData(shop);
+    const result = await runStoreSyncJob(shop, "manual");
     return res.json({ result });
   } catch (error) {
     const message =
@@ -47,6 +47,17 @@ shopifyRouter.post("/sync", async (req, res) => {
 
     throw error;
   }
+});
+
+shopifyRouter.get("/sync-jobs/latest", async (req, res) => {
+  const { shop } = req.query;
+
+  if (!shop || typeof shop !== "string") {
+    return res.status(400).json({ error: "Missing shop." });
+  }
+
+  const result = await getLatestSyncJob(shop);
+  return res.json({ result });
 });
 
 shopifyRouter.post("/register-webhooks", async (req, res) => {

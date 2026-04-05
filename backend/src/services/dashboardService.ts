@@ -3,6 +3,16 @@ import { prisma } from "../db/prismaClient";
 export async function getDashboardMetrics(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
+    include: {
+      syncJobs: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+      timelineEvents: {
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      },
+    },
   });
   if (!store) {
     return null;
@@ -65,6 +75,9 @@ export async function getDashboardMetrics(shopDomain: string) {
     promotionAlerts: competitorChanges,
     aiPricingSuggestions: pricingSuggestions,
     profitOptimizationOpportunities: profitOpportunities,
+    lastSyncStatus: store.syncJobs[0]?.status ?? "NOT_RUN",
+    lastSyncAt: store.syncJobs[0]?.finishedAt?.toISOString() ?? null,
+    timelineEventsGenerated: store.timelineEvents.length,
   };
 }
 

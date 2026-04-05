@@ -465,7 +465,7 @@ export function CompetitorPage() {
         title="Competitor Intelligence"
         subtitle={
           rows.length === 0
-            ? "No competitor tracking data is available yet."
+            ? "Baseline monitoring is active and ready for live competitor coverage."
             : "Use the move feed, strategy detection, and action board to decide what to do next."
         }
         primaryAction={{
@@ -544,7 +544,7 @@ export function CompetitorPage() {
                       <Text as="p" variant="headingSm">Channels ready</Text>
                       <BulletList
                         items={overview.coverageSummary?.channelsReady ?? []}
-                        empty="Website monitoring, Google Shopping signals, and ad pressure watch will show up here after setup."
+                        empty="Website monitoring, Google Shopping signals, and ad pressure watch are ready to be activated through competitor domain setup."
                       />
                     </div>
                   </InlineGrid>
@@ -593,7 +593,7 @@ export function CompetitorPage() {
                   </Badge>
                 </InlineStack>
                 {(overview.moveFeed ?? []).length === 0 ? (
-                  <Text as="p" tone="subdued">The move feed will surface price drops, promotion changes, stock pressure, launch pushes, and ad activity once competitor ingestion runs.</Text>
+                  <Text as="p" tone="subdued">The move feed translates website, shopping-surface, promotion, stock, and ad-pressure signals into merchant-ready decisions.</Text>
                 ) : (
                   <BlockStack gap="200">
                     {(overview.moveFeed ?? []).map((item) => (
@@ -709,12 +709,34 @@ export function CompetitorPage() {
                 <Box paddingBlockStart="400">
                   {selectedTab === 0 ? (
                     visibleRows.length === 0 ? (
-                      <EmptyState
-                        title="No tracked competitor results yet"
-                        body="Add competitor domains, run ingestion, and VedaSuite will start surfacing price moves, promotions, stock posture, launch watch signals, and response recommendations here."
-                        action={<Button onClick={() => setModalOpen(true)}>Add competitor domains</Button>}
-                        secondaryAction={<Button variant="secondary" onClick={ingestCompetitorData}>Run first ingestion</Button>}
-                      />
+                      <Card>
+                        <BlockStack gap="300">
+                          <Text as="h3" variant="headingMd">
+                            Competitor watchlist is ready
+                          </Text>
+                          <Text as="p" tone="subdued">
+                            VedaSuite already has a baseline response posture. Connect domains and run ingestion to replace this baseline with live competitor products and events.
+                          </Text>
+                          <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+                            {(overview.moveFeed ?? []).slice(0, 2).map((item) => (
+                              <div key={item.id} className="vs-action-card">
+                                <BlockStack gap="100">
+                                  <InlineStack align="space-between" blockAlign="start">
+                                    <Text as="p" variant="headingSm">{item.headline}</Text>
+                                    <Badge tone={toneForPriority(item.priority)}>{item.priority}</Badge>
+                                  </InlineStack>
+                                  <Text as="p" tone="subdued">{item.whyItMatters}</Text>
+                                  <Text as="p" variant="bodySm">Suggested action: {item.suggestedAction}</Text>
+                                </BlockStack>
+                              </div>
+                            ))}
+                          </InlineGrid>
+                          <InlineStack gap="300">
+                            <Button onClick={() => setModalOpen(true)}>Add competitor domains</Button>
+                            <Button variant="secondary" onClick={ingestCompetitorData}>Run first ingestion</Button>
+                          </InlineStack>
+                        </BlockStack>
+                      </Card>
                     ) : (
                       <IndexTable
                         resourceName={resourceName}
@@ -770,7 +792,7 @@ export function CompetitorPage() {
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Highest market movers</Text>
                           {(overview.topMovers ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">Highest market movers will populate after repeated competitor events are collected.</Text>
+                            <Text as="p" tone="subdued">The market is currently stable, so VedaSuite is prioritizing setup posture and baseline watchlist guidance.</Text>
                           ) : (
                             (overview.topMovers ?? []).map((mover) => (
                               <InlineStack key={mover.productHandle} align="space-between" blockAlign="center">
@@ -791,7 +813,7 @@ export function CompetitorPage() {
                           <Text as="h3" variant="headingMd">Move feed detail</Text>
                           {(overview.moveFeed ?? []).length === 0 ? (
                             <Text as="p" tone="subdued">
-                              Detailed event explanations will appear once competitor ingestion is active.
+                              Event detail will switch from baseline monitoring to live competitor movement once ingestion begins.
                             </Text>
                           ) : (
                             (overview.moveFeed ?? []).slice(0, 5).map((item) => (
@@ -820,7 +842,7 @@ export function CompetitorPage() {
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Product launch alerts</Text>
                           {(overview.launchAlerts ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">Launch watch alerts will appear once repeated new-product signals are detected.</Text>
+                            <Text as="p" tone="subdued">No launch push has been inferred yet, so the module is keeping launch watch in a monitor posture.</Text>
                           ) : (
                             (overview.launchAlerts ?? []).map((alert) => (
                               <InlineStack key={`${alert.productHandle}-${alert.collectedAt}`} align="space-between" blockAlign="center">
@@ -867,7 +889,7 @@ export function CompetitorPage() {
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">What should I do?</Text>
                           {(overview.actionSuggestions ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">Action suggestions will appear once tracked products generate meaningful competitor events.</Text>
+                            <Text as="p" tone="subdued">Action suggestions are currently calm because no concentrated competitor pressure has been detected.</Text>
                           ) : (
                             (overview.actionSuggestions ?? []).map((item) => (
                               <div key={item.productHandle} className="vs-action-card">
@@ -895,7 +917,7 @@ export function CompetitorPage() {
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Priority watchlist</Text>
                           {(responseEngine.responsePlans ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">The response engine will populate a priority watchlist after enough competitor movement is collected.</Text>
+                            <Text as="p" tone="subdued">The response engine is in watch mode and will elevate products here if competitor pressure intensifies.</Text>
                           ) : (
                             (responseEngine.responsePlans ?? []).slice(0, 4).map((item) => (
                               <InlineStack key={`${item.productHandle}-strategy`} align="space-between" blockAlign="center">
@@ -934,7 +956,7 @@ export function CompetitorPage() {
                             </Banner>
                           ) : null}
                           {(overview.strategyDetections ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">Strategy detection will appear after repeated move patterns are observed across your tracked competitor set.</Text>
+                            <Text as="p" tone="subdued">No strong competitor strategy pattern is active yet, so VedaSuite is preserving a baseline watch posture.</Text>
                           ) : (
                             (overview.strategyDetections ?? []).map((detection) => (
                               <div key={`${detection.strategy}-${detection.why}`} className="vs-action-card">

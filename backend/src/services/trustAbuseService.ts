@@ -3,6 +3,7 @@ import {
   getFraudIntelligenceOverview,
   listRecentFraudOrders,
 } from "./fraudService";
+import { prisma } from "../db/prismaClient";
 import { getCurrentSubscription } from "./subscriptionService";
 
 function maskIdentity(value: string | null | undefined, fallback: string) {
@@ -20,14 +21,28 @@ function maskIdentity(value: string | null | undefined, fallback: string) {
 }
 
 export async function getTrustAbuseOverview(shopDomain: string) {
-  const [subscription, fraudOverview, trustLayer, recentOrders, customers] =
+  const [subscription, fraudOverview, trustLayer, recentOrders, customers, store] =
     await Promise.all([
       getCurrentSubscription(shopDomain),
       getFraudIntelligenceOverview(shopDomain),
       getTrustOperatingLayer(shopDomain),
       listRecentFraudOrders(shopDomain),
       listCustomerScores(shopDomain),
+      prisma.store.findUnique({
+        where: { shop: shopDomain },
+        select: {
+          id: true,
+          timelineEvents: {
+            orderBy: { createdAt: "desc" },
+            take: 24,
+          },
+        },
+      }),
     ]);
+
+  if (!store) {
+    throw new Error("Store not found");
+  }
 
   const queue = recentOrders.slice(0, 6).map((order) => ({
     id: order.id,
@@ -39,19 +54,64 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     createdAt: order.createdAt,
   }));
 
-  const behaviorTimeline = customers.slice(0, 6).map((customer) => ({
-    id: customer.id,
-    shopper: maskIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
-    trustScore: customer.creditScore,
-    tier: customer.creditCategory,
-    refundRate: Number((customer.refundRate * 100).toFixed(1)),
-    eventSummary:
-      customer.creditScore >= 80
-        ? "Trusted handling history with low refund pressure."
-        : customer.creditScore < 50
-        ? "Escalating trust concerns from refund and fraud signals."
-        : "Normal trust posture with moderate monitoring.",
-  }));
+  const behaviorTimeline =
+    store.timelineEvents.length > 0
+      ? store.timelineEvents.slice(0, 10).map((event) => {
+          const metadata = (() => {
+            if (!event.metadataJson) {
+              return {};
+            }
+            try {
+              return JSON.parse(event.metadataJson) as Record<string, unknown>;
+            } catch {
+              return {};
+            }
+          })();
+
+          return {
+            id: event.id,
+            shopper:
+              typeof metadata.customerEmail === "string"
+                ? maskIdentity(metadata.customerEmail, `shopper-${(event.customerId ?? event.id).slice(-4)}`)
+                : event.customerId
+                ? `shopper-${event.customerId.slice(-4)}`
+                : "Store-level signal",
+            trustScore:
+              typeof metadata.score === "number"
+                ? metadata.score
+                : typeof event.scoreImpact === "number"
+                ? Math.max(0, Math.min(100, 60 + event.scoreImpact))
+                : 60,
+            tier:
+              typeof metadata.category === "string"
+                ? metadata.category
+                : event.severity === "critical"
+                ? "Review Buyer"
+                : event.severity === "success"
+                ? "Trusted Buyer"
+                : "Standard Buyer",
+            refundRate:
+              typeof metadata.refundRate === "number"
+                ? Number((metadata.refundRate * 100).toFixed(1))
+                : 0,
+            eventSummary: event.detail,
+            occurredAt: event.createdAt,
+          };
+        })
+      : customers.slice(0, 6).map((customer) => ({
+          id: customer.id,
+          shopper: maskIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
+          trustScore: customer.creditScore,
+          tier: customer.creditCategory,
+          refundRate: Number((customer.refundRate * 100).toFixed(1)),
+          eventSummary:
+            customer.creditScore >= 80
+              ? "Trusted handling history with low refund pressure."
+              : customer.creditScore < 50
+              ? "Escalating trust concerns from refund and fraud signals."
+              : "Normal trust posture with moderate monitoring.",
+          occurredAt: null,
+        }));
 
   const trustTierSummary = [
     {
@@ -215,6 +275,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
       manualReviewCount: fraudOverview.summary.manualReviewCount,
       sharedFraudNetworkEnabled: fraudOverview.summary.sharedFraudNetworkEnabled,
       automationReadiness: fraudOverview.summary.automationReadiness,
+      timelineEvents: store.timelineEvents.length,
     },
     scoreBands: fraudOverview.scoreBands,
     trustTierSummary,

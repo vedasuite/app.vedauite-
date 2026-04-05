@@ -1,6 +1,11 @@
+import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 
 export async function ensureStoreBootstrapped(shop: string) {
+  if (!env.enableDemoBootstrap) {
+    return;
+  }
+
   const store = await prisma.store.findUnique({
     where: { shop },
   });
