@@ -65,6 +65,20 @@ type DecisionCenter = {
   }>;
 };
 
+type SyncJobPayload = {
+  id?: string;
+  jobId?: string;
+  status: string;
+  errorMessage?: string | null;
+  reusedExisting?: boolean;
+  finishedAt?: string | null;
+  summaryJson?: string | null;
+};
+
+type SyncJobResponse = {
+  result: SyncJobPayload | null;
+};
+
 function getApiErrorMessage(error: unknown, fallback: string) {
   const candidate = error as {
     message?: string;
@@ -161,6 +175,48 @@ export function DashboardPage() {
     ? `/auth/install?shop=${encodeURIComponent(shop)}`
     : null;
 
+  const pollSyncJob = async (jobId?: string | null) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < 180000) {
+      const response = await embeddedShopRequest<SyncJobResponse>(
+        "/api/shopify/sync-jobs/latest",
+        {
+          timeoutMs: 15000,
+        }
+      );
+
+      const latestJob = response.result;
+      if (!latestJob) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+
+      const latestJobId = latestJob.id ?? latestJob.jobId;
+      if (jobId && latestJobId && latestJobId !== jobId) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+
+      if (latestJob.status === "SUCCEEDED") {
+        loadMetrics();
+        loadWebhookStatus();
+        setToast("Live Shopify data synced into VedaSuite.");
+        return;
+      }
+
+      if (latestJob.status === "FAILED") {
+        throw new Error(latestJob.errorMessage ?? "Shopify sync job failed.");
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+
+    throw new Error(
+      "Sync is still running in the background. Check back in a moment."
+    );
+  };
+
   const loadMetrics = () => {
     embeddedShopRequest<Metrics>("/api/dashboard/metrics", {
       timeoutMs: 30000,
@@ -196,16 +252,50 @@ export function DashboardPage() {
       .catch(() => setDecisionCenter(null));
   }, []);
 
+  useEffect(() => {
+    if (!shop) {
+      return;
+    }
+
+    embeddedShopRequest<SyncJobResponse>("/api/shopify/sync-jobs/latest", {
+      timeoutMs: 15000,
+    })
+      .then((response) => {
+        const latestJob = response.result;
+        if (
+          latestJob &&
+          (latestJob.status === "PENDING" || latestJob.status === "RUNNING")
+        ) {
+          setSyncing(true);
+          return pollSyncJob(latestJob.id ?? latestJob.jobId ?? null)
+            .catch((error) => {
+              const message = getApiErrorMessage(
+                error,
+                "Sync is still running in the background."
+              );
+              setActionError({
+                title: "Live sync needs attention",
+                detail: message,
+              });
+              setToast(message);
+            })
+            .finally(() => setSyncing(false));
+        }
+
+        return undefined;
+      })
+      .catch(() => undefined);
+  }, [shop]);
+
   const syncLiveStoreData = async () => {
     try {
       setSyncing(true);
       setActionError(null);
-      await embeddedShopRequest("/api/shopify/sync", {
+      const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
         method: "POST",
-        timeoutMs: 90000,
+        timeoutMs: 20000,
       });
-      loadMetrics();
-      setToast("Live Shopify data synced into VedaSuite.");
+      await pollSyncJob(response.result?.jobId ?? response.result?.id ?? null);
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
       const reauthorizeUrl =

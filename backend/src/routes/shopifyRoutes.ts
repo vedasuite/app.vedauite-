@@ -4,7 +4,10 @@ import {
   getSyncWebhookStatus,
   registerSyncWebhooks,
 } from "../services/shopifyAdminService";
-import { getLatestSyncJob, runStoreSyncJob } from "../services/syncJobService";
+import {
+  getLatestSyncJob,
+  startStoreSyncJob,
+} from "../services/syncJobService";
 
 export const shopifyRouter = Router();
 
@@ -30,7 +33,7 @@ shopifyRouter.post("/sync", async (req, res) => {
   }
 
   try {
-    const result = await runStoreSyncJob(shop, "manual");
+    const result = await startStoreSyncJob(shop, "manual");
     return res.json({ result });
   } catch (error) {
     const message =

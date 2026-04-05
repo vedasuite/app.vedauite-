@@ -12,6 +12,8 @@ export type SyncTriggerSource =
   | "customers_update"
   | "system";
 
+const ACTIVE_SYNC_STATUSES = ["PENDING", "RUNNING"] as const;
+
 async function resolveStore(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
@@ -94,6 +96,101 @@ export async function runStoreSyncJob(
 
     throw error;
   }
+}
+
+export async function startStoreSyncJob(
+  shopDomain: string,
+  triggerSource: SyncTriggerSource
+) {
+  const store = await resolveStore(shopDomain);
+
+  const activeJob = await prisma.syncJob.findFirst({
+    where: {
+      storeId: store.id,
+      jobType: "shopify_sync",
+      status: {
+        in: [...ACTIVE_SYNC_STATUSES],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (activeJob) {
+    return {
+      jobId: activeJob.id,
+      status: activeJob.status,
+      reusedExisting: true,
+    };
+  }
+
+  const createdJob = await prisma.syncJob.create({
+    data: {
+      storeId: store.id,
+      jobType: "shopify_sync",
+      triggerSource,
+      status: "PENDING",
+    },
+  });
+
+  void (async () => {
+    try {
+      await prisma.syncJob.update({
+        where: { id: createdJob.id },
+        data: {
+          status: "RUNNING",
+          startedAt: new Date(),
+        },
+      });
+
+      const syncResult = await syncShopifyStoreData(shopDomain);
+      const recomputeResult = await recomputeStoreDerivedData(shopDomain);
+
+      await prisma.syncJob.update({
+        where: { id: createdJob.id },
+        data: {
+          status: "SUCCEEDED",
+          finishedAt: new Date(),
+          summaryJson: JSON.stringify({
+            syncResult,
+            recomputeResult,
+          }),
+        },
+      });
+
+      logEvent("info", "sync_job.completed", {
+        shop: shopDomain,
+        triggerSource,
+        jobId: createdJob.id,
+        mode: "background",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Shopify sync job failed.";
+
+      await prisma.syncJob.update({
+        where: { id: createdJob.id },
+        data: {
+          status: "FAILED",
+          finishedAt: new Date(),
+          errorMessage: message,
+        },
+      });
+
+      logEvent("error", "sync_job.failed", {
+        shop: shopDomain,
+        triggerSource,
+        jobId: createdJob.id,
+        mode: "background",
+        message,
+      });
+    }
+  })();
+
+  return {
+    jobId: createdJob.id,
+    status: "PENDING",
+    reusedExisting: false,
+  };
 }
 
 export async function getLatestSyncJob(shopDomain: string) {
