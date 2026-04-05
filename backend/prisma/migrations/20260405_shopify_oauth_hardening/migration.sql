@@ -1,0 +1,5 @@
+ALTER TABLE "Store"
+ALTER COLUMN "accessToken" DROP NOT NULL;
+
+ALTER TABLE "Store"
+ADD COLUMN IF NOT EXISTS "lastConnectionError" TEXT;

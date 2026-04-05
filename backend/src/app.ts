@@ -31,6 +31,7 @@ const embeddedAppRoutes = [
 
 export function createApp() {
   const app = express();
+  app.set("trust proxy", 1);
   const frontendDistPath = path.resolve(__dirname, "../../frontend/dist");
   const frontendIndexPath = path.join(frontendDistPath, "index.html");
 

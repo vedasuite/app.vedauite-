@@ -4,8 +4,15 @@ import crypto from "crypto";
 import axios from "axios";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
+import {
+  clearShopifyOAuthStateCookie,
+  createShopifyOAuthState,
+  readShopifyOAuthStateCookie,
+  setShopifyOAuthStateCookie,
+} from "../lib/shopifyOAuthState";
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
+import { normalizeShopDomain } from "../services/shopifyConnectionService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
 import { runStoreSyncJob } from "../services/syncJobService";
 
@@ -38,28 +45,37 @@ function redirectTopLevel(res: Response, url: string) {
 </html>`);
 }
 
-function buildInstallUrl(shop: string) {
+function buildInstallUrl(shop: string, state: string) {
   const params = qs.stringify({
     client_id: env.shopifyApiKey,
     scope: env.shopifyScopes,
     redirect_uri: `${env.shopifyAppUrl}/auth/callback`,
+    state,
   });
   return `https://${shop}/admin/oauth/authorize?${params}`;
 }
 
 authRouter.get("/install", (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const normalizedShop = normalizeShopDomain(
+    typeof req.query.shop === "string" ? req.query.shop : undefined
+  );
+
+  if (!normalizedShop) {
     return res.status(400).send("Missing shop parameter.");
   }
-  const redirectUrl = buildInstallUrl(shop);
+  const state = createShopifyOAuthState();
+  setShopifyOAuthStateCookie(res, normalizedShop, state);
+  const redirectUrl = buildInstallUrl(normalizedShop, state);
   return redirectTopLevel(res, redirectUrl);
 });
 
 authRouter.get("/callback", async (req, res) => {
-  const { shop, code, hmac } = req.query;
+  const { code, hmac, state } = req.query;
+  const shop = normalizeShopDomain(
+    typeof req.query.shop === "string" ? req.query.shop : undefined
+  );
 
-  if (!shop || !code || !hmac) {
+  if (!shop || typeof code !== "string" || typeof hmac !== "string") {
     return res.status(400).send("Missing OAuth parameters.");
   }
 
@@ -80,6 +96,19 @@ authRouter.get("/callback", async (req, res) => {
     return res.status(400).send("HMAC validation failed.");
   }
 
+  const expectedState = readShopifyOAuthStateCookie(req);
+  if (
+    !state ||
+    typeof state !== "string" ||
+    !expectedState ||
+    expectedState.shop !== shop ||
+    expectedState.state !== state
+  ) {
+    return res.status(400).send("OAuth state validation failed.");
+  }
+
+  clearShopifyOAuthStateCookie(res);
+
   const tokenUrl = `https://${shop}/admin/oauth/access_token`;
 
   const tokenResponse = await axios.post(tokenUrl, {
@@ -89,22 +118,47 @@ authRouter.get("/callback", async (req, res) => {
   });
 
   const accessToken = tokenResponse.data.access_token as string;
+  const grantedScope = tokenResponse.data.scope as string | undefined;
 
-  const shopDomain = String(shop);
+  const shopDomain = shop;
   const trialStartedAt = new Date();
   const trialEndsAt = new Date(trialStartedAt);
   trialEndsAt.setDate(trialEndsAt.getDate() + env.billing.trialDays);
+  const existingStore = await prisma.store.findUnique({
+    where: { shop: shopDomain },
+    select: {
+      installedAt: true,
+      trialStartedAt: true,
+      trialEndsAt: true,
+    },
+  });
 
   await prisma.store.upsert({
     where: { shop: shopDomain },
     create: {
       shop: shopDomain,
       accessToken,
+      scope: grantedScope ?? env.shopifyScopes,
+      isOffline: true,
+      installedAt: trialStartedAt,
+      lastConnectionCheckAt: trialStartedAt,
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+      syncStatus: "PENDING",
       trialStartedAt,
       trialEndsAt,
     },
     update: {
       accessToken,
+      scope: grantedScope ?? env.shopifyScopes,
+      isOffline: true,
+      installedAt: existingStore?.installedAt ?? trialStartedAt,
+      trialStartedAt: existingStore?.trialStartedAt ?? trialStartedAt,
+      trialEndsAt: existingStore?.trialEndsAt ?? trialEndsAt,
+      uninstalledAt: null,
+      lastConnectionCheckAt: new Date(),
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
     },
   });
 

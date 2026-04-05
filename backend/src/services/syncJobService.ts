@@ -47,6 +47,13 @@ export async function runStoreSyncJob(
   });
 
   try {
+    await prisma.store.update({
+      where: { id: store.id },
+      data: {
+        syncStatus: "RUNNING",
+      },
+    });
+
     const syncResult = await syncShopifyStoreData(shopDomain);
     const recomputeResult = await recomputeStoreDerivedData(shopDomain);
 
@@ -59,6 +66,17 @@ export async function runStoreSyncJob(
           syncResult,
           recomputeResult,
         }),
+      },
+    });
+
+    await prisma.store.update({
+      where: { id: store.id },
+      data: {
+        lastSyncAt: new Date(),
+        syncStatus: "SUCCEEDED",
+        lastConnectionCheckAt: new Date(),
+        lastConnectionStatus: "OK",
+        lastConnectionError: null,
       },
     });
 
@@ -84,6 +102,18 @@ export async function runStoreSyncJob(
         status: "FAILED",
         finishedAt: new Date(),
         errorMessage: message,
+      },
+    });
+
+    await prisma.store.update({
+      where: { id: store.id },
+      data: {
+        syncStatus: "FAILED",
+        lastConnectionCheckAt: new Date(),
+        lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
+          ? "SHOPIFY_AUTH_REQUIRED"
+          : "SYNC_REQUIRED",
+        lastConnectionError: message,
       },
     });
 
@@ -134,6 +164,13 @@ export async function startStoreSyncJob(
 
   void (async () => {
     try {
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          syncStatus: "RUNNING",
+        },
+      });
+
       await prisma.syncJob.update({
         where: { id: createdJob.id },
         data: {
@@ -157,6 +194,17 @@ export async function startStoreSyncJob(
         },
       });
 
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          lastSyncAt: new Date(),
+          syncStatus: "SUCCEEDED",
+          lastConnectionCheckAt: new Date(),
+          lastConnectionStatus: "OK",
+          lastConnectionError: null,
+        },
+      });
+
       logEvent("info", "sync_job.completed", {
         shop: shopDomain,
         triggerSource,
@@ -173,6 +221,18 @@ export async function startStoreSyncJob(
           status: "FAILED",
           finishedAt: new Date(),
           errorMessage: message,
+        },
+      });
+
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          syncStatus: "FAILED",
+          lastConnectionCheckAt: new Date(),
+          lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
+            ? "SHOPIFY_AUTH_REQUIRED"
+            : "SYNC_REQUIRED",
+          lastConnectionError: message,
         },
       });
 

@@ -102,19 +102,28 @@ async function handleAppUninstalled(req: any, res: any) {
 
   await prisma.$transaction(async (tx) => {
     if (store.subscription) {
-      await tx.storeSubscription.delete({
+      await tx.storeSubscription.update({
         where: { id: store.subscription.id },
+        data: {
+          active: false,
+          billingStatus: "UNINSTALLED",
+          cancelledAt: new Date(),
+        },
       });
     }
 
-    await tx.fraudSignal.deleteMany({ where: { storeId: store.id } });
-    await tx.order.deleteMany({ where: { storeId: store.id } });
-    await tx.customer.deleteMany({ where: { storeId: store.id } });
-    await tx.competitorData.deleteMany({ where: { storeId: store.id } });
-    await tx.competitorDomain.deleteMany({ where: { storeId: store.id } });
-    await tx.priceHistory.deleteMany({ where: { storeId: store.id } });
-    await tx.profitOptimizationData.deleteMany({ where: { storeId: store.id } });
-    await tx.store.delete({ where: { id: store.id } });
+    await tx.store.update({
+      where: { id: store.id },
+      data: {
+        accessToken: null,
+        uninstalledAt: new Date(),
+        webhooksRegisteredAt: null,
+        syncStatus: "UNINSTALLED",
+        lastConnectionCheckAt: new Date(),
+        lastConnectionStatus: "UNINSTALLED",
+        lastConnectionError: "Shopify app uninstall webhook received.",
+      },
+    });
   });
 
   logEvent("info", "webhook.app_uninstalled", {

@@ -1,5 +1,9 @@
 import { prisma } from "../db/prismaClient";
 import { logEvent, withRetry } from "./observabilityService";
+import {
+  getOfflineShopSession,
+  normalizeShopDomain,
+} from "./shopifyConnectionService";
 
 const SHOPIFY_API_VERSION = "2024-01";
 
@@ -27,8 +31,24 @@ function extractLegacyId(gid?: string | null) {
 }
 
 async function getStoreAccess(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  if (!normalizedShop) {
+    throw new Error("Missing Shopify shop domain.");
+  }
+
+  const store = await getOfflineShopSession(normalizedShop);
+  if (!store || store.uninstalledAt) {
+    throw new Error("Store installation not found. Reauthorize the app and retry.");
+  }
+
+  if (!store.accessToken) {
+    throw new Error(
+      `Stored Shopify access token is invalid for ${normalizedShop}. Reauthorize the app and retry.`
+    );
+  }
+
+  const access = await prisma.store.findUnique({
+    where: { shop: normalizedShop },
     select: {
       id: true,
       shop: true,
@@ -38,11 +58,17 @@ async function getStoreAccess(shopDomain: string) {
     },
   });
 
-  if (!store) {
+  if (!access) {
     throw new Error("Store not found");
   }
 
-  return store;
+  if (!access.accessToken) {
+    throw new Error(
+      `Stored Shopify access token is invalid for ${normalizedShop}. Reauthorize the app and retry.`
+    );
+  }
+
+  return access;
 }
 
 export async function shopifyGraphQL<T>(
@@ -63,7 +89,7 @@ export async function shopifyGraphQL<T>(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Shopify-Access-Token": store.accessToken,
+          "X-Shopify-Access-Token": store.accessToken ?? "",
         },
         body: JSON.stringify({ query, variables }),
         signal: controller.signal,
@@ -283,6 +309,10 @@ export async function cancelAppSubscription(
 }
 
 export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  if (!normalizedShop) {
+    throw new Error("Missing shop.");
+  }
   const callbackBaseUrl = new URL("/webhooks/shopify", appUrl).toString();
   const desiredTopics = [
     "ORDERS_CREATE",
@@ -306,7 +336,7 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
       }>;
     };
   }>(
-    shopDomain,
+    normalizedShop,
     `
       query ExistingWebhooks {
         webhookSubscriptions(first: 50) {
@@ -348,7 +378,7 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
         userErrors: Array<{ message: string }>;
       };
     }>(
-      shopDomain,
+      normalizedShop,
       `
         mutation CreateWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
           webhookSubscriptionCreate(
@@ -382,6 +412,16 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
     created.push(topic);
   }
 
+  await prisma.store.update({
+    where: { shop: normalizedShop },
+    data: {
+      webhooksRegisteredAt: new Date(),
+      lastConnectionCheckAt: new Date(),
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+    },
+  });
+
   return {
     created,
     totalTracked: desiredTopics.length,
@@ -389,6 +429,10 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
 }
 
 export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  if (!normalizedShop) {
+    throw new Error("Missing shop.");
+  }
   const callbackBaseUrl = new URL("/webhooks/shopify", appUrl).toString();
   const desiredTopics = [
     "ORDERS_CREATE",
@@ -412,7 +456,7 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
       }>;
     };
   }>(
-    shopDomain,
+    normalizedShop,
     `
       query ExistingWebhooks {
         webhookSubscriptions(first: 50) {
@@ -589,9 +633,14 @@ export async function fetchCompetitorSnapshot(
 }
 
 export async function syncShopifyStoreData(shopDomain: string) {
-  const store = await getStoreAccess(shopDomain);
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  if (!normalizedShop) {
+    throw new Error("Missing shop.");
+  }
+
+  const store = await getStoreAccess(normalizedShop);
   const data = await shopifyGraphQL<SyncQueryResponse>(
-    shopDomain,
+    normalizedShop,
     `
       query SyncStoreData {
         shop {
@@ -862,6 +911,17 @@ export async function syncShopifyStoreData(shopDomain: string) {
       });
     }
   }
+
+  await prisma.store.update({
+    where: { id: store.id },
+    data: {
+      lastSyncAt: new Date(),
+      syncStatus: "SUCCEEDED",
+      lastConnectionCheckAt: new Date(),
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+    },
+  });
 
   return {
     syncedAt: new Date().toISOString(),

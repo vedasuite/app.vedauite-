@@ -41,17 +41,25 @@ export async function embeddedShopRequest<T = unknown>(
           ...(host ? { host } : {}),
         }
       : body;
-  const sessionToken = await withRequestTimeout(
-    Promise.resolve(getEmbeddedSessionToken()),
-    Math.min(timeoutMs, 12000),
-    "Unable to establish the Shopify embedded session."
-  );
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Requested-With": "XMLHttpRequest",
   };
-  if (sessionToken) {
-    headers.Authorization = `Bearer ${sessionToken}`;
+
+  try {
+    const sessionToken = await withRequestTimeout(
+      Promise.resolve(getEmbeddedSessionToken()),
+      Math.min(timeoutMs, 12000),
+      "Unable to establish the Shopify embedded session."
+    );
+
+    if (sessionToken) {
+      headers.Authorization = `Bearer ${sessionToken}`;
+    }
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("[embeddedShopRequest] session token fallback to cookie session", error);
+    }
   }
 
   const abortController = new AbortController();

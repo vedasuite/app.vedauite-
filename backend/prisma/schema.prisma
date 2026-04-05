@@ -10,7 +10,17 @@ datasource db {
 model Store {
   id          String @id @default(cuid())
   shop        String @unique
-  accessToken String
+  accessToken String?
+  scope       String?
+  isOffline   Boolean @default(true)
+  installedAt DateTime?
+  webhooksRegisteredAt DateTime?
+  lastConnectionCheckAt DateTime?
+  lastConnectionStatus String?
+  lastConnectionError String?
+  uninstalledAt DateTime?
+  lastSyncAt DateTime?
+  syncStatus String?
 
   trialStartedAt DateTime?
   trialEndsAt    DateTime?

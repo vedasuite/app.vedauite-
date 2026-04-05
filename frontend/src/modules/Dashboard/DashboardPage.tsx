@@ -79,6 +79,22 @@ type SyncJobResponse = {
   result: SyncJobPayload | null;
 };
 
+type ConnectionHealth = {
+  shop: string | null;
+  code: string;
+  healthy: boolean;
+  installationFound: boolean;
+  hasOfflineToken: boolean;
+  webhooksRegistered: boolean;
+  webhookCoverageReady: boolean;
+  lastSyncStatus: string | null;
+  lastSyncAt: string | null;
+  lastConnectionStatus: string | null;
+  lastConnectionError: string | null;
+  reauthRequired: boolean;
+  message: string;
+};
+
 function getApiErrorMessage(error: unknown, fallback: string) {
   const candidate = error as {
     message?: string;
@@ -118,6 +134,7 @@ function getApiErrorMessage(error: unknown, fallback: string) {
 
 function getApiReauthorizeUrl(error: unknown) {
   const candidate = error as {
+    reauthorizeUrl?: string | null;
     response?: {
       data?: {
         error?: {
@@ -127,7 +144,11 @@ function getApiReauthorizeUrl(error: unknown) {
     };
   };
 
-  return candidate.response?.data?.error?.reauthorizeUrl ?? null;
+  return (
+    candidate.reauthorizeUrl ??
+    candidate.response?.data?.error?.reauthorizeUrl ??
+    null
+  );
 }
 
 function redirectTopLevel(url: string) {
@@ -162,6 +183,7 @@ export function DashboardPage() {
   const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
   const [launchAudit, setLaunchAudit] = useState<LaunchAudit | null>(null);
   const [decisionCenter, setDecisionCenter] = useState<DecisionCenter | null>(null);
+  const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{
     title: string;
@@ -201,6 +223,7 @@ export function DashboardPage() {
       if (latestJob.status === "SUCCEEDED") {
         loadMetrics();
         loadWebhookStatus();
+        loadConnectionHealth();
         setToast("Live Shopify data synced into VedaSuite.");
         return;
       }
@@ -237,9 +260,35 @@ export function DashboardPage() {
       .catch(() => setWebhookStatus(null));
   };
 
+  const loadConnectionHealth = () => {
+    embeddedShopRequest<{ result: ConnectionHealth }>(
+      "/api/shopify/connection-health",
+      { timeoutMs: 20000 }
+    )
+      .then((res) => {
+        setConnectionHealth(res.result);
+        if (!res.result.healthy) {
+          setActionError({
+            title: res.result.reauthRequired
+              ? "Shopify connection needs reauthorization"
+              : res.result.code === "WEBHOOKS_MISSING"
+                ? "Shopify webhook setup needs attention"
+                : "Live sync needs attention",
+            detail: res.result.message,
+            reauthorizeUrl: res.result.reauthRequired ? fallbackReauthorizeUrl : null,
+          });
+          return;
+        }
+
+        setActionError(null);
+      })
+      .catch(() => undefined);
+  };
+
   useEffect(() => {
     loadMetrics();
     loadWebhookStatus();
+    loadConnectionHealth();
     embeddedShopRequest<LaunchAudit>("/launch/audit", {
       timeoutMs: 30000,
     })
@@ -295,6 +344,7 @@ export function DashboardPage() {
         method: "POST",
         timeoutMs: 20000,
       });
+      loadConnectionHealth();
       await pollSyncJob(response.result?.jobId ?? response.result?.id ?? null);
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
@@ -342,6 +392,7 @@ export function DashboardPage() {
           : "Shopify sync webhooks are already registered."
       );
       loadWebhookStatus();
+      loadConnectionHealth();
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to register Shopify sync webhooks.");
       const reauthorizeUrl =
@@ -600,7 +651,12 @@ export function DashboardPage() {
                       your connected Shopify store.
                     </Text>
                   </div>
-                  <Badge tone="success">Connected</Badge>
+                  <InlineStack gap="200">
+                    <Badge tone="success">Connected</Badge>
+                    {connectionHealth && !connectionHealth.healthy ? (
+                      <Badge tone="attention">{connectionHealth.code}</Badge>
+                    ) : null}
+                  </InlineStack>
                 </InlineStack>
                 <div className="vs-analytics-strip" aria-hidden="true">
                   {[52, 68, 61, 82, 74, 88, 79].map((width, index) => (
