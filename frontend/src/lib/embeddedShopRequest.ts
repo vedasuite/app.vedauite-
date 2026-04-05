@@ -41,7 +41,11 @@ export async function embeddedShopRequest<T = unknown>(
           ...(host ? { host } : {}),
         }
       : body;
-  const sessionToken = await getEmbeddedSessionToken();
+  const sessionToken = await withRequestTimeout(
+    Promise.resolve(getEmbeddedSessionToken()),
+    Math.min(timeoutMs, 12000),
+    "Unable to establish the Shopify embedded session."
+  );
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Requested-With": "XMLHttpRequest",
@@ -50,15 +54,37 @@ export async function embeddedShopRequest<T = unknown>(
     headers.Authorization = `Bearer ${sessionToken}`;
   }
 
+  const abortController = new AbortController();
+
   const response = await withRequestTimeout(
     fetch(url.toString(), {
       method,
       credentials: "same-origin",
       headers,
+      signal: abortController.signal,
       body: requestBody ? JSON.stringify(requestBody) : undefined,
     }),
-    timeoutMs
-  );
+    timeoutMs,
+    `Request timed out after ${timeoutMs}ms`
+  ).catch((error) => {
+    abortController.abort();
+    throw error;
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    const payload = await response.json().catch(() => ({}));
+    const reauthorizeMessage =
+      payload?.error?.message ||
+      payload?.message ||
+      "Shopify authorization expired. Reconnect the app and retry.";
+    const enrichedError = new Error(reauthorizeMessage) as Error & {
+      reauthorizeUrl?: string;
+    };
+    if (payload?.error?.reauthorizeUrl) {
+      enrichedError.reauthorizeUrl = payload.error.reauthorizeUrl;
+    }
+    throw enrichedError;
+  }
 
   const payload = await response.json().catch(() => ({}));
 

@@ -300,7 +300,7 @@ export function DashboardPage() {
       const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
       const reauthorizeUrl =
         getApiReauthorizeUrl(error) ??
-        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login/i.test(
+        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|embedded session|reconnect shopify/i.test(
           message
         )
           ? fallbackReauthorizeUrl
@@ -346,7 +346,7 @@ export function DashboardPage() {
       const message = getApiErrorMessage(error, "Unable to register Shopify sync webhooks.");
       const reauthorizeUrl =
         getApiReauthorizeUrl(error) ??
-        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login/i.test(
+        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|embedded session|reconnect shopify/i.test(
           message
         )
           ? fallbackReauthorizeUrl

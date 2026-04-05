@@ -2,6 +2,7 @@ import { getSessionToken } from "@shopify/app-bridge/utilities/session-token";
 import { useMemo } from "react";
 import createApp, { AppConfig } from "@shopify/app-bridge";
 import { getEmbeddedContext } from "./lib/shopifyEmbeddedContext";
+import { withRequestTimeout } from "./lib/requestTimeout";
 
 const apiKey =
   (import.meta.env.VITE_SHOPIFY_API_KEY as string | undefined) || "";
@@ -60,7 +61,11 @@ export async function getEmbeddedSessionToken() {
     return null;
   }
 
-  const inflight = getSessionToken(app).then((token) => {
+  const inflight = withRequestTimeout(
+    getSessionToken(app),
+    12000,
+    "Shopify session token request timed out."
+  ).then((token) => {
     sessionTokenCache.set(cacheKey, {
       token,
       expiresAt: Date.now() + 30_000,
@@ -76,6 +81,19 @@ export async function getEmbeddedSessionToken() {
 
   try {
     return await inflight;
+  } catch (error) {
+    sessionTokenCache.delete(cacheKey);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to establish the Shopify embedded session.";
+
+    throw new Error(
+      /timed out/i.test(message)
+        ? "Unable to establish the Shopify embedded session. Refresh the app or reconnect Shopify."
+        : message
+    );
   } finally {
     const latest = sessionTokenCache.get(cacheKey);
     if (latest?.inflight === inflight) {

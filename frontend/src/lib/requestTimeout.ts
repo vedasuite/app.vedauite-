@@ -1,10 +1,11 @@
 export function withRequestTimeout<T>(
   promise: Promise<T>,
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  message = `Request timed out after ${timeoutMs}ms`
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
-      reject(new Error(`Request timed out after ${timeoutMs}ms`));
+      reject(new Error(message));
     }, timeoutMs);
 
     promise
