@@ -13,7 +13,11 @@ import { router } from "./routes";
 import { shopifyWebhookRouter } from "./routes/shopifyWebhookRoutes";
 import { ensureStoreBootstrapped } from "./services/bootstrapService";
 import { env } from "./config/env";
-import { setShopifySessionCookie } from "./lib/shopifySessionCookie";
+import {
+  readShopifySessionCookie,
+  setShopifySessionCookie,
+} from "./lib/shopifySessionCookie";
+import { normalizeShopDomain } from "./services/shopifyConnectionService";
 
 const embeddedAppRoutes = [
   "/",
@@ -107,13 +111,24 @@ export function createApp() {
   );
 
   app.get("/auth", (req, res) => {
-    const shop = req.query.shop as string | undefined;
+    const shop = normalizeShopDomain(
+      (req.query.shop as string | undefined) ?? readShopifySessionCookie(req)
+    );
 
     if (!shop) {
       return res.status(400).send("Missing shop");
     }
 
-    return res.redirect(`/auth/install?shop=${encodeURIComponent(shop)}`);
+    const redirectUrl = new URL("/auth/reconnect", env.shopifyAppUrl);
+    redirectUrl.searchParams.set("shop", shop);
+    if (typeof req.query.host === "string" && req.query.host) {
+      redirectUrl.searchParams.set("host", req.query.host);
+    }
+    if (typeof req.query.returnTo === "string" && req.query.returnTo.startsWith("/")) {
+      redirectUrl.searchParams.set("returnTo", req.query.returnTo);
+    }
+
+    return res.redirect(redirectUrl.toString());
   });
 
   app.get("/products", async (req, res) => {
@@ -151,7 +166,9 @@ export function createApp() {
 
   app.get(embeddedAppRoutes, async (req, res, next) => {
     try {
-      const shop = req.query.shop as string | undefined;
+      const shop = normalizeShopDomain(
+        (req.query.shop as string | undefined) ?? readShopifySessionCookie(req)
+      );
 
       if (!shop) {
         return res.status(400).send("Missing shop");
@@ -162,7 +179,9 @@ export function createApp() {
       if (!token) {
         return redirectTopLevel(
           res,
-          `/auth?shop=${encodeURIComponent(shop)}`
+          `/auth?shop=${encodeURIComponent(shop)}&returnTo=${encodeURIComponent(
+            req.path
+          )}`
         );
       }
 

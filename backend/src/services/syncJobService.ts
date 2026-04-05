@@ -50,7 +50,7 @@ export async function runStoreSyncJob(
     await prisma.store.update({
       where: { id: store.id },
       data: {
-        syncStatus: "RUNNING",
+        lastSyncStatus: "RUNNING",
       },
     });
 
@@ -73,10 +73,12 @@ export async function runStoreSyncJob(
       where: { id: store.id },
       data: {
         lastSyncAt: new Date(),
-        syncStatus: "SUCCEEDED",
+        lastSyncStatus: "SUCCEEDED",
         lastConnectionCheckAt: new Date(),
         lastConnectionStatus: "OK",
         lastConnectionError: null,
+        authErrorCode: null,
+        authErrorMessage: null,
       },
     });
 
@@ -108,12 +110,16 @@ export async function runStoreSyncJob(
     await prisma.store.update({
       where: { id: store.id },
       data: {
-        syncStatus: "FAILED",
+        lastSyncStatus: "FAILED",
         lastConnectionCheckAt: new Date(),
         lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
           ? "SHOPIFY_AUTH_REQUIRED"
           : "SYNC_REQUIRED",
         lastConnectionError: message,
+        authErrorCode: /reauthorize|invalid access token/i.test(message)
+          ? "SHOPIFY_AUTH_REQUIRED"
+          : "SYNC_FAILED",
+        authErrorMessage: message,
       },
     });
 
@@ -167,7 +173,7 @@ export async function startStoreSyncJob(
       await prisma.store.update({
         where: { id: store.id },
         data: {
-          syncStatus: "RUNNING",
+          lastSyncStatus: "RUNNING",
         },
       });
 
@@ -198,10 +204,12 @@ export async function startStoreSyncJob(
         where: { id: store.id },
         data: {
           lastSyncAt: new Date(),
-          syncStatus: "SUCCEEDED",
+          lastSyncStatus: "SUCCEEDED",
           lastConnectionCheckAt: new Date(),
           lastConnectionStatus: "OK",
           lastConnectionError: null,
+          authErrorCode: null,
+          authErrorMessage: null,
         },
       });
 
@@ -227,12 +235,16 @@ export async function startStoreSyncJob(
       await prisma.store.update({
         where: { id: store.id },
         data: {
-          syncStatus: "FAILED",
+          lastSyncStatus: "FAILED",
           lastConnectionCheckAt: new Date(),
           lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
             ? "SHOPIFY_AUTH_REQUIRED"
             : "SYNC_REQUIRED",
           lastConnectionError: message,
+          authErrorCode: /reauthorize|invalid access token/i.test(message)
+            ? "SHOPIFY_AUTH_REQUIRED"
+            : "SYNC_FAILED",
+          authErrorMessage: message,
         },
       });
 

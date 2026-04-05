@@ -11,16 +11,23 @@ model Store {
   id          String @id @default(cuid())
   shop        String @unique
   accessToken String?
-  scope       String?
+  grantedScopes String? @map("scope")
   isOffline   Boolean @default(true)
   installedAt DateTime?
+  reauthorizedAt DateTime?
   webhooksRegisteredAt DateTime?
+  lastWebhookRegistrationStatus String?
   lastConnectionCheckAt DateTime?
   lastConnectionStatus String?
   lastConnectionError String?
+  authErrorCode String?
+  authErrorMessage String?
+  accessTokenExpiresAt DateTime?
+  refreshToken String?
+  refreshTokenExpiresAt DateTime?
   uninstalledAt DateTime?
   lastSyncAt DateTime?
-  syncStatus String?
+  lastSyncStatus String? @map("syncStatus")
 
   trialStartedAt DateTime?
   trialEndsAt    DateTime?

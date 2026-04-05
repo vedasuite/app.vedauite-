@@ -22,46 +22,30 @@ function buildUrl(path: string) {
   return url;
 }
 
-export async function embeddedShopRequest<T = unknown>(
-  path: string,
-  options: EmbeddedRequestOptions = {}
+function buildRequestBody(
+  method: EmbeddedRequestOptions["method"],
+  body: EmbeddedRequestOptions["body"]
 ) {
-  const { method = "GET", body, timeoutMs = 30000 } = options;
-  const url = buildUrl(path);
   const { shop, host } = getEmbeddedContext();
   const shouldAttachContext =
-    method !== "GET" &&
-    method !== "HEAD" &&
-    method !== "OPTIONS";
-  const requestBody =
-    shouldAttachContext
-      ? {
-          ...(body ?? {}),
-          ...(shop ? { shop } : {}),
-          ...(host ? { host } : {}),
-        }
-      : body;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Requested-With": "XMLHttpRequest",
-  };
+    method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
 
-  try {
-    const sessionToken = await withRequestTimeout(
-      Promise.resolve(getEmbeddedSessionToken()),
-      Math.min(timeoutMs, 12000),
-      "Unable to establish the Shopify embedded session."
-    );
+  return shouldAttachContext
+    ? {
+        ...(body ?? {}),
+        ...(shop ? { shop } : {}),
+        ...(host ? { host } : {}),
+      }
+    : body;
+}
 
-    if (sessionToken) {
-      headers.Authorization = `Bearer ${sessionToken}`;
-    }
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.warn("[embeddedShopRequest] session token fallback to cookie session", error);
-    }
-  }
-
+async function doFetch(
+  url: URL,
+  method: NonNullable<EmbeddedRequestOptions["method"]>,
+  requestBody: ReturnType<typeof buildRequestBody>,
+  timeoutMs: number,
+  headers: Record<string, string>
+) {
   const abortController = new AbortController();
 
   const response = await withRequestTimeout(
@@ -79,39 +63,88 @@ export async function embeddedShopRequest<T = unknown>(
     throw error;
   });
 
-  if (response.status === 401 || response.status === 403) {
-    const payload = await response.json().catch(() => ({}));
-    const reauthorizeMessage =
-      payload?.error?.message ||
-      payload?.message ||
-      "Shopify authorization expired. Reconnect the app and retry.";
-    const enrichedError = new Error(reauthorizeMessage) as Error & {
-      reauthorizeUrl?: string;
-    };
-    if (payload?.error?.reauthorizeUrl) {
-      enrichedError.reauthorizeUrl = payload.error.reauthorizeUrl;
-    }
-    throw enrichedError;
-  }
-
   const payload = await response.json().catch(() => ({}));
 
-  if (!response.ok) {
-    const error =
-      typeof payload?.error === "string"
-        ? payload.error
-        : payload?.error?.message ||
-          payload?.message ||
-          `Request failed with status ${response.status}`;
+  return { response, payload };
+}
 
-    const enrichedError = new Error(error) as Error & {
-      reauthorizeUrl?: string;
-    };
-    if (payload?.error?.reauthorizeUrl) {
-      enrichedError.reauthorizeUrl = payload.error.reauthorizeUrl;
-    }
-    throw enrichedError;
+function enrichError(
+  payload: any,
+  fallbackMessage: string
+) {
+  const errorMessage =
+    typeof payload?.error === "string"
+      ? payload.error
+      : payload?.error?.message ||
+        payload?.message ||
+        fallbackMessage;
+
+  const enrichedError = new Error(errorMessage) as Error & {
+    reauthorizeUrl?: string;
+    code?: string;
+  };
+
+  if (typeof payload?.error?.reauthorizeUrl === "string") {
+    enrichedError.reauthorizeUrl = payload.error.reauthorizeUrl;
+  }
+  if (typeof payload?.error?.code === "string") {
+    enrichedError.code = payload.error.code;
   }
 
-  return payload as T;
+  return enrichedError;
+}
+
+export async function embeddedShopRequest<T = unknown>(
+  path: string,
+  options: EmbeddedRequestOptions = {}
+) {
+  const { method = "GET", body, timeoutMs = 30000 } = options;
+  const url = buildUrl(path);
+  const requestBody = buildRequestBody(method, body);
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+  };
+
+  let firstAttempt = await doFetch(url, method, requestBody, timeoutMs, baseHeaders);
+
+  if (
+    (firstAttempt.response.status === 401 || firstAttempt.response.status === 403) &&
+    firstAttempt.payload?.error?.code === "INVALID_SHOPIFY_SESSION_TOKEN"
+  ) {
+    try {
+      const sessionToken = await withRequestTimeout(
+        Promise.resolve(getEmbeddedSessionToken()),
+        Math.min(timeoutMs, 6000),
+        "Shopify session token request timed out."
+      );
+
+      if (sessionToken) {
+        firstAttempt = await doFetch(url, method, requestBody, timeoutMs, {
+          ...baseHeaders,
+          Authorization: `Bearer ${sessionToken}`,
+        });
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn("[embeddedShopRequest] bearer retry unavailable", error);
+      }
+    }
+  }
+
+  if (firstAttempt.response.status === 401 || firstAttempt.response.status === 403) {
+    throw enrichError(
+      firstAttempt.payload,
+      "Shopify authorization expired. Reconnect the app and retry."
+    );
+  }
+
+  if (!firstAttempt.response.ok) {
+    throw enrichError(
+      firstAttempt.payload,
+      `Request failed with status ${firstAttempt.response.status}`
+    );
+  }
+
+  return firstAttempt.payload as T;
 }

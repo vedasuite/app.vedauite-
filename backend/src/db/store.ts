@@ -1,5 +1,8 @@
 import { prisma } from "./prismaClient";
-import { normalizeShopDomain } from "../services/shopifyConnectionService";
+import {
+  normalizeShopDomain,
+  resolveOfflineInstallation,
+} from "../services/shopifyConnectionService";
 
 export async function saveStore(shop: string, accessToken: string) {
   const normalizedShop = normalizeShopDomain(shop);
@@ -12,30 +15,30 @@ export async function saveStore(shop: string, accessToken: string) {
     create: {
       shop: normalizedShop,
       accessToken,
+      isOffline: true,
+      installedAt: new Date(),
+      reauthorizedAt: new Date(),
+      lastConnectionStatus: "OK",
+      authErrorCode: null,
+      authErrorMessage: null,
     },
     update: {
       accessToken,
+      reauthorizedAt: new Date(),
       uninstalledAt: null,
       lastConnectionStatus: "OK",
       lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
     },
   });
 }
 
 export async function getToken(shop: string) {
-  const normalizedShop = normalizeShopDomain(shop);
-  if (!normalizedShop) {
+  try {
+    const installation = await resolveOfflineInstallation(shop);
+    return installation.accessToken ?? null;
+  } catch {
     return null;
   }
-
-  const store = await prisma.store.findUnique({
-    where: { shop: normalizedShop },
-    select: { accessToken: true, uninstalledAt: true },
-  });
-
-  if (!store || store.uninstalledAt) {
-    return null;
-  }
-
-  return store.accessToken ?? null;
 }

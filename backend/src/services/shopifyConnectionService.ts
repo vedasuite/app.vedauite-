@@ -1,3 +1,4 @@
+import axios from "axios";
 import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
 import { logEvent } from "./observabilityService";
@@ -6,13 +7,15 @@ export type ShopifyConnectionCode =
   | "OK"
   | "MISSING_SHOP"
   | "MISSING_INSTALLATION"
-  | "MISSING_ACCESS_TOKEN"
+  | "MISSING_OFFLINE_TOKEN"
   | "UNINSTALLED"
-  | "STALE_CONNECTION"
   | "SHOPIFY_AUTH_REQUIRED"
   | "SHOPIFY_API_UNREACHABLE"
+  | "WEBHOOK_REGISTRATION_FAILED"
   | "WEBHOOKS_MISSING"
-  | "SYNC_REQUIRED";
+  | "SYNC_FAILED"
+  | "INVALID_SHOP"
+  | "STALE_CONNECTION";
 
 export type ShopifyConnectionHealth = {
   shop: string | null;
@@ -21,14 +24,41 @@ export type ShopifyConnectionHealth = {
   installationFound: boolean;
   hasOfflineToken: boolean;
   webhooksRegistered: boolean;
-  webhookCoverageReady: boolean;
+  lastWebhookRegistrationStatus: string | null;
   lastSyncStatus: string | null;
   lastSyncAt: string | null;
+  lastConnectionCheckAt: string | null;
   lastConnectionStatus: string | null;
-  lastConnectionError: string | null;
+  authErrorCode: string | null;
+  authErrorMessage: string | null;
   reauthRequired: boolean;
   message: string;
+  reauthorizeUrl?: string;
 };
+
+type InstallationRecord = Awaited<ReturnType<typeof getOfflineInstallation>>;
+
+type ConnectionDiagnosticUpdate = {
+  lastConnectionStatus?: string | null;
+  lastConnectionError?: string | null;
+  authErrorCode?: string | null;
+  authErrorMessage?: string | null;
+  webhooksRegisteredAt?: Date | null;
+  lastWebhookRegistrationStatus?: string | null;
+  lastSyncAt?: Date | null;
+  lastSyncStatus?: string | null;
+};
+
+type RefreshAccessTokenResponse = {
+  access_token: string;
+  scope?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+};
+
+const SHOP_REGEX = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
+const ACCESS_TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 export class ShopifyConnectionError extends Error {
   code: ShopifyConnectionCode;
@@ -46,35 +76,45 @@ export class ShopifyConnectionError extends Error {
 }
 
 export function normalizeShopDomain(shop?: string | null) {
-  if (!shop) {
+  if (!shop || typeof shop !== "string") {
     return null;
   }
 
-  const normalized = shop.trim().toLowerCase();
-  if (!normalized) {
+  const trimmed = shop.trim().toLowerCase();
+  if (!trimmed) {
     return null;
   }
 
-  if (normalized.endsWith(".myshopify.com")) {
-    return normalized;
+  if (trimmed.includes("://") || trimmed.includes("/") || trimmed.includes("?")) {
+    return null;
   }
 
-  return `${normalized}.myshopify.com`;
+  const normalized = trimmed.endsWith(".myshopify.com")
+    ? trimmed
+    : `${trimmed}.myshopify.com`;
+
+  if (!SHOP_REGEX.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
-function buildReauthorizeUrl(shop?: string | null) {
+export function buildReauthorizeUrl(shop?: string | null, returnTo?: string | null) {
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
     return undefined;
   }
 
-  return new URL(
-    `/auth/install?shop=${encodeURIComponent(normalizedShop)}`,
-    env.shopifyAppUrl
-  ).toString();
+  const url = new URL("/auth/reconnect", env.shopifyAppUrl);
+  url.searchParams.set("shop", normalizedShop);
+  if (returnTo?.startsWith("/")) {
+    url.searchParams.set("returnTo", returnTo);
+  }
+  return url.toString();
 }
 
-export async function getOfflineShopSession(shop?: string | null) {
+export async function getOfflineInstallation(shop?: string | null) {
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
     return null;
@@ -85,26 +125,200 @@ export async function getOfflineShopSession(shop?: string | null) {
   });
 }
 
-export async function getShopAccessToken(shop?: string | null) {
-  const installation = await getOfflineShopSession(shop);
-  if (!installation?.accessToken || installation.uninstalledAt) {
-    return null;
+function isAccessTokenExpiring(installation: NonNullable<InstallationRecord>) {
+  if (!installation.accessTokenExpiresAt) {
+    return false;
   }
 
-  return installation.accessToken;
+  return installation.accessTokenExpiresAt.getTime() <= Date.now() + ACCESS_TOKEN_EXPIRY_BUFFER_MS;
 }
 
-async function recordConnectionStatus(
-  shop: string,
-  status: ShopifyConnectionCode | "OK",
-  errorMessage?: string | null
+async function refreshOfflineAccessToken(
+  installation: NonNullable<InstallationRecord>
 ) {
+  if (!installation.refreshToken) {
+    throw new ShopifyConnectionError(
+      "SHOPIFY_AUTH_REQUIRED",
+      `Stored Shopify access token is invalid or expired for ${installation.shop}. Reauthorize the app and retry.`,
+      { reauthorizeUrl: buildReauthorizeUrl(installation.shop) }
+    );
+  }
+
+  try {
+    const tokenUrl = `https://${installation.shop}/admin/oauth/access_token`;
+    const response = await axios.post<RefreshAccessTokenResponse>(tokenUrl, {
+      client_id: env.shopifyApiKey,
+      client_secret: env.shopifyApiSecret,
+      grant_type: "refresh_token",
+      refresh_token: installation.refreshToken,
+    });
+
+    const now = new Date();
+    const nextAccessTokenExpiresAt =
+      typeof response.data.expires_in === "number"
+        ? new Date(now.getTime() + response.data.expires_in * 1000)
+        : null;
+    const nextRefreshTokenExpiresAt =
+      typeof response.data.refresh_token_expires_in === "number"
+        ? new Date(now.getTime() + response.data.refresh_token_expires_in * 1000)
+        : installation.refreshTokenExpiresAt;
+
+    const updated = await prisma.store.update({
+      where: { id: installation.id },
+      data: {
+        accessToken: response.data.access_token,
+        grantedScopes: response.data.scope ?? installation.grantedScopes,
+        accessTokenExpiresAt: nextAccessTokenExpiresAt,
+        refreshToken: response.data.refresh_token ?? installation.refreshToken,
+        refreshTokenExpiresAt: nextRefreshTokenExpiresAt,
+        reauthorizedAt: now,
+        authErrorCode: null,
+        authErrorMessage: null,
+        lastConnectionCheckAt: now,
+        lastConnectionStatus: "OK",
+        lastConnectionError: null,
+        uninstalledAt: null,
+      },
+    });
+
+    logEvent("info", "shopify.connection.refresh_token_succeeded", {
+      shop: installation.shop,
+      route: "connection.refresh",
+      accessTokenExpiresAt: nextAccessTokenExpiresAt?.toISOString() ?? null,
+    });
+
+    return updated;
+  } catch (error) {
+    await prisma.store.update({
+      where: { id: installation.id },
+      data: {
+        authErrorCode: "SHOPIFY_AUTH_REQUIRED",
+        authErrorMessage:
+          error instanceof Error ? error.message : "Shopify access token refresh failed.",
+        lastConnectionCheckAt: new Date(),
+        lastConnectionStatus: "SHOPIFY_AUTH_REQUIRED",
+        lastConnectionError:
+          error instanceof Error ? error.message : "Shopify access token refresh failed.",
+      },
+    });
+
+    logEvent("error", "shopify.connection.refresh_token_failed", {
+      shop: installation.shop,
+      route: "connection.refresh",
+      error,
+    });
+
+    throw new ShopifyConnectionError(
+      "SHOPIFY_AUTH_REQUIRED",
+      `Stored Shopify access token is invalid or expired for ${installation.shop}. Reauthorize the app and retry.`,
+      { reauthorizeUrl: buildReauthorizeUrl(installation.shop) }
+    );
+  }
+}
+
+export async function forceRefreshOfflineAccessToken(shop?: string | null) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    throw new ShopifyConnectionError("INVALID_SHOP", "Invalid Shopify shop domain.");
+  }
+
+  const installation = await getOfflineInstallation(normalizedShop);
+  if (!installation) {
+    throw new ShopifyConnectionError(
+      "MISSING_INSTALLATION",
+      `No Shopify installation record was found for ${normalizedShop}.`,
+      { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+    );
+  }
+
+  return refreshOfflineAccessToken(installation);
+}
+
+export async function resolveOfflineInstallation(
+  shop?: string | null,
+  options: { allowRefresh?: boolean } = {}
+) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    throw new ShopifyConnectionError("INVALID_SHOP", "Invalid Shopify shop domain.");
+  }
+
+  const installation = await getOfflineInstallation(normalizedShop);
+  if (!installation) {
+    throw new ShopifyConnectionError(
+      "MISSING_INSTALLATION",
+      `No Shopify installation record was found for ${normalizedShop}.`,
+      { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+    );
+  }
+
+  if (installation.uninstalledAt) {
+    throw new ShopifyConnectionError(
+      "UNINSTALLED",
+      `The app was previously uninstalled from ${normalizedShop}. Reconnect the app to continue.`,
+      { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+    );
+  }
+
+  if (!installation.accessToken) {
+    throw new ShopifyConnectionError(
+      "MISSING_OFFLINE_TOKEN",
+      `The stored Shopify offline access token is missing for ${normalizedShop}. Reauthorize the app and retry.`,
+      { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+    );
+  }
+
+  if (options.allowRefresh !== false && isAccessTokenExpiring(installation)) {
+    return refreshOfflineAccessToken(installation);
+  }
+
+  return installation;
+}
+
+export async function getOfflineShopSession(shop?: string | null) {
+  return resolveOfflineInstallation(shop);
+}
+
+export async function getShopAccessToken(shop?: string | null) {
+  const installation = await resolveOfflineInstallation(shop);
+  return installation.accessToken!;
+}
+
+export async function updateConnectionDiagnostics(
+  shop: string,
+  update: ConnectionDiagnosticUpdate
+) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    return;
+  }
+
   await prisma.store.update({
-    where: { shop },
+    where: { shop: normalizedShop },
     data: {
+      ...(update.lastConnectionStatus !== undefined
+        ? { lastConnectionStatus: update.lastConnectionStatus }
+        : {}),
+      ...(update.lastConnectionError !== undefined
+        ? { lastConnectionError: update.lastConnectionError }
+        : {}),
+      ...(update.authErrorCode !== undefined
+        ? { authErrorCode: update.authErrorCode }
+        : {}),
+      ...(update.authErrorMessage !== undefined
+        ? { authErrorMessage: update.authErrorMessage }
+        : {}),
+      ...(update.webhooksRegisteredAt !== undefined
+        ? { webhooksRegisteredAt: update.webhooksRegisteredAt }
+        : {}),
+      ...(update.lastWebhookRegistrationStatus !== undefined
+        ? { lastWebhookRegistrationStatus: update.lastWebhookRegistrationStatus }
+        : {}),
+      ...(update.lastSyncAt !== undefined ? { lastSyncAt: update.lastSyncAt } : {}),
+      ...(update.lastSyncStatus !== undefined
+        ? { lastSyncStatus: update.lastSyncStatus }
+        : {}),
       lastConnectionCheckAt: new Date(),
-      lastConnectionStatus: status,
-      lastConnectionError: errorMessage ?? null,
     },
   });
 }
@@ -136,36 +350,27 @@ async function probeShopApi(shop: string, accessToken: string) {
     );
 
     if (!response.ok) {
-      const text = await response.text();
-      if (
-        response.status === 401 ||
-        /invalid api key|invalid access token|unrecognized login|wrong password/i.test(
-          text
-        )
-      ) {
-        throw new ShopifyConnectionError(
-          "SHOPIFY_AUTH_REQUIRED",
-          `Stored Shopify access token is invalid for ${shop}. Reauthorize the app and retry.`,
-          { reauthorizeUrl: buildReauthorizeUrl(shop) }
-        );
-      }
-
+      const body = await response.text();
       throw new ShopifyConnectionError(
-        "SHOPIFY_API_UNREACHABLE",
-        `Shopify Admin API probe failed for ${shop}: ${response.status}`
+        response.status === 401 ? "SHOPIFY_AUTH_REQUIRED" : "SHOPIFY_API_UNREACHABLE",
+        response.status === 401
+          ? `Stored Shopify access token is invalid for ${shop}. Reauthorize the app and retry.`
+          : `Shopify Admin API probe failed for ${shop}: ${response.status}.`,
+        { reauthorizeUrl: buildReauthorizeUrl(shop) }
       );
     }
 
     const payload = (await response.json()) as {
-      data?: { shop?: { name?: string } };
       errors?: Array<{ message: string }>;
+      data?: { shop?: { name?: string } };
     };
 
     if (payload.errors?.length) {
-      const message = payload.errors.map((error) => error.message).join(", ");
-      throw new ShopifyConnectionError("STALE_CONNECTION", message, {
-        reauthorizeUrl: buildReauthorizeUrl(shop),
-      });
+      const message = payload.errors.map((entry) => entry.message).join(", ");
+      throw new ShopifyConnectionError(
+        "SHOPIFY_API_UNREACHABLE",
+        message || `Shopify Admin API probe failed for ${shop}.`
+      );
     }
 
     return payload.data?.shop?.name ?? shop;
@@ -177,17 +382,17 @@ async function probeShopApi(shop: string, accessToken: string) {
     if (
       error instanceof Error &&
       (error.name === "AbortError" ||
-        /aborted|timed out|network request failed|fetch failed/i.test(error.message))
+        /timed out|fetch failed|network request failed|aborted/i.test(error.message))
     ) {
       throw new ShopifyConnectionError(
         "SHOPIFY_API_UNREACHABLE",
-        `Shopify API request timed out for ${shop}. Retry in a few seconds.`
+        `Shopify Admin API request timed out for ${shop}. Retry in a few seconds.`
       );
     }
 
     throw new ShopifyConnectionError(
       "STALE_CONNECTION",
-      error instanceof Error ? error.message : "Shopify connection probe failed.",
+      error instanceof Error ? error.message : `Unable to verify Shopify connection for ${shop}.`,
       { reauthorizeUrl: buildReauthorizeUrl(shop) }
     );
   } finally {
@@ -200,6 +405,7 @@ export async function getConnectionHealth(
   options: { probeApi?: boolean } = {}
 ): Promise<ShopifyConnectionHealth> {
   const normalizedShop = normalizeShopDomain(shop);
+
   if (!normalizedShop) {
     return {
       shop: null,
@@ -208,11 +414,13 @@ export async function getConnectionHealth(
       installationFound: false,
       hasOfflineToken: false,
       webhooksRegistered: false,
-      webhookCoverageReady: false,
+      lastWebhookRegistrationStatus: null,
       lastSyncStatus: null,
       lastSyncAt: null,
+      lastConnectionCheckAt: null,
       lastConnectionStatus: null,
-      lastConnectionError: null,
+      authErrorCode: "MISSING_SHOP",
+      authErrorMessage: "Missing Shopify shop domain.",
       reauthRequired: true,
       message: "Missing Shopify shop domain.",
     };
@@ -230,55 +438,16 @@ export async function getConnectionHealth(
       installationFound: false,
       hasOfflineToken: false,
       webhooksRegistered: false,
-      webhookCoverageReady: false,
+      lastWebhookRegistrationStatus: null,
       lastSyncStatus: null,
       lastSyncAt: null,
+      lastConnectionCheckAt: null,
       lastConnectionStatus: null,
-      lastConnectionError: null,
+      authErrorCode: "MISSING_INSTALLATION",
+      authErrorMessage: `No Shopify installation record was found for ${normalizedShop}.`,
       reauthRequired: true,
-      message: "No Shopify installation record was found for this shop.",
-    };
-  }
-
-  if (installation.uninstalledAt) {
-    await recordConnectionStatus(normalizedShop, "UNINSTALLED");
-    return {
-      shop: normalizedShop,
-      code: "UNINSTALLED",
-      healthy: false,
-      installationFound: true,
-      hasOfflineToken: !!installation.accessToken,
-      webhooksRegistered: !!installation.webhooksRegisteredAt,
-      webhookCoverageReady: false,
-      lastSyncStatus: installation.syncStatus ?? null,
-      lastSyncAt: installation.lastSyncAt?.toISOString() ?? null,
-      lastConnectionStatus: "UNINSTALLED",
-      lastConnectionError: installation.lastConnectionError ?? null,
-      reauthRequired: true,
-      message: "This Shopify installation was previously uninstalled and must be reconnected.",
-    };
-  }
-
-  if (!installation.accessToken) {
-    await recordConnectionStatus(
-      normalizedShop,
-      "MISSING_ACCESS_TOKEN",
-      "Missing offline access token."
-    );
-    return {
-      shop: normalizedShop,
-      code: "MISSING_ACCESS_TOKEN",
-      healthy: false,
-      installationFound: true,
-      hasOfflineToken: false,
-      webhooksRegistered: !!installation.webhooksRegisteredAt,
-      webhookCoverageReady: false,
-      lastSyncStatus: installation.syncStatus ?? null,
-      lastSyncAt: installation.lastSyncAt?.toISOString() ?? null,
-      lastConnectionStatus: "MISSING_ACCESS_TOKEN",
-      lastConnectionError: "Missing offline access token.",
-      reauthRequired: true,
-      message: "The Shopify offline access token is missing for this installation.",
+      message: `No Shopify installation record was found for ${normalizedShop}.`,
+      reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
     };
   }
 
@@ -287,45 +456,75 @@ export async function getConnectionHealth(
     code: "OK",
     healthy: true,
     installationFound: true,
-    hasOfflineToken: true,
+    hasOfflineToken: !!installation.accessToken,
     webhooksRegistered: !!installation.webhooksRegisteredAt,
-    webhookCoverageReady: !!installation.webhooksRegisteredAt,
-    lastSyncStatus: installation.syncStatus ?? null,
+    lastWebhookRegistrationStatus: installation.lastWebhookRegistrationStatus ?? null,
+    lastSyncStatus: installation.lastSyncStatus ?? null,
     lastSyncAt: installation.lastSyncAt?.toISOString() ?? null,
-    lastConnectionStatus: installation.lastConnectionStatus ?? "OK",
-    lastConnectionError: installation.lastConnectionError ?? null,
+    lastConnectionCheckAt: installation.lastConnectionCheckAt?.toISOString() ?? null,
+    lastConnectionStatus: installation.lastConnectionStatus ?? null,
+    authErrorCode: installation.authErrorCode ?? null,
+    authErrorMessage: installation.authErrorMessage ?? installation.lastConnectionError ?? null,
     reauthRequired: false,
     message: "Shopify connection is healthy.",
   };
 
-  if (!options.probeApi) {
-    if (!installation.webhooksRegisteredAt) {
-      return {
-        ...baseHealth,
-        code: "WEBHOOKS_MISSING",
-        healthy: false,
-        webhookCoverageReady: false,
-        message: "Mandatory Shopify webhooks are not registered yet.",
-      };
-    }
+  const buildFailure = (
+    code: ShopifyConnectionCode,
+    message: string,
+    options: { reauthRequired?: boolean; reauthorizeUrl?: string } = {}
+  ): ShopifyConnectionHealth => ({
+    ...baseHealth,
+    code,
+    healthy: false,
+    reauthRequired: options.reauthRequired ?? false,
+    message,
+    authErrorCode: code,
+    authErrorMessage: message,
+    reauthorizeUrl: options.reauthorizeUrl,
+  });
 
+  if (installation.uninstalledAt) {
+    return buildFailure(
+      "UNINSTALLED",
+      `This Shopify installation was previously uninstalled and must be reconnected.`,
+      {
+        reauthRequired: true,
+        reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
+      }
+    );
+  }
+
+  if (!installation.accessToken) {
+    return buildFailure(
+      "MISSING_OFFLINE_TOKEN",
+      `The stored Shopify offline access token is missing for ${normalizedShop}.`,
+      {
+        reauthRequired: true,
+        reauthorizeUrl: buildReauthorizeUrl(normalizedShop),
+      }
+    );
+  }
+
+  if (!installation.webhooksRegisteredAt) {
+    baseHealth.code = "WEBHOOKS_MISSING";
+    baseHealth.healthy = false;
+    baseHealth.message = "Mandatory Shopify webhooks are not registered yet.";
+  }
+
+  if (!options.probeApi) {
     return baseHealth;
   }
 
   try {
-    await probeShopApi(normalizedShop, installation.accessToken);
-    await recordConnectionStatus(normalizedShop, "OK", null);
-
-    const webhookCoverageReady = !!installation.webhooksRegisteredAt;
-    return {
-      ...baseHealth,
-      code: webhookCoverageReady ? "OK" : "WEBHOOKS_MISSING",
-      healthy: webhookCoverageReady,
-      webhookCoverageReady,
-      message: webhookCoverageReady
-        ? "Shopify connection is healthy."
-        : "Shopify connection is healthy, but required webhooks are missing.",
-    };
+    const resolved = await resolveOfflineInstallation(normalizedShop, { allowRefresh: true });
+    await probeShopApi(normalizedShop, resolved.accessToken!);
+    await updateConnectionDiagnostics(normalizedShop, {
+      lastConnectionStatus: baseHealth.code === "WEBHOOKS_MISSING" ? "WEBHOOKS_MISSING" : "OK",
+      authErrorCode: null,
+      authErrorMessage: null,
+    });
+    return baseHealth;
   } catch (error) {
     const connectionError =
       error instanceof ShopifyConnectionError
@@ -336,14 +535,16 @@ export async function getConnectionHealth(
             { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
           );
 
-    await recordConnectionStatus(
-      normalizedShop,
-      connectionError.code,
-      connectionError.message
-    );
+    await updateConnectionDiagnostics(normalizedShop, {
+      lastConnectionStatus: connectionError.code,
+      lastConnectionError: connectionError.message,
+      authErrorCode: connectionError.code,
+      authErrorMessage: connectionError.message,
+    });
 
-    logEvent("warn", "shopify.connection_health.failed", {
+    logEvent("warn", "shopify.connection.health_failed", {
       shop: normalizedShop,
+      route: "shopify.connection_health",
       code: connectionError.code,
       message: connectionError.message,
     });
@@ -352,23 +553,24 @@ export async function getConnectionHealth(
       ...baseHealth,
       code: connectionError.code,
       healthy: false,
-      lastConnectionStatus: connectionError.code,
-      lastConnectionError: connectionError.message,
       reauthRequired:
         connectionError.code === "SHOPIFY_AUTH_REQUIRED" ||
-        connectionError.code === "STALE_CONNECTION" ||
-        connectionError.code === "MISSING_ACCESS_TOKEN" ||
-        connectionError.code === "UNINSTALLED",
+        connectionError.code === "MISSING_OFFLINE_TOKEN" ||
+        connectionError.code === "UNINSTALLED" ||
+        connectionError.code === "STALE_CONNECTION",
       message: connectionError.message,
+      authErrorCode: connectionError.code,
+      authErrorMessage: connectionError.message,
+      reauthorizeUrl: connectionError.reauthorizeUrl,
     };
   }
 }
 
 export async function assertHealthyOfflineAccess(shop?: string | null) {
   const health = await getConnectionHealth(shop, { probeApi: true });
-  if (!health.healthy && health.code !== "WEBHOOKS_MISSING") {
+  if (!health.healthy) {
     throw new ShopifyConnectionError(health.code, health.message, {
-      reauthorizeUrl: buildReauthorizeUrl(health.shop),
+      reauthorizeUrl: health.reauthorizeUrl ?? buildReauthorizeUrl(health.shop),
     });
   }
 

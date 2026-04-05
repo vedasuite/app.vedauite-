@@ -2,6 +2,7 @@ import { type Response, Router } from "express";
 import { env } from "../config/env";
 import {
   assertHealthyOfflineAccess,
+  buildReauthorizeUrl,
   getConnectionHealth,
   normalizeShopDomain,
   ShopifyConnectionError,
@@ -17,18 +18,6 @@ import {
 } from "../services/syncJobService";
 
 export const shopifyRouter = Router();
-
-function buildReauthorizeUrl(shop?: string) {
-  const normalizedShop = normalizeShopDomain(shop);
-  if (!normalizedShop) {
-    return undefined;
-  }
-
-  return new URL(
-    `/auth/install?shop=${encodeURIComponent(normalizedShop)}`,
-    env.shopifyAppUrl
-  ).toString();
-}
 
 function sendStructuredConnectionError(
   res: Response,
@@ -60,9 +49,11 @@ function sendStructuredConnectionError(
 }
 
 shopifyRouter.get("/connection-health", async (req, res) => {
-  const { shop } = req.query;
+  const shop =
+    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
+    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
   const result = await getConnectionHealth(
-    typeof shop === "string" ? shop : undefined,
+    shop,
     { probeApi: true }
   );
   return res.json({ result });
@@ -72,10 +63,16 @@ shopifyRouter.post("/sync", async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
+    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
 
   if (!shop) {
-    return res.status(400).json({ error: "Missing shop." });
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
   }
 
   try {
@@ -108,7 +105,12 @@ shopifyRouter.get("/sync-jobs/latest", async (req, res) => {
   const { shop } = req.query;
 
   if (!shop || typeof shop !== "string") {
-    return res.status(400).json({ error: "Missing shop." });
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
   }
 
   const result = await getLatestSyncJob(shop);
@@ -119,10 +121,16 @@ shopifyRouter.post("/register-webhooks", async (req, res) => {
   const body = req.body as { shop?: string };
   const shop =
     body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
+    (req as typeof req & { shopifySession?: { shop?: string } }).shopifySession?.shop;
 
   if (!shop) {
-    return res.status(400).json({ error: "Missing shop." });
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
   }
 
   try {
@@ -155,7 +163,12 @@ shopifyRouter.get("/webhook-status", async (req, res) => {
   const { shop } = req.query;
 
   if (!shop || typeof shop !== "string") {
-    return res.status(400).json({ error: "Missing shop." });
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
   }
 
   const result = await getSyncWebhookStatus(shop, env.shopifyAppUrl);

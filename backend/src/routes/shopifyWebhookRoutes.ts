@@ -116,12 +116,18 @@ async function handleAppUninstalled(req: any, res: any) {
       where: { id: store.id },
       data: {
         accessToken: null,
+        refreshToken: null,
+        accessTokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
         uninstalledAt: new Date(),
         webhooksRegisteredAt: null,
-        syncStatus: "UNINSTALLED",
+        lastWebhookRegistrationStatus: "UNINSTALLED",
+        lastSyncStatus: "UNINSTALLED",
         lastConnectionCheckAt: new Date(),
         lastConnectionStatus: "UNINSTALLED",
         lastConnectionError: "Shopify app uninstall webhook received.",
+        authErrorCode: "UNINSTALLED",
+        authErrorMessage: "Shopify app uninstall webhook received.",
       },
     });
   });

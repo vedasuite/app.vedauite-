@@ -1,17 +1,40 @@
 import type { Request, Response } from "express";
 import crypto from "crypto";
+import { env } from "../config/env";
 
 const SHOPIFY_OAUTH_STATE_COOKIE = "vedasuite_oauth_state";
 const COOKIE_MAX_AGE_MS = 15 * 60 * 1000;
 
-function buildCookieValue(shop: string, state: string) {
-  const payload = `${shop}|${state}`;
+export type ShopifyOAuthStatePayload = {
+  shop: string;
+  state: string;
+  host?: string | null;
+  returnTo?: string | null;
+};
+
+function toBase64Url(value: string) {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function fromBase64Url(value: string) {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function buildCookieValue(payload: ShopifyOAuthStatePayload) {
+  const encodedPayload = toBase64Url(
+    JSON.stringify({
+      shop: payload.shop,
+      state: payload.state,
+      host: payload.host ?? null,
+      returnTo: payload.returnTo ?? null,
+    })
+  );
   const signature = crypto
-    .createHmac("sha256", process.env.SHOPIFY_API_SECRET || "")
-    .update(payload)
+    .createHmac("sha256", env.shopifyApiSecret)
+    .update(encodedPayload)
     .digest("hex");
 
-  return `${payload}|${signature}`;
+  return `${encodedPayload}.${signature}`;
 }
 
 function parseCookieValue(raw: string | undefined) {
@@ -19,14 +42,14 @@ function parseCookieValue(raw: string | undefined) {
     return null;
   }
 
-  const [shop, state, signature] = raw.split("|");
-  if (!shop || !state || !signature) {
+  const [encodedPayload, signature] = raw.split(".");
+  if (!encodedPayload || !signature) {
     return null;
   }
 
   const expected = crypto
-    .createHmac("sha256", process.env.SHOPIFY_API_SECRET || "")
-    .update(`${shop}|${state}`)
+    .createHmac("sha256", env.shopifyApiSecret)
+    .update(encodedPayload)
     .digest("hex");
 
   const provided = Buffer.from(signature);
@@ -40,15 +63,30 @@ function parseCookieValue(raw: string | undefined) {
     return null;
   }
 
-  return { shop, state };
+  try {
+    const payload = JSON.parse(
+      fromBase64Url(encodedPayload)
+    ) as ShopifyOAuthStatePayload;
+
+    if (!payload.shop || !payload.state) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 export function createShopifyOAuthState() {
   return crypto.randomBytes(24).toString("hex");
 }
 
-export function setShopifyOAuthStateCookie(res: Response, shop: string, state: string) {
-  res.cookie(SHOPIFY_OAUTH_STATE_COOKIE, buildCookieValue(shop, state), {
+export function setShopifyOAuthStateCookie(
+  res: Response,
+  payload: ShopifyOAuthStatePayload
+) {
+  res.cookie(SHOPIFY_OAUTH_STATE_COOKIE, buildCookieValue(payload), {
     httpOnly: true,
     secure: true,
     sameSite: "none",

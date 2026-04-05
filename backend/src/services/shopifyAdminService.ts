@@ -1,8 +1,10 @@
 import { prisma } from "../db/prismaClient";
 import { logEvent, withRetry } from "./observabilityService";
 import {
-  getOfflineShopSession,
+  forceRefreshOfflineAccessToken,
   normalizeShopDomain,
+  resolveOfflineInstallation,
+  updateConnectionDiagnostics,
 } from "./shopifyConnectionService";
 
 const SHOPIFY_API_VERSION = "2024-01";
@@ -36,46 +38,22 @@ async function getStoreAccess(shopDomain: string) {
     throw new Error("Missing Shopify shop domain.");
   }
 
-  const store = await getOfflineShopSession(normalizedShop);
-  if (!store || store.uninstalledAt) {
-    throw new Error("Store installation not found. Reauthorize the app and retry.");
-  }
+  const access = await resolveOfflineInstallation(normalizedShop);
 
-  if (!store.accessToken) {
-    throw new Error(
-      `Stored Shopify access token is invalid for ${normalizedShop}. Reauthorize the app and retry.`
-    );
-  }
-
-  const access = await prisma.store.findUnique({
-    where: { shop: normalizedShop },
-    select: {
-      id: true,
-      shop: true,
-      accessToken: true,
-      pricingBias: true,
-      profitGuardrail: true,
-    },
-  });
-
-  if (!access) {
-    throw new Error("Store not found");
-  }
-
-  if (!access.accessToken) {
-    throw new Error(
-      `Stored Shopify access token is invalid for ${normalizedShop}. Reauthorize the app and retry.`
-    );
-  }
-
-  return access;
+  return {
+    id: access.id,
+    shop: access.shop,
+    accessToken: access.accessToken,
+    pricingBias: access.pricingBias,
+    profitGuardrail: access.profitGuardrail,
+  };
 }
 
 export async function shopifyGraphQL<T>(
   shopDomain: string,
   query: string,
   variables?: Record<string, unknown>,
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; _retriedAuth?: boolean } = {}
 ) {
   const store = await getStoreAccess(shopDomain);
   const controller = new AbortController();
@@ -104,6 +82,25 @@ export async function shopifyGraphQL<T>(
           text
         )
       ) {
+        if (!options._retriedAuth) {
+          try {
+            await forceRefreshOfflineAccessToken(shopDomain);
+            return shopifyGraphQL<T>(shopDomain, query, variables, {
+              timeoutMs,
+              _retriedAuth: true,
+            });
+          } catch {
+            // fall through to structured auth failure below
+          }
+        }
+
+        await updateConnectionDiagnostics(shopDomain, {
+          lastConnectionStatus: "SHOPIFY_AUTH_REQUIRED",
+          lastConnectionError: `Stored Shopify access token is invalid for ${shopDomain}.`,
+          authErrorCode: "SHOPIFY_AUTH_REQUIRED",
+          authErrorMessage: `Stored Shopify access token is invalid for ${shopDomain}. Reauthorize the app and retry.`,
+        });
+
         throw new Error(
           `Stored Shopify access token is invalid for ${shopDomain}. Reauthorize the app and retry.`
         );
@@ -370,8 +367,20 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
     const callbackUrl = `${callbackBaseUrl}/${topic.toLowerCase()}`;
     const key = `${topic}|${callbackUrl}`;
     if (existingKeys.has(key)) {
+      logEvent("info", "shopify.webhook.registration_skipped", {
+        shop: normalizedShop,
+        topic,
+        callbackUrl,
+        reason: "already_registered",
+      });
       continue;
     }
+
+    logEvent("info", "shopify.webhook.registration_attempt", {
+      shop: normalizedShop,
+      topic,
+      callbackUrl,
+    });
 
     const createdWebhook = await shopifyGraphQL<{
       webhookSubscriptionCreate: {
@@ -402,23 +411,46 @@ export async function registerSyncWebhooks(shopDomain: string, appUrl: string) {
     );
 
     if (createdWebhook.webhookSubscriptionCreate.userErrors.length) {
-      throw new Error(
-        createdWebhook.webhookSubscriptionCreate.userErrors
-          .map((error) => error.message)
-          .join(", ")
-      );
+      const failureMessage = createdWebhook.webhookSubscriptionCreate.userErrors
+        .map((error) => error.message)
+        .join(", ");
+
+      logEvent("error", "shopify.webhook.registration_failed", {
+        shop: normalizedShop,
+        topic,
+        callbackUrl,
+        reason: failureMessage,
+      });
+
+      await updateConnectionDiagnostics(normalizedShop, {
+        lastWebhookRegistrationStatus: "FAILED",
+        lastConnectionStatus: "WEBHOOK_REGISTRATION_FAILED",
+        lastConnectionError: failureMessage,
+        authErrorCode: "WEBHOOK_REGISTRATION_FAILED",
+        authErrorMessage: failureMessage,
+      });
+
+      throw new Error(failureMessage);
     }
 
     created.push(topic);
+    logEvent("info", "shopify.webhook.registration_succeeded", {
+      shop: normalizedShop,
+      topic,
+      callbackUrl,
+    });
   }
 
   await prisma.store.update({
     where: { shop: normalizedShop },
     data: {
       webhooksRegisteredAt: new Date(),
+      lastWebhookRegistrationStatus: "SUCCEEDED",
       lastConnectionCheckAt: new Date(),
       lastConnectionStatus: "OK",
       lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
     },
   });
 
@@ -916,10 +948,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
     where: { id: store.id },
     data: {
       lastSyncAt: new Date(),
-      syncStatus: "SUCCEEDED",
+      lastSyncStatus: "SUCCEEDED",
       lastConnectionCheckAt: new Date(),
       lastConnectionStatus: "OK",
       lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
     },
   });
 

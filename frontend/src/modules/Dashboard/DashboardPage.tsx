@@ -93,6 +93,7 @@ type ConnectionHealth = {
   lastConnectionError: string | null;
   reauthRequired: boolean;
   message: string;
+  reauthorizeUrl?: string;
 };
 
 function getApiErrorMessage(error: unknown, fallback: string) {
@@ -194,7 +195,9 @@ export function DashboardPage() {
   const [onboardingStep, setOnboardingStep] = useState(0);
 
   const fallbackReauthorizeUrl = shop
-    ? `/auth/install?shop=${encodeURIComponent(shop)}`
+    ? `/auth/reconnect?shop=${encodeURIComponent(shop)}&returnTo=${encodeURIComponent(
+        window.location.pathname
+      )}`
     : null;
 
   const pollSyncJob = async (jobId?: string | null) => {
@@ -272,10 +275,13 @@ export function DashboardPage() {
             title: res.result.reauthRequired
               ? "Shopify connection needs reauthorization"
               : res.result.code === "WEBHOOKS_MISSING"
-                ? "Shopify webhook setup needs attention"
+              ? "Shopify webhook setup needs attention"
                 : "Live sync needs attention",
             detail: res.result.message,
-            reauthorizeUrl: res.result.reauthRequired ? fallbackReauthorizeUrl : null,
+            reauthorizeUrl:
+              res.result.reauthRequired
+                ? res.result.reauthorizeUrl ?? fallbackReauthorizeUrl
+                : null,
           });
           return;
         }
