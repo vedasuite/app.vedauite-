@@ -28,6 +28,7 @@ export type ShopifyConnectionHealth = {
   installationFound: boolean;
   hasOfflineToken: boolean;
   webhooksRegistered: boolean;
+  webhookCoverageReady: boolean;
   lastWebhookRegistrationStatus: string | null;
   lastSyncStatus: string | null;
   lastSyncAt: string | null;
@@ -510,6 +511,7 @@ export async function getConnectionHealth(
       installationFound: false,
       hasOfflineToken: false,
       webhooksRegistered: false,
+      webhookCoverageReady: false,
       lastWebhookRegistrationStatus: null,
       lastSyncStatus: null,
       lastSyncAt: null,
@@ -537,6 +539,7 @@ export async function getConnectionHealth(
       installationFound: false,
       hasOfflineToken: false,
       webhooksRegistered: false,
+      webhookCoverageReady: false,
       lastWebhookRegistrationStatus: null,
       lastSyncStatus: null,
       lastSyncAt: null,
@@ -564,6 +567,10 @@ export async function getConnectionHealth(
     installationFound: true,
     hasOfflineToken: !!installation.accessToken,
     webhooksRegistered: !!installation.webhooksRegisteredAt,
+    webhookCoverageReady:
+      !!installation.webhooksRegisteredAt &&
+      installation.lastWebhookRegistrationStatus !== "FAILED" &&
+      installation.lastWebhookRegistrationStatus !== "UNINSTALLED",
     lastWebhookRegistrationStatus: installation.lastWebhookRegistrationStatus ?? null,
     lastSyncStatus: installation.lastSyncStatus ?? null,
     lastSyncAt: installation.lastSyncAt?.toISOString() ?? null,

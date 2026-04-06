@@ -49,6 +49,7 @@ type LaunchAudit = {
     ok: boolean;
     detail: string;
   }>;
+  reviewerReminders?: string[];
 };
 
 type DecisionCenter = {
@@ -100,6 +101,48 @@ type ConnectionHealth = {
   reauthRequired: boolean;
   message: string;
   reauthorizeUrl?: string;
+};
+
+type Diagnostics = {
+  generatedAt: string;
+  shop: string;
+  installation: {
+    found: boolean;
+    offlineTokenPresent: boolean;
+    refreshTokenPresent: boolean;
+    accessTokenExpiresAt: string | null;
+    refreshTokenExpiresAt: string | null;
+    uninstalledAt: string | null;
+  };
+  connection: ConnectionHealth;
+  reviewerSummary: {
+    installExists: boolean;
+    tokenPresent: boolean;
+    tokenRefreshHealthy: boolean;
+    webhookCoverageReady: boolean;
+    reconnectRequired: boolean;
+    uninstallState: boolean;
+    billingStatus: string | null;
+  };
+  webhooks: {
+    registeredAt: string | null;
+    lastStatus: string | null;
+    liveStatus: WebhookStatus | null;
+  };
+  sync: {
+    lastSyncAt: string | null;
+    lastSyncStatus: string | null;
+    latestJob: SyncJobPayload | null;
+  };
+  billing: {
+    planName: string;
+    status: string;
+    billingStatus: string | null;
+    active: boolean;
+    starterModule: string | null;
+    endsAt: string | null;
+    trialEndsAt: string | null;
+  } | null;
 };
 
 function getApiErrorMessage(error: unknown, fallback: string) {
@@ -189,6 +232,7 @@ export function DashboardPage() {
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
   const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
   const [launchAudit, setLaunchAudit] = useState<LaunchAudit | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [decisionCenter, setDecisionCenter] = useState<DecisionCenter | null>(null);
   const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -205,6 +249,9 @@ export function DashboardPage() {
         host ? `&host=${encodeURIComponent(host)}` : ""
       }&returnTo=${encodeURIComponent(window.location.pathname)}`
     : null;
+
+  const effectiveConnectionHealth = diagnostics?.connection ?? connectionHealth;
+  const effectiveWebhookStatus = diagnostics?.webhooks.liveStatus ?? webhookStatus;
 
   const pollSyncJob = async (jobId?: string | null) => {
     const startedAt = Date.now();
@@ -231,8 +278,7 @@ export function DashboardPage() {
 
       if (latestJob.status === "SUCCEEDED") {
         loadMetrics();
-        loadWebhookStatus();
-        loadConnectionHealth();
+        void loadDiagnostics();
         setToast("Live Shopify data synced into VedaSuite.");
         return;
       }
@@ -261,39 +307,32 @@ export function DashboardPage() {
       .finally(() => setLoading(false));
   };
 
-  const loadWebhookStatus = () => {
-    embeddedShopRequest<{ result: WebhookStatus }>("/api/shopify/webhook-status", {
-      timeoutMs: 30000,
-    })
-      .then((res) => setWebhookStatus(res.result))
-      .catch(() => setWebhookStatus(null));
-  };
+  const loadDiagnostics = () => {
+    const query = host
+      ? `?host=${encodeURIComponent(host)}&returnTo=${encodeURIComponent(
+          window.location.pathname
+        )}`
+      : "";
 
-  const loadConnectionHealth = () => {
-    embeddedShopRequest<{ result: ConnectionHealth }>(
-      `/api/shopify/connection-health${
-        host
-          ? `?host=${encodeURIComponent(host)}&returnTo=${encodeURIComponent(
-              window.location.pathname
-            )}`
-          : ""
-      }`,
-      { timeoutMs: 20000 }
-    )
+    return embeddedShopRequest<Diagnostics>(`/api/shopify/diagnostics${query}`, {
+      timeoutMs: 20000,
+    })
       .then((res) => {
-        setConnectionHealth(res.result);
-        if (!res.result.healthy) {
+        setDiagnostics(res);
+        setConnectionHealth(res.connection);
+        setWebhookStatus(res.webhooks.liveStatus);
+
+        if (!res.connection.healthy) {
           setActionError({
-            title: res.result.reauthRequired
+            title: res.connection.reauthRequired
               ? "Shopify connection needs reauthorization"
-              : res.result.code === "WEBHOOKS_MISSING"
+              : res.connection.code === "WEBHOOKS_MISSING"
               ? "Shopify webhook setup needs attention"
-                : "Live sync needs attention",
-            detail: res.result.message,
-            reauthorizeUrl:
-              res.result.reauthRequired
-                ? res.result.reauthorizeUrl ?? fallbackReauthorizeUrl
-                : null,
+              : "Live sync needs attention",
+            detail: res.connection.message,
+            reauthorizeUrl: res.connection.reauthRequired
+              ? res.connection.reauthorizeUrl ?? fallbackReauthorizeUrl
+              : null,
           });
           return;
         }
@@ -305,9 +344,8 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadMetrics();
-    loadWebhookStatus();
-    loadConnectionHealth();
-    embeddedShopRequest<LaunchAudit>("/launch/audit", {
+    void loadDiagnostics();
+    embeddedShopRequest<LaunchAudit>("/launch/sanity", {
       timeoutMs: 30000,
     })
       .then((res) => setLaunchAudit(res))
@@ -366,7 +404,7 @@ export function DashboardPage() {
         },
         timeoutMs: 20000,
       });
-      loadConnectionHealth();
+      void loadDiagnostics();
       await pollSyncJob(response.result?.jobId ?? response.result?.id ?? null);
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
@@ -417,8 +455,7 @@ export function DashboardPage() {
           ? `Registered ${response.result.created.length} Shopify sync webhooks.`
           : "Shopify sync webhooks are already registered."
       );
-      loadWebhookStatus();
-      loadConnectionHealth();
+      void loadDiagnostics();
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to register Shopify sync webhooks.");
       const reauthorizeUrl =
@@ -461,9 +498,9 @@ export function DashboardPage() {
       {
         label: "Shopify sync webhooks are registered",
         done:
-          webhookStatus != null &&
-          webhookStatus.totalTracked > 0 &&
-          webhookStatus.registeredCount === webhookStatus.totalTracked,
+          effectiveWebhookStatus != null &&
+          effectiveWebhookStatus.totalTracked > 0 &&
+          effectiveWebhookStatus.registeredCount === effectiveWebhookStatus.totalTracked,
         action: "Register webhooks",
         route: null as string | null,
         run: registerWebhooks,
@@ -481,7 +518,7 @@ export function DashboardPage() {
         route: "/subscription",
       },
       {
-        label: "Launch-facing configuration checks are green",
+        label: "Submission-facing configuration checks are green",
         done: launchAudit?.checks.every((item) => item.ok) ?? false,
         action: "Open settings",
         route: "/settings",
@@ -491,7 +528,7 @@ export function DashboardPage() {
       launchAudit?.checks,
       reportsEnabled,
       subscription?.enabledModules?.pricingProfit,
-      webhookStatus,
+      effectiveWebhookStatus,
     ]
   );
 
@@ -691,8 +728,8 @@ export function DashboardPage() {
                   </div>
                   <InlineStack gap="200">
                     <Badge tone="success">Connected</Badge>
-                    {connectionHealth && !connectionHealth.healthy ? (
-                      <Badge tone="attention">{connectionHealth.code}</Badge>
+                    {effectiveConnectionHealth && !effectiveConnectionHealth.healthy ? (
+                      <Badge tone="attention">{effectiveConnectionHealth.code}</Badge>
                     ) : null}
                   </InlineStack>
                 </InlineStack>
@@ -732,8 +769,8 @@ export function DashboardPage() {
                       Webhook coverage
                     </Text>
                     <Text as="p" variant="headingLg">
-                      {webhookStatus
-                        ? `${webhookStatus.registeredCount}/${webhookStatus.totalTracked}`
+                      {effectiveWebhookStatus
+                        ? `${effectiveWebhookStatus.registeredCount}/${effectiveWebhookStatus.totalTracked}`
                         : "-"}
                     </Text>
                   </div>
@@ -785,13 +822,13 @@ export function DashboardPage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
                   <div>
-                    <Text as="h2" variant="headingLg">
-                      Launch readiness checklist
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Keep this store configured for review, sync health, and full-suite operations.
-                    </Text>
-                  </div>
+                <Text as="h2" variant="headingLg">
+                  Reviewer readiness checklist
+                </Text>
+                <Text as="p" tone="subdued">
+                  Track the factual install, webhook, sync, and configuration checks needed for Shopify review.
+                </Text>
+              </div>
                   <Badge tone="info">
                     {`${onboardingChecklist.filter((item) => item.done).length}/${onboardingChecklist.length} complete`}
                   </Badge>
@@ -827,6 +864,15 @@ export function DashboardPage() {
                     </div>
                   ))}
                 </BlockStack>
+                {launchAudit?.reviewerReminders?.length ? (
+                  <Banner title="Reviewer notes" tone="info">
+                    <List type="bullet">
+                      {launchAudit.reviewerReminders.map((item) => (
+                        <List.Item key={item}>{item}</List.Item>
+                      ))}
+                    </List>
+                  </Banner>
+                ) : null}
               </BlockStack>
             </Card>
             {decisionCenter ? (

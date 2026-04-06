@@ -6,46 +6,55 @@ This walkthrough is intended for Shopify App Review or internal launch QA.
 
 1. Install VedaSuite AI in a Shopify dev store.
 2. Open the app from Shopify Admin.
-3. Verify the dashboard loads inside the embedded admin.
+3. Verify the dashboard loads inside the embedded admin and does not break on refresh.
 4. Open each module from the left navigation:
    - Dashboard
-   - Fraud Intelligence
+   - Trust & Abuse Intelligence
    - Competitor Intelligence
-   - AI Pricing Strategy
-   - AI Profit Optimization
-   - Shopper Credit Score
+   - Pricing & Profit Engine
    - Reports
    - Settings
    - Subscription Plans
-5. Open Subscription Plans and trigger a billing selection.
-6. Confirm the billing redirect opens correctly outside the iframe.
-7. Return to the app and verify plan access updates.
-8. Open Dashboard and test:
+5. Open `/api/shopify/diagnostics` from the embedded app session and confirm:
+   - install exists
+   - offline token is present
+   - reconnect is not required
+   - webhook status is visible
+   - sync status is visible
+   - billing status is visible
+6. Open Dashboard and test:
    - Sync live Shopify data
    - Register sync webhooks
-9. Confirm support and legal URLs are reachable.
+7. Trigger one real module workflow:
+   - Trust & Abuse: review queue/timeline
+   - Competitor Intelligence: move feed/setup state
+   - Pricing & Profit: recommendation or baseline state
+8. Open Subscription Plans and trigger a billing selection.
+9. Confirm the billing redirect opens correctly outside the iframe.
+10. Return to the app and verify plan access updates.
+11. Confirm support and legal URLs are reachable.
 
 ## What Reviewers Should Notice
 
 - The app is embedded and uses Shopify-style UI patterns.
-- Billing is handled via Shopify Billing.
+- Billing is handled via Shopify Billing and reflects plan changes back in the embedded app.
 - Compliance webhooks are supported.
 - App uninstall and subscription lifecycle flows are handled.
-- Session-token protected APIs are used for embedded requests.
+- Embedded requests authenticate cleanly while server-admin operations use the stored offline installation.
+- Reviewer-facing health and launch checks are factual, not score-based.
 
 ## Demo Notes
 
-- Competitor Intelligence includes website ingestion plus connector-style market signals for Google Shopping and Meta Ad Library.
-- Some seeded/demo records may appear on first use before live Shopify data fills the store.
+- Competitor Intelligence includes monitored competitor surfaces plus manual/setup states where live external coverage is not yet configured.
+- The app no longer seeds fake merchant intelligence into production installs.
 - Compliance export files are generated server-side and should use durable storage in production.
 
 ## Suggested Screenshot Set
 
 - dashboard overview
-- fraud module with flagged orders
+- trust & abuse module
 - competitor module with connector cards
-- pricing strategy recommendation review
-- profit optimization table
+- pricing & profit recommendation review
 - subscription plan screen
 - settings page
 - support page

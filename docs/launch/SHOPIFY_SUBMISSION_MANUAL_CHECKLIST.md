@@ -52,6 +52,7 @@ cd frontend && npm install && npm run build && cd ../backend && npm install && n
 
 - Open the app from Shopify Admin sidebar
 - Confirm dashboard loads after refresh
+- Confirm `/launch/sanity` shows factual configuration checks
 - Open:
   - Trust & Abuse
   - Competitor Intelligence
@@ -69,6 +70,8 @@ cd frontend && npm install && npm run build && cd ../backend && npm install && n
     - webhooks registered
     - sync status visible
     - billing status visible
+ - Follow:
+   - `docs/launch/SHOPIFY_REVIEWER_RUNBOOK.md`
 
 ## 6. Reconnect/reinstall repair
 

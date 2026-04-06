@@ -213,6 +213,7 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     installationFound: true,
     hasOfflineToken: true,
     webhooksRegistered: true,
+    webhookCoverageReady: true,
     lastWebhookRegistrationStatus: "SUCCEEDED",
     lastSyncStatus: "SUCCEEDED",
     lastSyncAt: "2026-04-06T02:00:00.000Z",
@@ -259,6 +260,59 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     assert.match(response.body, /"offlineTokenPresent":true/);
     assert.match(response.body, /"lastWebhookRegistrationStatus":"SUCCEEDED"/);
     assert.match(response.body, /"planName":"PRO"/);
+    assert.match(response.body, /"reconnectRequired":false/);
+    assert.match(response.body, /"tokenRefreshHealthy":true/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("connection health exposes reconnect-required state for missing offline token", async () => {
+  const connectionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/shopifyConnectionService.js"
+  );
+  const routesPath = path.resolve(__dirname, "../dist/routes/shopifyRoutes.js");
+
+  resetModule(connectionServicePath);
+  const connectionService = require(connectionServicePath);
+  connectionService.getConnectionHealth = async () => ({
+    shop: "test-shop.myshopify.com",
+    code: "MISSING_OFFLINE_TOKEN",
+    healthy: false,
+    installationFound: true,
+    hasOfflineToken: false,
+    webhooksRegistered: false,
+    webhookCoverageReady: false,
+    lastWebhookRegistrationStatus: null,
+    lastSyncStatus: null,
+    lastSyncAt: null,
+    lastConnectionCheckAt: null,
+    lastConnectionStatus: "MISSING_OFFLINE_TOKEN",
+    authErrorCode: "MISSING_OFFLINE_TOKEN",
+    authErrorMessage: "The stored Shopify offline access token is missing.",
+    reauthRequired: true,
+    message: "The stored Shopify offline access token is missing.",
+    reauthorizeUrl:
+      "https://app.vedasuite.in/auth/reconnect?shop=test-shop.myshopify.com",
+  });
+
+  resetModule(routesPath);
+  const { shopifyRouter } = require(routesPath);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.use("/shopify", shopifyRouter);
+  const server = app.listen(0);
+
+  try {
+    const response = await request(server, "/shopify/connection-health");
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /"code":"MISSING_OFFLINE_TOKEN"/);
+    assert.match(response.body, /"reauthRequired":true/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

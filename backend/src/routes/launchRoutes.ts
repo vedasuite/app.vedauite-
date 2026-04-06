@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { type Request, type Response, Router } from "express";
 import fs from "fs";
 import path from "path";
 import { env } from "../config/env";
@@ -11,37 +11,42 @@ function routeUrl(route: string) {
   return new URL(route, env.shopifyAppUrl).toString();
 }
 
-launchRouter.get("/launch/audit", async (req, res) => {
-  const appTomlPath = path.resolve(process.cwd(), "shopify.app.toml");
-  const appTomlContents = fs.existsSync(appTomlPath)
-    ? fs.readFileSync(appTomlPath, "utf8")
-    : "";
-  const requestedShop =
-    typeof req.query.shop === "string" ? normalizeShopDomain(req.query.shop) : null;
+function findAppTomlPath() {
+  const candidates = [
+    path.resolve(process.cwd(), "shopify.app.toml"),
+    path.resolve(process.cwd(), "../shopify.app.toml"),
+    path.resolve(__dirname, "../../../shopify.app.toml"),
+  ];
 
-  const store = requestedShop
-    ? await prisma.store.findUnique({
-        where: { shop: requestedShop },
-        select: {
-          shop: true,
-          accessToken: true,
-          lastSyncStatus: true,
-          lastSyncAt: true,
-          webhooksRegisteredAt: true,
-          lastWebhookRegistrationStatus: true,
-          uninstalledAt: true,
-        },
-      })
-    : null;
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
 
-  const checks = [
+function buildSanityChecks(options: {
+  appTomlContents: string;
+  appTomlPath: string;
+  store:
+    | {
+        shop: string;
+        accessToken: string | null;
+        lastSyncStatus: string | null;
+        lastSyncAt: Date | null;
+        webhooksRegisteredAt: Date | null;
+        lastWebhookRegistrationStatus: string | null;
+        uninstalledAt: Date | null;
+      }
+    | null;
+  requestedShop: string | null;
+}) {
+  const { appTomlContents, appTomlPath, requestedShop, store } = options;
+
+  return [
     {
-      key: "shopify_app_url",
+      key: "production_app_url_configured",
       ok: Boolean(env.shopifyAppUrl),
       detail: env.shopifyAppUrl || "Missing SHOPIFY_APP_URL",
     },
     {
-      key: "shopify_app_url_not_temporary",
+      key: "production_app_url_not_temporary",
       ok:
         Boolean(env.shopifyAppUrl) &&
         !/ngrok|trycloudflare|localhost/i.test(env.shopifyAppUrl),
@@ -65,7 +70,10 @@ launchRouter.get("/launch/audit", async (req, res) => {
         appTomlContents.includes('/webhooks/shopify/orders_updated') &&
         appTomlContents.includes('/webhooks/shopify/customers_create') &&
         appTomlContents.includes('/webhooks/shopify/customers_update') &&
-        appTomlContents.includes('/webhooks/shopify/app_subscriptions_update'),
+        appTomlContents.includes('/webhooks/shopify/app_subscriptions_update') &&
+        appTomlContents.includes('/webhooks/shopify/customers_data_request') &&
+        appTomlContents.includes('/webhooks/shopify/customers_redact') &&
+        appTomlContents.includes('/webhooks/shopify/shop_redact'),
       detail: "/webhooks/shopify/* routes present in shopify.app.toml",
     },
     {
@@ -100,32 +108,22 @@ launchRouter.get("/launch/audit", async (req, res) => {
           : "No shop selected for webhook status.",
     },
     {
-      key: "orders_scope",
-      ok: env.shopifyScopes.includes("read_orders"),
-      detail: env.shopifyScopes,
-    },
-    {
-      key: "customer_scope",
-      ok: env.shopifyScopes.includes("read_customers"),
-      detail: env.shopifyScopes,
-    },
-    {
-      key: "privacy_url",
+      key: "privacy_url_available",
       ok: Boolean(env.publicContact.privacyUrl),
       detail: env.publicContact.privacyUrl,
     },
     {
-      key: "terms_url",
+      key: "terms_url_available",
       ok: Boolean(env.publicContact.termsUrl),
       detail: env.publicContact.termsUrl,
     },
     {
-      key: "support_url",
+      key: "support_url_available",
       ok: Boolean(env.publicContact.supportUrl),
       detail: env.publicContact.supportUrl,
     },
     {
-      key: "shopify_app_toml",
+      key: "shopify_app_toml_present",
       ok: fs.existsSync(appTomlPath),
       detail: appTomlPath,
     },
@@ -138,11 +136,43 @@ launchRouter.get("/launch/audit", async (req, res) => {
       detail: "customers/data_request, customers/redact, shop/redact",
     },
     {
-      key: "app_uninstalled_in_toml",
-      ok: appTomlContents.includes("app/uninstalled"),
-      detail: "app/uninstalled",
+      key: "protected_customer_data_declaration_reminder",
+      ok: false,
+      detail:
+        "Confirm protected customer data declarations are complete in Shopify Partner Dashboard before submission.",
     },
   ];
+}
+
+async function sendSanityResponse(req: Request, res: Response) {
+  const appTomlPath = findAppTomlPath();
+  const appTomlContents = fs.existsSync(appTomlPath)
+    ? fs.readFileSync(appTomlPath, "utf8")
+    : "";
+  const requestedShop =
+    typeof req.query.shop === "string" ? normalizeShopDomain(req.query.shop) : null;
+
+  const store = requestedShop
+    ? await prisma.store.findUnique({
+        where: { shop: requestedShop },
+        select: {
+          shop: true,
+          accessToken: true,
+          lastSyncStatus: true,
+          lastSyncAt: true,
+          webhooksRegisteredAt: true,
+          lastWebhookRegistrationStatus: true,
+          uninstalledAt: true,
+        },
+      })
+    : null;
+
+  const checks = buildSanityChecks({
+    appTomlContents,
+    appTomlPath,
+    requestedShop,
+    store,
+  });
 
   res.json({
     app: "VedaSuite AI",
@@ -154,8 +184,22 @@ launchRouter.get("/launch/audit", async (req, res) => {
       support: routeUrl("/support"),
       readiness: routeUrl("/launch/readiness"),
       audit: routeUrl("/launch/audit"),
+      sanity: routeUrl("/launch/sanity"),
       diagnosticsHint: "Open /api/shopify/diagnostics from an authenticated embedded app session.",
     },
     checks,
+    reviewerReminders: [
+      "Verify the protected customer data declaration in Partner Dashboard.",
+      "Open /api/shopify/diagnostics from inside the embedded app to confirm install, token, webhook, sync, and billing state.",
+      "Reconnect once after deploy if this store was installed before the latest auth hardening.",
+    ],
   });
+}
+
+launchRouter.get("/launch/sanity", async (req, res) => {
+  await sendSanityResponse(req, res);
+});
+
+launchRouter.get("/launch/audit", async (req, res) => {
+  await sendSanityResponse(req, res);
 });

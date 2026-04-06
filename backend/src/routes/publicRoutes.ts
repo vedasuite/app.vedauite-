@@ -159,5 +159,10 @@ publicRouter.get("/launch/readiness", (_req, res) => {
       terms: env.publicContact.termsUrl,
     },
     complianceExportDir: env.complianceExportDir,
+    reviewerNotes: [
+      "Use /launch/sanity for public configuration checks.",
+      "Use /api/shopify/diagnostics from an authenticated embedded session for install, token, webhook, sync, and billing state.",
+      "Complete protected customer data declarations in Shopify Partner Dashboard before submission.",
+    ],
   });
 });

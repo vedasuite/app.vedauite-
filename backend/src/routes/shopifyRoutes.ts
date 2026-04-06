@@ -149,6 +149,17 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       authErrorMessage: store?.authErrorMessage ?? null,
     },
     connection: health,
+    reviewerSummary: {
+      installExists: !!store,
+      tokenPresent: !!store?.accessToken,
+      tokenRefreshHealthy:
+        !store?.refreshTokenExpiresAt ||
+        store.refreshTokenExpiresAt.getTime() > Date.now(),
+      webhookCoverageReady: health.webhookCoverageReady,
+      reconnectRequired: health.reauthRequired,
+      uninstallState: !!store?.uninstalledAt,
+      billingStatus: subscription?.billingStatus ?? null,
+    },
     webhooks: {
       registeredAt: store?.webhooksRegisteredAt?.toISOString() ?? null,
       lastStatus: store?.lastWebhookRegistrationStatus ?? null,
