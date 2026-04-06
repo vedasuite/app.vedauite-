@@ -1,4 +1,5 @@
 import { prisma } from "../db/prismaClient";
+import { env } from "../config/env";
 import { logEvent, withRetry } from "./observabilityService";
 import {
   forceRefreshOfflineAccessToken,
@@ -7,7 +8,7 @@ import {
   updateConnectionDiagnostics,
 } from "./shopifyConnectionService";
 
-const SHOPIFY_API_VERSION = "2024-01";
+const SHOPIFY_API_VERSION = env.shopifyAdminApiVersion;
 
 type GraphQLResponse<T> = {
   data?: T;

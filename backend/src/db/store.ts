@@ -15,6 +15,7 @@ export async function saveStore(shop: string, accessToken: string) {
     create: {
       shop: normalizedShop,
       accessToken,
+      tokenAcquisitionMode: "offline_legacy",
       isOffline: true,
       installedAt: new Date(),
       reauthorizedAt: new Date(),
@@ -24,6 +25,7 @@ export async function saveStore(shop: string, accessToken: string) {
     },
     update: {
       accessToken,
+      tokenAcquisitionMode: "offline_legacy",
       reauthorizedAt: new Date(),
       uninstalledAt: null,
       lastConnectionStatus: "OK",

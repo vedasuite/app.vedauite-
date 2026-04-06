@@ -2,6 +2,7 @@ import { prisma } from "../db/prismaClient";
 import { recomputeStoreDerivedData } from "./coreEngineService";
 import { logEvent } from "./observabilityService";
 import { syncShopifyStoreData } from "./shopifyAdminService";
+import { ShopifyConnectionError } from "./shopifyConnectionService";
 
 export type SyncTriggerSource =
   | "manual"
@@ -28,6 +29,36 @@ async function resolveStore(shopDomain: string) {
   }
 
   return store;
+}
+
+function mapSyncFailure(error: unknown) {
+  if (error instanceof ShopifyConnectionError) {
+    const reconnectRequired =
+      error.code === "OFFLINE_TOKEN_EXPIRED" ||
+      error.code === "REFRESH_TOKEN_EXPIRED" ||
+      error.code === "TOKEN_REFRESH_FAILED" ||
+      error.code === "SHOPIFY_RECONNECT_REQUIRED" ||
+      error.code === "SHOPIFY_AUTH_REQUIRED";
+
+    return {
+      code: error.code,
+      status: reconnectRequired ? "SHOPIFY_RECONNECT_REQUIRED" : "SYNC_REQUIRED",
+      message: error.message,
+    };
+  }
+
+  const message =
+    error instanceof Error ? error.message : "Shopify sync job failed.";
+
+  const reconnectRequired = /reauthorize|invalid access token|refresh token|offline token expired|reconnect/i.test(
+    message
+  );
+
+  return {
+    code: reconnectRequired ? "SHOPIFY_RECONNECT_REQUIRED" : "SYNC_FAILED",
+    status: reconnectRequired ? "SHOPIFY_RECONNECT_REQUIRED" : "SYNC_REQUIRED",
+    message,
+  };
 }
 
 export async function runStoreSyncJob(
@@ -95,15 +126,14 @@ export async function runStoreSyncJob(
       recomputeResult,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Shopify sync job failed.";
+    const failure = mapSyncFailure(error);
 
     await prisma.syncJob.update({
       where: { id: job.id },
       data: {
         status: "FAILED",
         finishedAt: new Date(),
-        errorMessage: message,
+        errorMessage: failure.message,
       },
     });
 
@@ -112,14 +142,10 @@ export async function runStoreSyncJob(
       data: {
         lastSyncStatus: "FAILED",
         lastConnectionCheckAt: new Date(),
-        lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
-          ? "SHOPIFY_AUTH_REQUIRED"
-          : "SYNC_REQUIRED",
-        lastConnectionError: message,
-        authErrorCode: /reauthorize|invalid access token/i.test(message)
-          ? "SHOPIFY_AUTH_REQUIRED"
-          : "SYNC_FAILED",
-        authErrorMessage: message,
+        lastConnectionStatus: failure.status,
+        lastConnectionError: failure.message,
+        authErrorCode: failure.code,
+        authErrorMessage: failure.message,
       },
     });
 
@@ -127,7 +153,8 @@ export async function runStoreSyncJob(
       shop: shopDomain,
       triggerSource,
       jobId: job.id,
-      message,
+      code: failure.code,
+      message: failure.message,
     });
 
     throw error;
@@ -220,15 +247,14 @@ export async function startStoreSyncJob(
         mode: "background",
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Shopify sync job failed.";
+      const failure = mapSyncFailure(error);
 
       await prisma.syncJob.update({
         where: { id: createdJob.id },
         data: {
           status: "FAILED",
           finishedAt: new Date(),
-          errorMessage: message,
+          errorMessage: failure.message,
         },
       });
 
@@ -237,14 +263,10 @@ export async function startStoreSyncJob(
         data: {
           lastSyncStatus: "FAILED",
           lastConnectionCheckAt: new Date(),
-          lastConnectionStatus: /reauthorize|invalid access token/i.test(message)
-            ? "SHOPIFY_AUTH_REQUIRED"
-            : "SYNC_REQUIRED",
-          lastConnectionError: message,
-          authErrorCode: /reauthorize|invalid access token/i.test(message)
-            ? "SHOPIFY_AUTH_REQUIRED"
-            : "SYNC_FAILED",
-          authErrorMessage: message,
+          lastConnectionStatus: failure.status,
+          lastConnectionError: failure.message,
+          authErrorCode: failure.code,
+          authErrorMessage: failure.message,
         },
       });
 
@@ -253,7 +275,8 @@ export async function startStoreSyncJob(
         triggerSource,
         jobId: createdJob.id,
         mode: "background",
-        message,
+        code: failure.code,
+        message: failure.message,
       });
     }
   })();

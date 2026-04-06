@@ -12,6 +12,7 @@ model Store {
   shop        String @unique
   accessToken String?
   grantedScopes String? @map("scope")
+  tokenAcquisitionMode String? @default("offline_expiring")
   isOffline   Boolean @default(true)
   installedAt DateTime?
   reauthorizedAt DateTime?

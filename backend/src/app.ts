@@ -8,7 +8,6 @@ import cookieParser from "cookie-parser";
 
 import { errorHandler } from "./middleware/errorHandler";
 import { attachRequestContext } from "./middleware/requestContext";
-import { getToken } from "./db/store";
 import { router } from "./routes";
 import { shopifyWebhookRouter } from "./routes/shopifyWebhookRoutes";
 import { ensureStoreBootstrapped } from "./services/bootstrapService";
@@ -17,7 +16,11 @@ import {
   readShopifySessionCookie,
   setShopifySessionCookie,
 } from "./lib/shopifySessionCookie";
-import { normalizeShopDomain } from "./services/shopifyConnectionService";
+import {
+  getConnectionHealth,
+  normalizeShopDomain,
+} from "./services/shopifyConnectionService";
+import { shopifyGraphQL } from "./services/shopifyAdminService";
 
 const embeddedAppRoutes = [
   "/",
@@ -137,30 +140,40 @@ export function createApp() {
 
   app.get("/products", async (req, res) => {
     try {
-      const shop = req.query.shop as string;
+      const shop = normalizeShopDomain(req.query.shop as string | undefined);
 
       if (!shop) {
         return res.status(400).send("Missing shop");
       }
 
-      const token = await getToken(shop);
-
-      if (!token) {
-        return res.status(400).send("No token found");
-      }
-
-      const response = await fetch(
-        `https://${shop}/admin/api/2024-01/products.json`,
-        {
-          headers: {
-            "X-Shopify-Access-Token": token,
-            "Content-Type": "application/json",
-          },
-        }
+      const data = await shopifyGraphQL<{
+        products: {
+          edges: Array<{
+            node: {
+              id: string;
+              handle: string;
+              title: string;
+            };
+          }>;
+        };
+      }>(
+        shop,
+        `
+          query EmbeddedProducts {
+            products(first: 20, sortKey: UPDATED_AT, reverse: true) {
+              edges {
+                node {
+                  id
+                  handle
+                  title
+                }
+              }
+            }
+          }
+        `
       );
 
-      const data = await response.json();
-      return res.status(response.status).json(data);
+      return res.status(200).json(data);
     } catch (err) {
       return res.status(500).send("Error fetching products");
     }
@@ -178,9 +191,9 @@ export function createApp() {
         return res.status(400).send("Missing shop");
       }
 
-      const token = await getToken(shop);
+      const connectionHealth = await getConnectionHealth(shop, { probeApi: false });
 
-      if (!token) {
+      if (!connectionHealth.installationFound || !connectionHealth.hasOfflineToken) {
         const reconnectUrl = new URL("/auth", env.shopifyAppUrl);
         reconnectUrl.searchParams.set("shop", shop);
         reconnectUrl.searchParams.set("returnTo", req.path);

@@ -128,6 +128,9 @@ test("oauth callback persists offline installation and triggers repair tasks", a
     data: {
       access_token: "offline-token",
       scope: "read_products,read_orders,read_customers",
+      expires_in: 3600,
+      refresh_token: "refresh-token",
+      refresh_token_expires_in: 86400,
     },
   });
   if (axiosModule.default) {
@@ -192,6 +195,10 @@ test("oauth callback persists offline installation and triggers repair tasks", a
     assert.ok(upsertPayload);
     assert.equal(upsertPayload.where.shop, "test-shop.myshopify.com");
     assert.equal(upsertPayload.create.accessToken, "offline-token");
+    assert.equal(upsertPayload.create.refreshToken, "refresh-token");
+    assert.equal(upsertPayload.create.tokenAcquisitionMode, "offline_expiring");
+    assert.ok(upsertPayload.create.accessTokenExpiresAt instanceof Date);
+    assert.ok(upsertPayload.create.refreshTokenExpiresAt instanceof Date);
     assert.equal(registeredShop, "test-shop.myshopify.com");
     assert.equal(syncShop, "test-shop.myshopify.com");
   } finally {

@@ -30,6 +30,8 @@ type OAuthAccessTokenResponse = {
   refresh_token_expires_in?: number;
 };
 
+type TokenAcquisitionMode = "offline_expiring" | "offline_legacy";
+
 function redirectTopLevel(res: Response, url: string) {
   return res
     .status(200)
@@ -144,6 +146,7 @@ async function persistInstallationRecord(params: {
   accessTokenExpiresAt: Date | null;
   refreshToken: string | null;
   refreshTokenExpiresAt: Date | null;
+  tokenAcquisitionMode: TokenAcquisitionMode;
 }) {
   const existingStore = await prisma.store.findUnique({
     where: { shop: params.shop },
@@ -172,6 +175,7 @@ async function persistInstallationRecord(params: {
       accessTokenExpiresAt: params.accessTokenExpiresAt,
       refreshToken: params.refreshToken,
       refreshTokenExpiresAt: params.refreshTokenExpiresAt,
+      tokenAcquisitionMode: params.tokenAcquisitionMode,
       lastConnectionCheckAt: params.reauthorizedAt,
       lastConnectionStatus: "OK",
       lastConnectionError: null,
@@ -192,6 +196,7 @@ async function persistInstallationRecord(params: {
       accessTokenExpiresAt: params.accessTokenExpiresAt,
       refreshToken: params.refreshToken,
       refreshTokenExpiresAt: params.refreshTokenExpiresAt,
+      tokenAcquisitionMode: params.tokenAcquisitionMode,
       uninstalledAt: null,
       lastConnectionCheckAt: params.reauthorizedAt,
       lastConnectionStatus: "OK",
@@ -312,6 +317,9 @@ authRouter.get("/callback", async (req, res) => {
       typeof tokenData.refresh_token_expires_in === "number"
         ? new Date(now.getTime() + tokenData.refresh_token_expires_in * 1000)
         : null;
+    const tokenAcquisitionMode: TokenAcquisitionMode = tokenData.refresh_token
+      ? "offline_expiring"
+      : "offline_legacy";
 
     await persistInstallationRecord({
       shop,
@@ -322,6 +330,7 @@ authRouter.get("/callback", async (req, res) => {
       accessTokenExpiresAt,
       refreshToken: tokenData.refresh_token ?? null,
       refreshTokenExpiresAt,
+      tokenAcquisitionMode,
     });
 
     setShopifySessionCookie(res, shop);
@@ -351,6 +360,7 @@ authRouter.get("/callback", async (req, res) => {
       returnTo: statePayload.returnTo ?? "/",
       grantedScopes: tokenData.scope ?? env.shopifyScopes,
       hasRefreshToken: !!tokenData.refresh_token,
+      tokenAcquisitionMode,
       accessTokenExpiresAt: accessTokenExpiresAt?.toISOString() ?? null,
     });
 

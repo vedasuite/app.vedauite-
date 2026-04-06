@@ -8,6 +8,10 @@ export type ShopifyConnectionCode =
   | "MISSING_SHOP"
   | "MISSING_INSTALLATION"
   | "MISSING_OFFLINE_TOKEN"
+  | "OFFLINE_TOKEN_EXPIRED"
+  | "REFRESH_TOKEN_EXPIRED"
+  | "TOKEN_REFRESH_FAILED"
+  | "SHOPIFY_RECONNECT_REQUIRED"
   | "UNINSTALLED"
   | "SHOPIFY_AUTH_REQUIRED"
   | "SHOPIFY_API_UNREACHABLE"
@@ -29,6 +33,9 @@ export type ShopifyConnectionHealth = {
   lastSyncAt: string | null;
   lastConnectionCheckAt: string | null;
   lastConnectionStatus: string | null;
+  tokenAcquisitionMode: string | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
   authErrorCode: string | null;
   authErrorMessage: string | null;
   reauthRequired: boolean;
@@ -158,15 +165,64 @@ function isAccessTokenExpiring(installation: NonNullable<InstallationRecord>) {
   return installation.accessTokenExpiresAt.getTime() <= Date.now() + ACCESS_TOKEN_EXPIRY_BUFFER_MS;
 }
 
+function isRefreshTokenExpired(installation: NonNullable<InstallationRecord>) {
+  if (!installation.refreshTokenExpiresAt) {
+    return false;
+  }
+
+  return (
+    installation.refreshTokenExpiresAt.getTime() <=
+    Date.now() + ACCESS_TOKEN_EXPIRY_BUFFER_MS
+  );
+}
+
+async function markReconnectRequired(
+  installation: NonNullable<InstallationRecord>,
+  code:
+    | "OFFLINE_TOKEN_EXPIRED"
+    | "REFRESH_TOKEN_EXPIRED"
+    | "TOKEN_REFRESH_FAILED"
+    | "SHOPIFY_RECONNECT_REQUIRED",
+  message: string
+) {
+  await prisma.store.update({
+    where: { id: installation.id },
+    data: {
+      lastConnectionCheckAt: new Date(),
+      lastConnectionStatus: "SHOPIFY_RECONNECT_REQUIRED",
+      lastConnectionError: message,
+      authErrorCode: code,
+      authErrorMessage: message,
+    },
+  });
+}
+
 async function refreshOfflineAccessToken(
   installation: NonNullable<InstallationRecord>
 ) {
   if (!installation.refreshToken) {
+    const code = installation.accessTokenExpiresAt
+      ? "OFFLINE_TOKEN_EXPIRED"
+      : "SHOPIFY_RECONNECT_REQUIRED";
+    const message = installation.accessTokenExpiresAt
+      ? `Stored offline access token expired for ${installation.shop} and no refresh token is available. Reconnect the app and retry.`
+      : `Stored Shopify offline installation for ${installation.shop} does not include a refresh token. Reconnect the app and retry.`;
+
+    await markReconnectRequired(installation, code, message);
+
     throw new ShopifyConnectionError(
-      "SHOPIFY_AUTH_REQUIRED",
-      `Stored Shopify access token is invalid or expired for ${installation.shop}. Reauthorize the app and retry.`,
+      code,
+      message,
       { reauthorizeUrl: buildReauthorizeUrl(installation.shop) }
     );
+  }
+
+  if (isRefreshTokenExpired(installation)) {
+    const message = `Stored Shopify refresh token expired for ${installation.shop}. Reconnect the app and retry.`;
+    await markReconnectRequired(installation, "REFRESH_TOKEN_EXPIRED", message);
+    throw new ShopifyConnectionError("REFRESH_TOKEN_EXPIRED", message, {
+      reauthorizeUrl: buildReauthorizeUrl(installation.shop),
+    });
   }
 
   try {
@@ -196,6 +252,9 @@ async function refreshOfflineAccessToken(
         accessTokenExpiresAt: nextAccessTokenExpiresAt,
         refreshToken: response.data.refresh_token ?? installation.refreshToken,
         refreshTokenExpiresAt: nextRefreshTokenExpiresAt,
+        tokenAcquisitionMode: response.data.refresh_token
+          ? "offline_expiring"
+          : installation.tokenAcquisitionMode ?? "offline_expiring",
         reauthorizedAt: now,
         authErrorCode: null,
         authErrorMessage: null,
@@ -214,30 +273,34 @@ async function refreshOfflineAccessToken(
 
     return updated;
   } catch (error) {
-    await prisma.store.update({
-      where: { id: installation.id },
-      data: {
-        authErrorCode: "SHOPIFY_AUTH_REQUIRED",
-        authErrorMessage:
-          error instanceof Error ? error.message : "Shopify access token refresh failed.",
-        lastConnectionCheckAt: new Date(),
-        lastConnectionStatus: "SHOPIFY_AUTH_REQUIRED",
-        lastConnectionError:
-          error instanceof Error ? error.message : "Shopify access token refresh failed.",
-      },
-    });
+    const authRelatedFailure =
+      axios.isAxiosError(error) &&
+      (error.response?.status === 400 ||
+        error.response?.status === 401 ||
+        /invalid_grant|invalid refresh token|invalid access token|unauthorized/i.test(
+          String(error.response?.data ?? error.message)
+        ));
+    const code = authRelatedFailure
+      ? "SHOPIFY_RECONNECT_REQUIRED"
+      : "TOKEN_REFRESH_FAILED";
+    const message = authRelatedFailure
+      ? `Shopify rejected the stored refresh token for ${installation.shop}. Reconnect the app and retry.`
+      : error instanceof Error
+      ? error.message
+      : "Shopify access token refresh failed.";
+
+    await markReconnectRequired(installation, code, message);
 
     logEvent("error", "shopify.connection.refresh_token_failed", {
       shop: installation.shop,
       route: "connection.refresh",
+      code,
       error,
     });
 
-    throw new ShopifyConnectionError(
-      "SHOPIFY_AUTH_REQUIRED",
-      `Stored Shopify access token is invalid or expired for ${installation.shop}. Reauthorize the app and retry.`,
-      { reauthorizeUrl: buildReauthorizeUrl(installation.shop) }
-    );
+    throw new ShopifyConnectionError(code, message, {
+      reauthorizeUrl: buildReauthorizeUrl(installation.shop),
+    });
   }
 }
 
@@ -289,6 +352,14 @@ export async function resolveOfflineInstallation(
     throw new ShopifyConnectionError(
       "MISSING_OFFLINE_TOKEN",
       `The stored Shopify offline access token is missing for ${normalizedShop}. Reauthorize the app and retry.`,
+      { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
+    );
+  }
+
+  if (options.allowRefresh === false && isAccessTokenExpiring(installation)) {
+    throw new ShopifyConnectionError(
+      "OFFLINE_TOKEN_EXPIRED",
+      `Stored offline access token expired for ${normalizedShop}. Reconnect the app or allow token refresh before retrying.`,
       { reauthorizeUrl: buildReauthorizeUrl(normalizedShop) }
     );
   }
@@ -354,7 +425,7 @@ async function probeShopApi(shop: string, accessToken: string) {
 
   try {
     const response = await fetch(
-      `https://${shop}/admin/api/2024-01/graphql.json`,
+      `https://${shop}/admin/api/${env.shopifyAdminApiVersion}/graphql.json`,
       {
         method: "POST",
         headers: {
@@ -446,6 +517,9 @@ export async function getConnectionHealth(
       lastConnectionStatus: null,
       authErrorCode: "MISSING_SHOP",
       authErrorMessage: "Missing Shopify shop domain.",
+      tokenAcquisitionMode: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
       reauthRequired: true,
       message: "Missing Shopify shop domain.",
     };
@@ -470,6 +544,9 @@ export async function getConnectionHealth(
       lastConnectionStatus: null,
       authErrorCode: "MISSING_INSTALLATION",
       authErrorMessage: `No Shopify installation record was found for ${normalizedShop}.`,
+      tokenAcquisitionMode: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
       reauthRequired: true,
       message: `No Shopify installation record was found for ${normalizedShop}.`,
       reauthorizeUrl: buildReauthorizeUrl(
@@ -492,6 +569,9 @@ export async function getConnectionHealth(
     lastSyncAt: installation.lastSyncAt?.toISOString() ?? null,
     lastConnectionCheckAt: installation.lastConnectionCheckAt?.toISOString() ?? null,
     lastConnectionStatus: installation.lastConnectionStatus ?? null,
+    tokenAcquisitionMode: installation.tokenAcquisitionMode ?? null,
+    accessTokenExpiresAt: installation.accessTokenExpiresAt?.toISOString() ?? null,
+    refreshTokenExpiresAt: installation.refreshTokenExpiresAt?.toISOString() ?? null,
     authErrorCode: installation.authErrorCode ?? null,
     authErrorMessage: installation.authErrorMessage ?? installation.lastConnectionError ?? null,
     reauthRequired: false,
@@ -510,8 +590,8 @@ export async function getConnectionHealth(
     message,
     authErrorCode: code,
     authErrorMessage: message,
-    reauthorizeUrl: options.reauthorizeUrl,
-  });
+      reauthorizeUrl: options.reauthorizeUrl,
+    });
 
   if (installation.uninstalledAt) {
     return buildFailure(
@@ -532,6 +612,30 @@ export async function getConnectionHealth(
     return buildFailure(
       "MISSING_OFFLINE_TOKEN",
       `The stored Shopify offline access token is missing for ${normalizedShop}.`,
+      {
+        reauthRequired: true,
+        reauthorizeUrl: buildReauthorizeUrl(
+          normalizedShop,
+          options.returnTo,
+          options.host
+        ),
+      }
+    );
+  }
+
+  if (
+    installation.authErrorCode &&
+    [
+      "OFFLINE_TOKEN_EXPIRED",
+      "REFRESH_TOKEN_EXPIRED",
+      "TOKEN_REFRESH_FAILED",
+      "SHOPIFY_RECONNECT_REQUIRED",
+    ].includes(installation.authErrorCode)
+  ) {
+    return buildFailure(
+      installation.authErrorCode as ShopifyConnectionCode,
+      installation.authErrorMessage ??
+        "Shopify installation needs reconnect before server-side operations can continue.",
       {
         reauthRequired: true,
         reauthorizeUrl: buildReauthorizeUrl(
@@ -600,7 +704,11 @@ export async function getConnectionHealth(
         connectionError.code === "SHOPIFY_AUTH_REQUIRED" ||
         connectionError.code === "MISSING_OFFLINE_TOKEN" ||
         connectionError.code === "UNINSTALLED" ||
-        connectionError.code === "MISSING_INSTALLATION",
+        connectionError.code === "MISSING_INSTALLATION" ||
+        connectionError.code === "OFFLINE_TOKEN_EXPIRED" ||
+        connectionError.code === "REFRESH_TOKEN_EXPIRED" ||
+        connectionError.code === "TOKEN_REFRESH_FAILED" ||
+        connectionError.code === "SHOPIFY_RECONNECT_REQUIRED",
       message: connectionError.message,
       authErrorCode: connectionError.code,
       authErrorMessage: connectionError.message,

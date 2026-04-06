@@ -10,6 +10,8 @@ export const env = {
     process.env.SHOPIFY_SCOPES ||
     "read_products,write_products,read_orders,write_orders,read_customers",
   shopifyAppUrl: process.env.SHOPIFY_APP_URL || "",
+  shopifyAdminApiVersion:
+    process.env.SHOPIFY_ADMIN_API_VERSION || "2026-01",
   databaseUrl: process.env.DATABASE_URL || "",
   complianceExportDir:
     process.env.COMPLIANCE_EXPORT_DIR || "backend/runtime/compliance-exports",
