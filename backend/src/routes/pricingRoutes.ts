@@ -5,6 +5,7 @@ import {
   getPricingRecommendations,
   simulatePricingChange,
 } from "../services/pricingService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const pricingRouter = Router();
 
@@ -12,8 +13,8 @@ pricingRouter.get(
   "/recommendations",
   requireCapability("pricing.basicRecommendations"),
   async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -40,10 +41,7 @@ pricingRouter.post(
   requireCapability("pricing.basicRecommendations"),
   async (req, res) => {
   const { id } = req.params;
-  const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req);
 
   if (!shop || !id) {
     return res.status(400).json({ error: "Missing shop or recommendation id." });

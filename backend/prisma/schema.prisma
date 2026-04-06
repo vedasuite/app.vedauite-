@@ -41,6 +41,7 @@ model Store {
   subscription StoreSubscription? @relation("StoreToSubscription")
 
   competitorDomains CompetitorDomain[]
+  productSnapshots  ProductSnapshot[]
   orders            Order[]
   customers         Customer[]
   fraudSignals      FraudSignal[]
@@ -53,6 +54,41 @@ model Store {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ProductSnapshot {
+  id               String   @id @default(cuid())
+  store            Store    @relation(fields: [storeId], references: [id])
+  storeId          String
+  shopifyProductId String
+  handle           String
+  title            String
+  status           String   @default("active")
+  variantCount     Int      @default(0)
+  currentPrice     Float?
+  currency         String?
+  syncedAt         DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  variants VariantSnapshot[]
+
+  @@unique([storeId, shopifyProductId])
+  @@index([storeId, handle])
+}
+
+model VariantSnapshot {
+  id               String          @id @default(cuid())
+  product          ProductSnapshot @relation(fields: [productSnapshotId], references: [id], onDelete: Cascade)
+  productSnapshotId String
+  shopifyVariantId String
+  title            String
+  price            Float
+  currency         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([productSnapshotId, shopifyVariantId])
 }
 
 model SubscriptionPlan {

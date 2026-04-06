@@ -6,12 +6,13 @@ import {
   getCurrentSubscription,
   updateStarterModuleSelection,
 } from "../services/subscriptionService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const subscriptionRouter = Router();
 
 subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
   const plan = await getCurrentSubscription(shop);
@@ -19,10 +20,7 @@ subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), asy
 });
 
 subscriptionRouter.post("/cancel", requireCapability("billing.downgrade"), async (req, res) => {
-  const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req);
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
@@ -32,10 +30,7 @@ subscriptionRouter.post("/cancel", requireCapability("billing.downgrade"), async
 });
 
 subscriptionRouter.post("/downgrade-to-trial", requireCapability("billing.downgrade"), async (req, res) => {
-  const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req);
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
@@ -46,12 +41,9 @@ subscriptionRouter.post("/downgrade-to-trial", requireCapability("billing.downgr
 
 subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSelectionStarter"), async (req, res) => {
   const body = req.body as {
-    shop?: string;
     starterModule?: "trustAbuse" | "competitor";
   };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req);
   const starterModule = body.starterModule;
 
   if (!shop || !starterModule) {

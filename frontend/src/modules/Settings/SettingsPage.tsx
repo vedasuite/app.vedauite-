@@ -176,7 +176,15 @@ export function SettingsPage() {
       ? "Pricing automation can be more responsive, but still needs merchant guardrails."
       : "Balanced pricing posture is best for controlled approval-led automation."
     : "Pricing & Profit is not active on this plan, so AI pricing controls stay view-only.";
-  const activePlanLabel = subscription?.planName ?? "TRIAL";
+  const activePlanLabel = subscription?.planName ?? "NONE";
+  const activePlanTone =
+    activePlanLabel === "PRO"
+      ? "success"
+      : activePlanLabel === "GROWTH"
+      ? "info"
+      : activePlanLabel === "STARTER"
+      ? "attention"
+      : "critical";
   const settingsSourceLabel =
     syncState === "live"
       ? "Live merchant settings"
@@ -238,7 +246,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
                   <Text as="h3" variant="headingMd">Active plan</Text>
-                  <Badge tone="success">{activePlanLabel}</Badge>
+                  <Badge tone={activePlanTone}>{activePlanLabel}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
                   Settings remain available on every plan and adapt to active modules.
@@ -255,7 +263,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Competitor controls</Text>
                 <Badge tone={competitorEnabled ? "success" : "info"}>
-                  {competitorEnabled ? "Enabled" : "Ready for activation"}
+                  {competitorEnabled ? "Enabled on current plan" : "Configured only"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Tracked domains: {connectedDomains}
@@ -266,7 +274,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Pricing controls</Text>
                 <Badge tone={pricingProfitEnabled ? "success" : "info"}>
-                  {pricingProfitEnabled ? "Enabled" : "Ready for activation"}
+                  {pricingProfitEnabled ? "Enabled on current plan" : "Configured only"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Bias: {pricingBias}/100

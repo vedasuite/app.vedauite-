@@ -1,4 +1,8 @@
 import { prisma } from "../db/prismaClient";
+import {
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 function maskCustomerLabel(value?: string | null, fallback = "Shopper profile") {
   if (!value) {
@@ -14,9 +18,12 @@ function maskCustomerLabel(value?: string | null, fallback = "Shopper profile") 
 }
 
 export async function getWeeklyReport(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-  });
+  const [store, operational] = await Promise.all([
+    prisma.store.findUnique({
+      where: { shop: shopDomain },
+    }),
+    getStoreOperationalSnapshot(shopDomain),
+  ]);
   if (!store) throw new Error("Store not found");
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -85,6 +92,18 @@ export async function getWeeklyReport(shopDomain: string) {
       orderBy: { createdAt: "desc" },
     }),
   ]);
+
+  const syncState = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
 
   const dailyMap = new Map<
     string,
@@ -189,7 +208,23 @@ export async function getWeeklyReport(shopDomain: string) {
   };
 
   const recommendations: string[] = [];
-  if (fraudHighRisk > 0) {
+  if (syncState.status === "NOT_CONNECTED") {
+    recommendations.push(
+      "Reconnect Shopify before reviewing weekly reports so VedaSuite can validate the store installation."
+    );
+  } else if (syncState.status === "SYNC_REQUIRED") {
+    recommendations.push(
+      "Run the first live sync so VedaSuite can build the weekly report from persisted Shopify records."
+    );
+  } else if (syncState.status === "SYNC_IN_PROGRESS") {
+    recommendations.push(
+      "Sync is currently running. Refresh this report after the job completes to review real store outputs."
+    );
+  } else if (syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING") {
+    recommendations.push(
+      "Raw Shopify data has synced, but pricing, trust, and profit processing is still catching up."
+    );
+  } else if (fraudHighRisk > 0) {
     recommendations.push(
       "Review the high-risk fraud queue before approving fulfillment for flagged orders."
     );
@@ -241,8 +276,8 @@ export async function getWeeklyReport(shopDomain: string) {
     },
     health,
     recommendations,
-    setupState:
-      latestSyncJob?.status === "SUCCEEDED" ? "LIVE_DATA" : "SETUP_REQUIRED",
+    setupState: syncState.status,
+    readiness: syncState,
     fraud: {
       highRiskOrders: fraudHighRisk,
     },
@@ -256,8 +291,9 @@ export async function getWeeklyReport(shopDomain: string) {
       opportunitiesIdentified: profitOpportunities,
     },
     sync: {
-      latestStatus: latestSyncJob?.status ?? "NOT_RUN",
+      latestStatus: syncState.status,
       latestFinishedAt: latestSyncJob?.finishedAt?.toISOString() ?? null,
+      latestJobStatus: latestSyncJob?.status ?? null,
     },
     trends: Array.from(dailyMap.values()).map((bucket) => ({
       ...bucket,

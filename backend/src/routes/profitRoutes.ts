@@ -4,6 +4,7 @@ import {
   getProfitOpportunities,
   getProfitRecommendations,
 } from "../services/profitService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const profitRouter = Router();
 
@@ -11,8 +12,8 @@ profitRouter.get(
   "/recommendations",
   requireCapability("pricing.profitLeakDetector"),
   async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
   const recs = await getProfitRecommendations(shop);
@@ -23,8 +24,8 @@ profitRouter.get(
   "/opportunities",
   requireCapability("pricing.profitLeakDetector"),
   async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
   const opportunities = await getProfitOpportunities(shop);

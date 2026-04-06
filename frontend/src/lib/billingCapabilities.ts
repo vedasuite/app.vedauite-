@@ -102,7 +102,7 @@ export type SubscriptionInfo = {
 
 function normalizeBillingPlanName(value?: string | null): BillingPlanName {
   if (!value) {
-    return "TRIAL";
+    return "NONE";
   }
 
   const normalized = value.toUpperCase();
@@ -110,7 +110,7 @@ function normalizeBillingPlanName(value?: string | null): BillingPlanName {
     return normalized as BillingPlanName;
   }
 
-  return "TRIAL";
+  return "NONE";
 }
 
 export function normalizeStarterModule(value?: string | null): StarterModule {
@@ -259,20 +259,20 @@ function getPlanPrice(planName: BillingPlanName) {
 }
 
 export const fallbackSubscription: SubscriptionInfo = {
-  planName: "TRIAL",
+  planName: "NONE",
   price: 0,
-  trialDays: 3,
+  trialDays: 0,
   starterModule: null,
-  active: true,
+  active: false,
   endsAt: null,
   trialStartedAt: null,
   trialEndsAt: null,
-  status: "trial_active",
-  billingStatus: null,
+  status: "inactive",
+  billingStatus: "INACTIVE",
   starterModuleSwitchAvailableAt: null,
-  enabledModules: buildModuleAccess("TRIAL", null),
-  featureAccess: buildFeatureAccess("TRIAL", null),
-  capabilities: buildCapabilities("TRIAL", null),
+  enabledModules: buildModuleAccess("NONE", null),
+  featureAccess: buildFeatureAccess("NONE", null),
+  capabilities: buildCapabilities("NONE", null),
 };
 
 export function normalizeSubscriptionInfo(
@@ -305,7 +305,12 @@ export function normalizeSubscriptionInfo(
     price: typeof value.price === "number" ? value.price : getPlanPrice(planName),
     trialDays: typeof value.trialDays === "number" ? value.trialDays : planName === "TRIAL" ? 3 : 0,
     starterModule,
-    active: typeof value.active === "boolean" ? value.active : planName !== "NONE",
+    active:
+      typeof value.active === "boolean"
+        ? value.active
+        : planName !== "NONE" && planName !== "TRIAL"
+        ? true
+        : planName === "TRIAL",
     endsAt: value.endsAt ?? null,
     trialStartedAt: value.trialStartedAt ?? null,
     trialEndsAt: value.trialEndsAt ?? null,

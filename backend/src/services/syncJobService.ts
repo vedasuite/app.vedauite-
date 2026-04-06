@@ -3,6 +3,10 @@ import { recomputeStoreDerivedData } from "./coreEngineService";
 import { logEvent } from "./observabilityService";
 import { syncShopifyStoreData } from "./shopifyAdminService";
 import { ShopifyConnectionError } from "./shopifyConnectionService";
+import {
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 export type SyncTriggerSource =
   | "manual"
@@ -87,16 +91,35 @@ export async function runStoreSyncJob(
 
     const syncResult = await syncShopifyStoreData(shopDomain);
     const recomputeResult = await recomputeStoreDerivedData(shopDomain);
+    const operational = await getStoreOperationalSnapshot(shopDomain);
+    const derivedSync = deriveSyncStatus({
+      connectionStatus: operational.store.lastConnectionStatus,
+      latestSyncJobStatus: syncResult.status,
+      lastSyncStatus: operational.store.lastSyncStatus,
+      products: operational.counts.products,
+      orders: operational.counts.orders,
+      customers: operational.counts.customers,
+      priceRows: operational.counts.pricingRows,
+      profitRows: operational.counts.profitRows,
+      timelineEvents: operational.counts.timelineEvents,
+    });
 
     const completed = await prisma.syncJob.update({
       where: { id: job.id },
       data: {
-        status: "SUCCEEDED",
+        status:
+          syncResult.status === "FAILED" || derivedSync.status === "FAILED"
+            ? "FAILED"
+            : "SUCCEEDED",
         finishedAt: new Date(),
         summaryJson: JSON.stringify({
           syncResult,
           recomputeResult,
+          operationalCounts: operational.counts,
+          derivedSync,
         }),
+        errorMessage:
+          derivedSync.status === "FAILED" ? derivedSync.reason : null,
       },
     });
 
@@ -104,7 +127,7 @@ export async function runStoreSyncJob(
       where: { id: store.id },
       data: {
         lastSyncAt: new Date(),
-        lastSyncStatus: "SUCCEEDED",
+        lastSyncStatus: syncResult.status,
         lastConnectionCheckAt: new Date(),
         lastConnectionStatus: "OK",
         lastConnectionError: null,
@@ -117,6 +140,9 @@ export async function runStoreSyncJob(
       shop: shopDomain,
       triggerSource,
       jobId: completed.id,
+      syncStatus: syncResult.status,
+      derivedStatus: derivedSync.status,
+      counts: operational.counts,
     });
 
     return {
@@ -214,16 +240,35 @@ export async function startStoreSyncJob(
 
       const syncResult = await syncShopifyStoreData(shopDomain);
       const recomputeResult = await recomputeStoreDerivedData(shopDomain);
+      const operational = await getStoreOperationalSnapshot(shopDomain);
+      const derivedSync = deriveSyncStatus({
+        connectionStatus: operational.store.lastConnectionStatus,
+        latestSyncJobStatus: syncResult.status,
+        lastSyncStatus: operational.store.lastSyncStatus,
+        products: operational.counts.products,
+        orders: operational.counts.orders,
+        customers: operational.counts.customers,
+        priceRows: operational.counts.pricingRows,
+        profitRows: operational.counts.profitRows,
+        timelineEvents: operational.counts.timelineEvents,
+      });
 
       await prisma.syncJob.update({
         where: { id: createdJob.id },
         data: {
-          status: "SUCCEEDED",
+          status:
+            syncResult.status === "FAILED" || derivedSync.status === "FAILED"
+              ? "FAILED"
+              : "SUCCEEDED",
           finishedAt: new Date(),
           summaryJson: JSON.stringify({
             syncResult,
             recomputeResult,
+            operationalCounts: operational.counts,
+            derivedSync,
           }),
+          errorMessage:
+            derivedSync.status === "FAILED" ? derivedSync.reason : null,
         },
       });
 
@@ -231,7 +276,7 @@ export async function startStoreSyncJob(
         where: { id: store.id },
         data: {
           lastSyncAt: new Date(),
-          lastSyncStatus: "SUCCEEDED",
+          lastSyncStatus: syncResult.status,
           lastConnectionCheckAt: new Date(),
           lastConnectionStatus: "OK",
           lastConnectionError: null,
@@ -245,6 +290,9 @@ export async function startStoreSyncJob(
         triggerSource,
         jobId: createdJob.id,
         mode: "background",
+        syncStatus: syncResult.status,
+        derivedStatus: derivedSync.status,
+        counts: operational.counts,
       });
     } catch (error) {
       const failure = mapSyncFailure(error);

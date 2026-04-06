@@ -28,6 +28,12 @@ type PricingProfitOverview = {
       marginAtRisk: boolean;
     };
   };
+  readiness?: {
+    readinessState: string;
+    reason: string;
+    processingState?: string;
+    lastUpdatedAt?: string | null;
+  };
   summary: {
     recommendationCount: number;
     profitOpportunityCount: number;
@@ -356,10 +362,24 @@ export function PricingProfitPage() {
             </Banner>
           </Layout.Section>
         ) : null}
-        {syncIssue ? (
+        {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (
           <Layout.Section>
-            <Banner title="Using fallback pricing and profit view" tone="warning">
-              <p>Live pricing or profit signals are still syncing. VedaSuite is showing the latest available real data while retrying in the background.</p>
+            <Banner
+              title={
+                overview.readiness?.readinessState === "FAILED"
+                  ? "Pricing & profit processing needs attention"
+                  : overview.readiness?.readinessState === "EMPTY_STORE_DATA"
+                  ? "No store data available for pricing & profit yet"
+                  : overview.readiness?.readinessState === "SYNC_COMPLETED_PROCESSING_PENDING"
+                  ? "Pricing & profit processing is catching up"
+                  : "Pricing & profit data is still syncing"
+              }
+              tone={overview.readiness?.readinessState === "FAILED" ? "critical" : "warning"}
+            >
+              <p>
+                {overview.readiness?.reason ??
+                  "VedaSuite will populate pricing and profit outputs after live sync and processing complete."}
+              </p>
             </Banner>
           </Layout.Section>
         ) : null}

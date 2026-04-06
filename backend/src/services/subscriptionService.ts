@@ -357,6 +357,11 @@ export async function getCurrentSubscription(
   });
 }
 
+export async function resolveActivePlan(shopDomain: string): Promise<BillingPlanName> {
+  const subscription = await getCurrentSubscription(shopDomain);
+  return subscription.planName;
+}
+
 export async function cancelSubscription(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },

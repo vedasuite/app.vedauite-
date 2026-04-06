@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { requireCapability } from "../middleware/requireCapability";
 import { getWeeklyReport } from "../services/reportsService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const reportsRouter = Router();
 
 reportsRouter.get("/weekly", requireCapability("reports.view"), async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -15,8 +16,8 @@ reportsRouter.get("/weekly", requireCapability("reports.view"), async (req, res)
 });
 
 reportsRouter.get("/weekly/export", requireCapability("reports.export"), async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 

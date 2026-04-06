@@ -1,19 +1,27 @@
 import { prisma } from "../db/prismaClient";
+import {
+  deriveModuleReadiness,
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 export async function getDashboardMetrics(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    include: {
-      syncJobs: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
+  const [store, operational] = await Promise.all([
+    prisma.store.findUnique({
+      where: { shop: shopDomain },
+      include: {
+        syncJobs: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        timelineEvents: {
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        },
       },
-      timelineEvents: {
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      },
-    },
-  });
+    }),
+    getStoreOperationalSnapshot(shopDomain).catch(() => null),
+  ]);
   if (!store) {
     return null;
   }
@@ -67,6 +75,56 @@ export async function getDashboardMetrics(shopDomain: string) {
       }),
     ]);
 
+  const syncState = operational
+    ? deriveSyncStatus({
+        connectionStatus: operational.store.lastConnectionStatus,
+        latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+        lastSyncStatus: operational.store.lastSyncStatus,
+        products: operational.counts.products,
+        orders: operational.counts.orders,
+        customers: operational.counts.customers,
+        priceRows: operational.counts.pricingRows,
+        profitRows: operational.counts.profitRows,
+        timelineEvents: operational.counts.timelineEvents,
+      })
+    : {
+        status: "SYNC_REQUIRED" as const,
+        reason: "Run the first live sync to populate the store.",
+      };
+
+  const trustReadiness = operational
+    ? deriveModuleReadiness({
+        syncStatus: syncState.status,
+        rawCount: operational.counts.orders + operational.counts.customers,
+        processedCount: operational.counts.timelineEvents,
+        lastUpdatedAt: operational.latestProcessingAt,
+        failureReason: operational.store.lastConnectionError,
+      })
+    : null;
+  const pricingReadiness = operational
+    ? deriveModuleReadiness({
+        syncStatus: syncState.status,
+        rawCount: operational.counts.products + operational.counts.orders,
+        processedCount: operational.counts.pricingRows + operational.counts.profitRows,
+        lastUpdatedAt: operational.latestProcessingAt,
+        failureReason: operational.store.lastConnectionError,
+      })
+    : null;
+  const competitorReadiness = operational
+    ? deriveModuleReadiness({
+        syncStatus:
+          operational.counts.competitorDomains > 0 &&
+          operational.counts.competitorRows === 0 &&
+          syncState.status === "READY_WITH_DATA"
+            ? "SYNC_COMPLETED_PROCESSING_PENDING"
+            : syncState.status,
+        rawCount: operational.counts.competitorDomains,
+        processedCount: operational.counts.competitorRows,
+        lastUpdatedAt: operational.latestCompetitorAt,
+        failureReason: operational.store.lastConnectionError,
+      })
+    : null;
+
   return {
     fraudAlertsToday: todayHighRiskOrders,
     highRiskOrders: todayHighRiskOrders,
@@ -78,18 +136,26 @@ export async function getDashboardMetrics(shopDomain: string) {
     lastSyncStatus: store.syncJobs[0]?.status ?? "NOT_RUN",
     lastSyncAt: store.syncJobs[0]?.finishedAt?.toISOString() ?? null,
     timelineEventsGenerated: store.timelineEvents.length,
-    dataState:
-      store.syncJobs[0]?.status === "SUCCEEDED"
-        ? "LIVE_DATA"
-        : "SETUP_REQUIRED",
+    dataState: syncState.status,
     summaryTitle:
-      store.syncJobs[0]?.status === "SUCCEEDED"
-        ? "Store signals are synced"
+      syncState.status === "READY_WITH_DATA"
+        ? "Store data and module outputs are ready"
+        : syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING"
+        ? "Sync completed, processing is still catching up"
+        : syncState.status === "EMPTY_STORE_DATA"
+        ? "Sync completed, but the store returned no usable data"
+        : syncState.status === "FAILED"
+        ? "Latest sync failed"
+        : syncState.status === "SYNC_IN_PROGRESS"
+        ? "Shopify sync is running"
         : "Run first sync to populate store signals",
-    summaryDetail:
-      store.syncJobs[0]?.status === "SUCCEEDED"
-        ? "Dashboard metrics are being computed from synced Shopify orders, pricing records, and timeline events."
-        : "The dashboard is connected, but most intelligence modules stay in setup mode until the first successful sync completes.",
+    summaryDetail: syncState.reason,
+    moduleReadiness: {
+      trustAbuse: trustReadiness,
+      competitor: competitorReadiness,
+      pricingProfit: pricingReadiness,
+    },
+    persistedCounts: operational?.counts ?? null,
   };
 }
 

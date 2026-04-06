@@ -37,6 +37,12 @@ type CompetitorRow = {
 };
 
 type CompetitorOverview = {
+  readiness?: {
+    readinessState: string;
+    reason: string;
+    processingState?: string;
+    lastUpdatedAt?: string | null;
+  };
   recentPriceChanges: number;
   promotionAlerts: number;
   stockMovementAlerts: number;
@@ -432,7 +438,7 @@ export function CompetitorPage() {
       setIngesting(true);
       const [ingestResponse, productsResponse, overviewResponse, connectorsResponse, responseEngineResponse] =
         await Promise.all([
-          embeddedShopRequest<{ result: { ingested: number } }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 }),
+          embeddedShopRequest<{ result: { ingested: number; status?: string; reason?: string | null } }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 }),
           embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", { timeoutMs: 30000 }),
           embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", { timeoutMs: 30000 }),
           embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", { timeoutMs: 30000 }),
@@ -447,7 +453,14 @@ export function CompetitorPage() {
       writeModuleCache("competitor-overview", nextOverview);
       writeModuleCache("competitor-connectors", connectorsResponse.connectors.length > 0 ? connectorsResponse.connectors : fallbackConnectors);
       writeModuleCache("competitor-response-engine", responseEngineResponse.responseEngine ?? fallbackResponseEngine);
-      setToast(`Competitor ingestion completed with ${ingestResponse.result.ingested} fresh market records.`);
+      if (ingestResponse.result.status === "SUCCEEDED") {
+        setToast(`Competitor ingestion completed with ${ingestResponse.result.ingested} fresh market records.`);
+      } else {
+        setToast(
+          ingestResponse.result.reason ??
+            "Competitor ingestion completed without capturing fresh market records."
+        );
+      }
     } catch {
       setToast("Unable to ingest competitor data right now.");
     } finally {
@@ -487,12 +500,32 @@ export function CompetitorPage() {
             </Layout.Section>
           ) : null}
 
-          <Layout.Section>
-            <Banner title={rows.length === 0 ? "Competitor monitoring is ready to configure" : "Market monitoring is live"} tone={rows.length === 0 ? "info" : "success"}>
+        <Layout.Section>
+            <Banner
+              title={
+                overview.readiness?.readinessState === "READY_WITH_DATA" &&
+                (overview.freshnessHours ?? 999) <= 72
+                  ? "Competitor monitoring has live data"
+                  : overview.readiness?.readinessState === "FAILED"
+                  ? "Competitor ingestion needs attention"
+                  : rows.length === 0
+                  ? "Competitor monitoring is ready to configure"
+                  : "Competitor monitoring is stale or limited"
+              }
+              tone={
+                overview.readiness?.readinessState === "READY_WITH_DATA" &&
+                (overview.freshnessHours ?? 999) <= 72
+                  ? "success"
+                  : overview.readiness?.readinessState === "FAILED"
+                  ? "critical"
+                  : "info"
+              }
+            >
               <p>
-                {rows.length === 0
+                {overview.readiness?.reason ??
+                  (rows.length === 0
                   ? "Add monitored domains, then run ingestion to build competitor price, promotion, launch, and ad-pressure coverage."
-                  : "VedaSuite is tracking competitor moves across websites, shopping surfaces, and ad signals, then translating them into merchant response guidance."}
+                  : "VedaSuite is tracking competitor moves across websites, shopping surfaces, and ad signals, then translating them into merchant response guidance.")}
               </p>
             </Banner>
           </Layout.Section>

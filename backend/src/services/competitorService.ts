@@ -1,5 +1,10 @@
 import { prisma } from "../db/prismaClient";
 import { fetchCompetitorSnapshot } from "./shopifyAdminService";
+import {
+  deriveModuleReadiness,
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 function normalizeCompetitorName(domain: string, label?: string | null) {
   return label ?? domain.replace(/\..+$/, "").replace(/[-_]/g, " ");
@@ -172,7 +177,10 @@ function buildStrategyDetections(rows: OverviewRow[]) {
 }
 
 export async function getCompetitorOverview(shopDomain: string) {
-  const store = await getStore(shopDomain);
+  const [store, operational] = await Promise.all([
+    getStore(shopDomain),
+    getStoreOperationalSnapshot(shopDomain),
+  ]);
   const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const last72h = new Date(Date.now() - 72 * 60 * 60 * 1000);
 
@@ -188,6 +196,17 @@ export async function getCompetitorOverview(shopDomain: string) {
       orderBy: { createdAt: "desc" },
     }),
   ]);
+  const syncState = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
 
   const sourceBreakdown = {
     website: recentRows.filter((row) => row.source.startsWith("website")).length,
@@ -312,6 +331,27 @@ export async function getCompetitorOverview(shopDomain: string) {
   const freshnessHours = lastIngestedAt
     ? Number(((Date.now() - new Date(lastIngestedAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
     : null;
+  const freshnessFailureReason =
+    freshnessHours != null && freshnessHours > 72
+      ? `Competitor monitoring is stale. Last successful ingestion was ${freshnessHours} hours ago.`
+      : operational.latestCompetitorIngestJob?.status === "FAILED"
+      ? operational.latestCompetitorIngestJob.errorMessage ??
+        "The latest competitor ingestion failed."
+      : operational.store.lastConnectionError;
+  const readiness = deriveModuleReadiness({
+    syncStatus:
+      operational.latestCompetitorIngestJob?.status === "FAILED"
+        ? "FAILED"
+        : syncState.status === "READY_WITH_DATA" &&
+          operational.counts.competitorDomains > 0 &&
+          operational.counts.competitorRows === 0
+        ? "SYNC_COMPLETED_PROCESSING_PENDING"
+        : syncState.status,
+    rawCount: operational.counts.competitorDomains,
+    processedCount: operational.counts.competitorRows,
+    lastUpdatedAt: operational.latestCompetitorAt,
+    failureReason: freshnessFailureReason,
+  });
 
   const weeklyReport = {
     headline:
@@ -356,6 +396,7 @@ export async function getCompetitorOverview(shopDomain: string) {
   };
 
   return {
+    readiness,
     recentPriceChanges: recentChanges,
     promotionAlerts: promoCount,
     stockMovementAlerts: stockAlerts,
@@ -392,8 +433,15 @@ export async function getCompetitorOverview(shopDomain: string) {
         sourceBreakdown.metaAds > 0 ? "Imported ad preview" : null,
       ].filter((item): item is string => item !== null),
       monitoringPosture:
-        recentRows.length > 0
+        readiness.readinessState === "READY_WITH_DATA" &&
+        freshnessHours != null &&
+        freshnessHours <= 72
           ? "Live monitoring"
+          : operational.counts.competitorDomains > 0 &&
+            readiness.readinessState === "FAILED"
+          ? "Monitoring failed"
+          : recentRows.length > 0
+          ? "Monitoring stale"
           : store.competitorDomains.length > 0
           ? "Configured, awaiting ingestion"
           : "Needs setup",
@@ -490,78 +538,150 @@ export async function updateCompetitorDomains(
 export async function ingestCompetitorSnapshots(shopDomain: string) {
   const store = await getStore(shopDomain);
   const domains = store.competitorDomains;
-
-  if (domains.length === 0) {
-    return {
-      ingested: 0,
-      domains: 0,
-      products: 0,
-      skipped: 0,
-    };
-  }
-
-  const sourceProducts = await prisma.priceHistory.findMany({
-    where: { storeId: store.id },
-    orderBy: { createdAt: "desc" },
-    distinct: ["productHandle"],
-    take: 12,
+  const job = await prisma.syncJob.create({
+    data: {
+      storeId: store.id,
+      jobType: "competitor_ingest",
+      triggerSource: "manual",
+      status: "RUNNING",
+      startedAt: new Date(),
+    },
   });
 
-  if (sourceProducts.length === 0) {
-    return {
-      ingested: 0,
-      domains: domains.length,
-      products: 0,
-      skipped: 0,
-    };
-  }
+  try {
+    if (domains.length === 0) {
+      const result = {
+        ingested: 0,
+        domains: 0,
+        products: 0,
+        skipped: 0,
+        status: "SUCCEEDED_NO_DATA",
+        reason: "No competitor domains are configured for this store.",
+      };
 
-  let ingested = 0;
-  let skipped = 0;
-
-  for (const domain of domains) {
-    for (const product of sourceProducts) {
-      const liveSnapshot = await fetchCompetitorSnapshot(
-        domain.domain,
-        product.productHandle,
-        product.currentPrice
-      );
-
-      if (!liveSnapshot) {
-        skipped += 1;
-        continue;
-      }
-
-      await prisma.competitorData.create({
+      await prisma.syncJob.update({
+        where: { id: job.id },
         data: {
-          storeId: store.id,
-          productHandle: product.productHandle,
-          competitorName: normalizeCompetitorName(domain.domain, domain.label),
-          competitorUrl:
-            liveSnapshot.competitorUrl ??
-            `https://${domain.domain}/products/${product.productHandle}`,
-          source: liveSnapshot.source ?? "website_live",
-          price: liveSnapshot.price ?? null,
-          promotion: liveSnapshot.promotion ?? null,
-          stockStatus: liveSnapshot.stockStatus ?? null,
-          adCopy: liveSnapshot.adCopy ?? null,
-          insightsJson: JSON.stringify({
-            ingestionSource: "live_competitor_fetch",
-            capturedAt: new Date().toISOString(),
-            externalFetch: true,
-          }),
+          status: "SUCCEEDED_NO_DATA",
+          finishedAt: new Date(),
+          summaryJson: JSON.stringify(result),
         },
       });
-      ingested += 1;
-    }
-  }
 
-  return {
-    ingested,
-    domains: domains.length,
-    products: sourceProducts.length,
-    skipped,
-  };
+      return result;
+    }
+
+    const sourceProducts = await prisma.priceHistory.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+      distinct: ["productHandle"],
+      take: 12,
+    });
+
+    if (sourceProducts.length === 0) {
+      const result = {
+        ingested: 0,
+        domains: domains.length,
+        products: 0,
+        skipped: 0,
+        status: "SUCCEEDED_NO_DATA",
+        reason:
+          "Pricing history is not available yet, so competitor ingestion has no product handles to monitor.",
+      };
+
+      await prisma.syncJob.update({
+        where: { id: job.id },
+        data: {
+          status: "SUCCEEDED_NO_DATA",
+          finishedAt: new Date(),
+          summaryJson: JSON.stringify(result),
+        },
+      });
+
+      return result;
+    }
+
+    let ingested = 0;
+    let skipped = 0;
+
+    for (const domain of domains) {
+      for (const product of sourceProducts) {
+        const liveSnapshot = await fetchCompetitorSnapshot(
+          domain.domain,
+          product.productHandle,
+          product.currentPrice
+        );
+
+        if (!liveSnapshot) {
+          skipped += 1;
+          continue;
+        }
+
+        await prisma.competitorData.create({
+          data: {
+            storeId: store.id,
+            productHandle: product.productHandle,
+            competitorName: normalizeCompetitorName(domain.domain, domain.label),
+            competitorUrl:
+              liveSnapshot.competitorUrl ??
+              `https://${domain.domain}/products/${product.productHandle}`,
+            source: liveSnapshot.source ?? "website_live",
+            price: liveSnapshot.price ?? null,
+            promotion: liveSnapshot.promotion ?? null,
+            stockStatus: liveSnapshot.stockStatus ?? null,
+            adCopy: liveSnapshot.adCopy ?? null,
+            insightsJson: JSON.stringify({
+              ingestionSource: "live_competitor_fetch",
+              capturedAt: new Date().toISOString(),
+              externalFetch: true,
+            }),
+          },
+        });
+        ingested += 1;
+      }
+    }
+
+    const status = ingested > 0 ? "SUCCEEDED" : "SUCCEEDED_NO_DATA";
+    const result = {
+      ingested,
+      domains: domains.length,
+      products: sourceProducts.length,
+      skipped,
+      status,
+      reason:
+        ingested > 0
+          ? null
+          : "Competitor pages were fetched, but no live competitor snapshots were captured for the monitored products.",
+    };
+
+    await prisma.syncJob.update({
+      where: { id: job.id },
+      data: {
+        status,
+        finishedAt: new Date(),
+        summaryJson: JSON.stringify(result),
+        errorMessage: ingested > 0 ? null : result.reason,
+      },
+    });
+
+    return result;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Competitor ingestion failed.";
+
+    await prisma.syncJob.update({
+      where: { id: job.id },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        errorMessage: message,
+      },
+    });
+
+    throw error;
+  }
 }
 
 export async function getCompetitorResponseEngine(shopDomain: string) {

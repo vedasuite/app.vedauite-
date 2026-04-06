@@ -5,6 +5,11 @@ import {
 } from "./fraudService";
 import { prisma } from "../db/prismaClient";
 import { getCurrentSubscription } from "./subscriptionService";
+import {
+  deriveModuleReadiness,
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 function maskIdentity(value: string | null | undefined, fallback: string) {
   if (!value) {
@@ -21,7 +26,15 @@ function maskIdentity(value: string | null | undefined, fallback: string) {
 }
 
 export async function getTrustAbuseOverview(shopDomain: string) {
-  const [subscription, fraudOverview, trustLayer, recentOrders, customers, store] =
+  const [
+    subscription,
+    fraudOverview,
+    trustLayer,
+    recentOrders,
+    customers,
+    store,
+    operational,
+  ] =
     await Promise.all([
       getCurrentSubscription(shopDomain),
       getFraudIntelligenceOverview(shopDomain),
@@ -38,6 +51,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
           },
         },
       }),
+      getStoreOperationalSnapshot(shopDomain),
     ]);
 
   if (!store) {
@@ -266,8 +280,28 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     },
   ];
 
+  const syncState = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
+  const readiness = deriveModuleReadiness({
+    syncStatus: syncState.status,
+    rawCount: operational.counts.orders + operational.counts.customers,
+    processedCount: operational.counts.timelineEvents,
+    lastUpdatedAt: operational.latestProcessingAt,
+    failureReason: operational.store.lastConnectionError,
+  });
+
   return {
     subscription,
+    readiness,
     summary: {
       shopperTrustProfiles: customers.length,
       returnAbuseProfiles: fraudOverview.summary.returnAbuseProfiles,

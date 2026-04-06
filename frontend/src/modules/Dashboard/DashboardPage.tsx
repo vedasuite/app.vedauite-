@@ -36,6 +36,30 @@ type Metrics = {
   dataState?: string;
   summaryTitle?: string;
   summaryDetail?: string;
+  moduleReadiness?: {
+    trustAbuse?: {
+      readinessState: string;
+      reason: string;
+    } | null;
+    competitor?: {
+      readinessState: string;
+      reason: string;
+    } | null;
+    pricingProfit?: {
+      readinessState: string;
+      reason: string;
+    } | null;
+  };
+  persistedCounts?: {
+    products: number;
+    orders: number;
+    customers: number;
+    pricingRows: number;
+    profitRows: number;
+    timelineEvents: number;
+    competitorDomains: number;
+    competitorRows: number;
+  } | null;
 };
 
 type WebhookStatus = {
@@ -133,6 +157,11 @@ type Diagnostics = {
     lastSyncAt: string | null;
     lastSyncStatus: string | null;
     latestJob: SyncJobPayload | null;
+    syncHealth?: {
+      status: string;
+      reason: string;
+    } | null;
+    operationalCounts?: Metrics["persistedCounts"];
   };
   billing: {
     planName: string;
@@ -210,6 +239,40 @@ function redirectTopLevel(url: string) {
   window.location.href = url;
 }
 
+function toneForReadiness(value?: string | null) {
+  switch (value) {
+    case "READY_WITH_DATA":
+      return "success";
+    case "SYNC_IN_PROGRESS":
+    case "SYNC_COMPLETED_PROCESSING_PENDING":
+      return "attention";
+    case "FAILED":
+    case "NOT_CONNECTED":
+      return "critical";
+    default:
+      return "info";
+  }
+}
+
+function labelForReadiness(value?: string | null) {
+  switch (value) {
+    case "READY_WITH_DATA":
+      return "Ready with data";
+    case "SYNC_IN_PROGRESS":
+      return "Syncing";
+    case "SYNC_COMPLETED_PROCESSING_PENDING":
+      return "Processing";
+    case "EMPTY_STORE_DATA":
+      return "No store data";
+    case "FAILED":
+      return "Failed";
+    case "NOT_CONNECTED":
+      return "Reconnect";
+    default:
+      return "Setup required";
+  }
+}
+
 const fallbackMetrics: Metrics = {
   fraudAlertsToday: 0,
   highRiskOrders: 0,
@@ -252,6 +315,10 @@ export function DashboardPage() {
 
   const effectiveConnectionHealth = diagnostics?.connection ?? connectionHealth;
   const effectiveWebhookStatus = diagnostics?.webhooks.liveStatus ?? webhookStatus;
+  const syncHealthState = diagnostics?.sync.syncHealth ?? null;
+  const trustReadiness = metrics.moduleReadiness?.trustAbuse?.readinessState ?? "SYNC_REQUIRED";
+  const competitorReadiness = metrics.moduleReadiness?.competitor?.readinessState ?? "SYNC_REQUIRED";
+  const pricingReadiness = metrics.moduleReadiness?.pricingProfit?.readinessState ?? "SYNC_REQUIRED";
 
   const pollSyncJob = async (jobId?: string | null) => {
     const startedAt = Date.now();
@@ -279,7 +346,9 @@ export function DashboardPage() {
       if (latestJob.status === "SUCCEEDED") {
         loadMetrics();
         void loadDiagnostics();
-        setToast("Live Shopify data synced into VedaSuite.");
+        setToast(
+          "Shopify sync completed. VedaSuite is now validating persisted records and module processing state."
+        );
         return;
       }
 
@@ -533,31 +602,34 @@ export function DashboardPage() {
   );
 
   const quickActions = [
-    {
-      title: "Review fraud queue",
-      description: "Inspect risky orders, chargeback exposure, and return abuse flags.",
-      route: "/trust-abuse?focus=high-risk",
-      cta: "Open trust & abuse",
-      tone: "critical" as const,
-    },
-    {
-      title: "Watch the market",
-      description:
-        "Review monitored competitor website signals and current market-response suggestions.",
-      route: "/competitor?focus=promotions",
-      cta: "Open competitor intelligence",
-      tone: "info" as const,
-    },
-    {
-      title: "Review pricing baseline",
-      description:
-        "Validate the latest pricing baseline or recommendation before taking merchant action.",
-      route: "/pricing-profit?focus=simulation",
-      cta: "Open pricing & profit",
-      tone: "success" as const,
-      locked: !subscription?.enabledModules?.pricingProfit,
-    },
-  ];
+      {
+        title: "Review fraud queue",
+        description: "Inspect risky orders, chargeback exposure, and return abuse flags.",
+        route: "/trust-abuse?focus=high-risk",
+        cta: "Open trust & abuse",
+        tone: "critical" as const,
+        readiness: trustReadiness,
+      },
+      {
+        title: "Watch the market",
+        description:
+          "Review monitored competitor website signals and current market-response suggestions.",
+        route: "/competitor?focus=promotions",
+        cta: "Open competitor intelligence",
+        tone: "info" as const,
+        readiness: competitorReadiness,
+      },
+      {
+        title: "Review pricing baseline",
+        description:
+          "Validate the latest pricing baseline or recommendation before taking merchant action.",
+        route: "/pricing-profit?focus=simulation",
+        cta: "Open pricing & profit",
+        tone: "success" as const,
+        locked: !subscription?.enabledModules?.pricingProfit,
+        readiness: pricingReadiness,
+      },
+    ];
 
   const kpis = useMemo(
     () => [
@@ -695,15 +767,15 @@ export function DashboardPage() {
             title={
               metrics.summaryTitle ??
               (metrics.lastSyncStatus === "SUCCEEDED"
-                ? "Store signals are synced"
+                ? "Store sync completed"
                 : "Run first sync to populate store signals")
             }
-            tone={metrics.lastSyncStatus === "SUCCEEDED" ? "info" : "warning"}
+            tone={metrics.dataState === "READY_WITH_DATA" ? "success" : "warning"}
           >
             <p>
               {metrics.summaryDetail ??
                 (metrics.lastSyncStatus === "SUCCEEDED"
-                  ? `VedaSuite is showing live order, pricing, and timeline outputs${metrics.lastSyncAt ? ` from the latest sync at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}.`
+                  ? `Shopify sync completed${metrics.lastSyncAt ? ` at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}, and VedaSuite is validating persisted module outputs.`
                   : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes.")}
             </p>
             <Box paddingBlockStart="300">
@@ -722,12 +794,14 @@ export function DashboardPage() {
                       Suite posture
                     </Text>
                     <Text as="p" tone="subdued">
-                      {subscription?.planName ?? "TRIAL"} plan coverage is active for
-                      your connected Shopify store.
+                      {subscription?.planName ?? "NONE"} plan coverage is resolved from
+                      the current backend billing state for this Shopify store.
                     </Text>
                   </div>
                   <InlineStack gap="200">
-                    <Badge tone="success">Connected</Badge>
+                    <Badge tone={toneForReadiness(syncHealthState?.status ?? metrics.dataState)}>
+                      {labelForReadiness(syncHealthState?.status ?? metrics.dataState)}
+                    </Badge>
                     {effectiveConnectionHealth && !effectiveConnectionHealth.healthy ? (
                       <Badge tone="attention">{effectiveConnectionHealth.code}</Badge>
                     ) : null}
@@ -794,13 +868,24 @@ export function DashboardPage() {
                             <Text as="h3" variant="headingMd">
                               {action.title}
                             </Text>
-                            <Badge tone={action.tone}>
-                              {action.locked ? "Upgrade required" : "Ready"}
+                            <Badge tone={action.locked ? "attention" : toneForReadiness(action.readiness)}>
+                              {action.locked
+                                ? "Upgrade required"
+                                : labelForReadiness(action.readiness)}
                             </Badge>
                           </InlineStack>
                           <Text as="p" tone="subdued">
                             {action.description}
                           </Text>
+                          {!action.locked ? (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {action.readiness === trustReadiness
+                                ? metrics.moduleReadiness?.trustAbuse?.reason
+                                : action.readiness === competitorReadiness
+                                ? metrics.moduleReadiness?.competitor?.reason
+                                : metrics.moduleReadiness?.pricingProfit?.reason}
+                            </Text>
+                          ) : null}
                         </BlockStack>
                         <Button
                           variant={action.locked ? "secondary" : "primary"}
@@ -987,7 +1072,9 @@ export function DashboardPage() {
                           <Text as="h3" variant="headingMd">
                             Module drilldowns
                           </Text>
-                          <Badge tone="info">Connected suite</Badge>
+                          <Badge tone={toneForReadiness(syncHealthState?.status ?? metrics.dataState)}>
+                            {labelForReadiness(syncHealthState?.status ?? metrics.dataState)}
+                          </Badge>
                         </InlineStack>
                         <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
                           <Button
@@ -1112,7 +1199,8 @@ export function DashboardPage() {
                           Current suite posture
                         </Text>
                         <Text as="p" tone="subdued">
-                          Your store is connected. Outputs become more specific as syncs, webhook coverage, and competitor monitoring complete.
+                          {metrics.summaryDetail ??
+                            "This panel reflects the latest persisted sync and processing status for the store."}
                         </Text>
                       </BlockStack>
                     </Card>

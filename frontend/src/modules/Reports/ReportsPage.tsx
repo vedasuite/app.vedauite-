@@ -26,6 +26,10 @@ import { withRequestTimeout } from "../../lib/requestTimeout";
 type WeeklyReport = {
   since: string;
   setupState?: string;
+  readiness?: {
+    status: string;
+    reason: string;
+  };
   summary: {
     totalOrders: number;
     totalRevenue: number;
@@ -46,6 +50,7 @@ type WeeklyReport = {
   sync?: {
     latestStatus: string;
     latestFinishedAt: string | null;
+    latestJobStatus?: string | null;
   };
   trends: Array<{
     date: string;
@@ -107,7 +112,11 @@ function buildFallbackReport(): WeeklyReport {
 
   return {
     since,
-    setupState: "SETUP_REQUIRED",
+    setupState: "SYNC_REQUIRED",
+    readiness: {
+      status: "SYNC_REQUIRED",
+      reason: "Run the first live sync to generate a weekly report from persisted store data.",
+    },
     summary: {
       totalOrders: 0,
       totalRevenue: 0,
@@ -120,16 +129,12 @@ function buildFallbackReport(): WeeklyReport {
       marketPressure: "Awaiting competitor data",
       pricingMomentum: "Awaiting pricing data",
     },
-    recommendations: [
-      "Run your first live sync so VedaSuite can generate a report from real orders and refunds.",
-      "Add competitor domains and run ingestion to unlock competitor highlights.",
-      "Sync pricing and product history before reviewing pricing and profit recommendations.",
-    ],
+    recommendations: [],
     fraud: { highRiskOrders: 0 },
     competitor: { intelligenceEvents: 0 },
     pricing: { suggestionsGenerated: 0 },
     profit: { opportunitiesIdentified: 0 },
-    sync: { latestStatus: "NOT_RUN", latestFinishedAt: null },
+    sync: { latestStatus: "SYNC_REQUIRED", latestFinishedAt: null, latestJobStatus: null },
     trends,
     customers: { topRisky: [] },
     pricingHighlights: [],
@@ -152,6 +157,12 @@ export function ReportsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
   const reportsEnabled = !!subscription?.capabilities?.["reports.view"];
+  const reportState = report.readiness?.status ?? report.setupState ?? report.sync?.latestStatus ?? "SYNC_REQUIRED";
+  const reportReason =
+    report.readiness?.reason ??
+    (reportState === "READY_WITH_DATA"
+      ? "The report below is built from persisted synced records and module outputs."
+      : "Run sync and processing before relying on this report for merchant decisions.");
 
   useEffect(() => {
     setLoading(true);
@@ -211,17 +222,23 @@ export function ReportsPage() {
           <Layout.Section>
             <Banner
               title={
-                report.sync?.latestStatus === "SUCCEEDED"
-                  ? "Weekly report generated"
-                  : "Weekly report is waiting for live merchant data"
+                reportState === "READY_WITH_DATA"
+                  ? "Weekly report generated from persisted store data"
+                  : reportState === "FAILED"
+                  ? "Weekly report needs attention"
+                  : reportState === "SYNC_COMPLETED_PROCESSING_PENDING"
+                  ? "Weekly report is waiting for processing outputs"
+                  : "Weekly report is waiting for real store data"
               }
-              tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "info"}
+              tone={
+                reportState === "READY_WITH_DATA"
+                  ? "success"
+                  : reportState === "FAILED"
+                  ? "critical"
+                  : "info"
+              }
             >
-              <p>
-                {report.sync?.latestStatus === "SUCCEEDED"
-                  ? "The report below combines the core modules into a single merchant decision brief."
-                  : "Run first sync and competitor ingestion to replace this setup view with a real weekly report."}
-              </p>
+              <p>{reportReason}</p>
             </Banner>
           </Layout.Section>
           <Layout.Section>
@@ -233,13 +250,11 @@ export function ReportsPage() {
                       Executive summary
                     </Text>
                     <Badge tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "attention"}>
-                      {report.sync?.latestStatus === "SUCCEEDED" ? "Live data" : "Setup state"}
+                      {reportState === "READY_WITH_DATA" ? "Persisted data" : "Setup or processing"}
                     </Badge>
                   </InlineStack>
                   <Text as="p" tone="subdued">
-                    {report.sync?.latestStatus === "SUCCEEDED"
-                      ? "This report summarizes the latest synced trust, competitor, pricing, and profit outputs."
-                      : "This report is in setup mode until live sync and competitor ingestion complete."}
+                    {reportReason}
                   </Text>
                   <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
                     <div className="vs-signal-stat">
@@ -304,7 +319,7 @@ export function ReportsPage() {
                             key={point.date}
                             style={{
                               width: `${
-                                report.summary.totalOrders > 0
+                            report.summary.totalOrders > 0
                                   ? Math.max(
                                       4,
                                       Math.round(
@@ -334,7 +349,7 @@ export function ReportsPage() {
                       <Text as="p" variant="bodySm" tone="subdued">
                         Revenue trend
                       </Text>
-                      <Badge tone="success">{report.health.revenueTrend}</Badge>
+                      <Badge tone={reportState === "READY_WITH_DATA" ? "success" : "info"}>{report.health.revenueTrend}</Badge>
                     </div>
                     <div className="vs-signal-stat">
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -478,30 +493,32 @@ export function ReportsPage() {
                             Report status
                           </Text>
                           <Text as="p" tone="subdued">
-                            {report.sync?.latestStatus === "SUCCEEDED"
-                              ? "This report is based on the latest synced module outputs and timeline events."
-                              : "This report is still in setup mode and only reflects currently synced store records."}
+                            {reportReason}
                           </Text>
                         </BlockStack>
                       </Card>
                       <Card>
-                          <Text as="p">{report.recommendations[0] ?? "No recommendation yet."}</Text>
+                          <Text as="p">{report.recommendations[0] ?? reportReason}</Text>
                       </Card>
                       <Card>
-                        <Text as="p">{report.recommendations[1] ?? "No recommendation yet."}</Text>
+                        <Text as="p">
+                          {report.recommendations[1] ??
+                            "No second recommendation is available yet from persisted weekly report outputs."}
+                        </Text>
                       </Card>
                       <Card>
-                        <Text as="p">{report.recommendations[2] ?? "No recommendation yet."}</Text>
+                        <Text as="p">
+                          {report.recommendations[2] ??
+                            "Additional report guidance appears after more processed module output is available."}
+                        </Text>
                       </Card>
                       <Card>
                         <InlineStack align="space-between" blockAlign="center">
                           <Text as="p">
-                            {report.sync?.latestStatus === "SUCCEEDED"
-                              ? "This report is based on the latest synced module outputs."
-                              : "This report is still in setup mode and does not yet include a full live data brief."}
+                            {reportReason}
                           </Text>
-                          <Badge tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "attention"}>
-                            {report.sync?.latestStatus === "SUCCEEDED" ? "Live data" : "Setup state"}
+                          <Badge tone={reportState === "READY_WITH_DATA" ? "success" : "attention"}>
+                            {reportState === "READY_WITH_DATA" ? "Persisted data" : "Setup or processing"}
                           </Badge>
                         </InlineStack>
                       </Card>

@@ -6,6 +6,12 @@ import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 
 type Overview = {
   subscription: { featureAccess: { supportCopilot: boolean; evidencePackExport: boolean } };
+  readiness?: {
+    readinessState: string;
+    reason: string;
+    processingState?: string;
+    lastUpdatedAt?: string | null;
+  };
   summary: {
     shopperTrustProfiles: number;
     returnAbuseProfiles: number;
@@ -155,7 +161,27 @@ export function TrustAbusePage() {
     <Page title="Trust & Abuse Intelligence" subtitle="Unifies fraud, shopper trust, return abuse, policy, and support decisioning.">
       <Layout>
         {loading ? <Layout.Section><Banner title="Refreshing trust and abuse signals" tone="info"><p>VedaSuite is refreshing trust, abuse, and review queue signals in the background.</p></Banner></Layout.Section> : null}
-        {syncIssue ? <Layout.Section><Banner title="Using fallback trust and abuse view" tone="warning"><p>Live review data is still syncing. The page remains available while VedaSuite retries in the background.</p></Banner></Layout.Section> : null}
+        {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (
+          <Layout.Section>
+            <Banner
+              title={
+                overview.readiness?.readinessState === "FAILED"
+                  ? "Trust & abuse processing needs attention"
+                  : overview.readiness?.readinessState === "EMPTY_STORE_DATA"
+                  ? "No store data available for trust scoring yet"
+                  : overview.readiness?.readinessState === "SYNC_COMPLETED_PROCESSING_PENDING"
+                  ? "Trust & abuse processing is catching up"
+                  : "Trust & abuse data is still syncing"
+              }
+              tone={overview.readiness?.readinessState === "FAILED" ? "critical" : "warning"}
+            >
+              <p>
+                {overview.readiness?.reason ??
+                  "VedaSuite will populate this module after live sync and processing complete."}
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
 
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">

@@ -16,17 +16,19 @@ import {
   getLatestSyncJob,
   startStoreSyncJob,
 } from "../services/syncJobService";
+import {
+  deriveModuleReadiness,
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "../services/storeOperationalStateService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const shopifyRouter = Router();
 
 type ShopifyRequest = Request & { shopifySession?: { shop?: string } };
 
 function resolveShopFromRequest(req: ShopifyRequest) {
-  return (
-    req.shopifySession?.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined) ??
-    (typeof req.body?.shop === "string" ? req.body.shop : undefined)
-  );
+  return resolveAuthenticatedShop(req);
 }
 
 function resolveEmbeddedContext(req: ShopifyRequest) {
@@ -87,7 +89,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     });
   }
 
-  const [health, store, latestSyncJob, subscription] = await Promise.all([
+  const [health, store, latestSyncJob, subscription, operational] = await Promise.all([
     getConnectionHealth(shop, {
       probeApi: true,
       host: context.host,
@@ -119,6 +121,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     }),
     getLatestSyncJob(shop),
     getCurrentSubscription(shop).catch(() => null),
+    getStoreOperationalSnapshot(shop).catch(() => null),
   ]);
 
   let webhookStatus: Awaited<ReturnType<typeof getSyncWebhookStatus>> | null = null;
@@ -129,6 +132,20 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       webhookStatus = null;
     }
   }
+
+  const syncHealth = operational
+    ? deriveSyncStatus({
+        connectionStatus: operational.store.lastConnectionStatus,
+        latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+        lastSyncStatus: operational.store.lastSyncStatus,
+        products: operational.counts.products,
+        orders: operational.counts.orders,
+        customers: operational.counts.customers,
+        priceRows: operational.counts.pricingRows,
+        profitRows: operational.counts.profitRows,
+        timelineEvents: operational.counts.timelineEvents,
+      })
+    : null;
 
   return res.json({
     generatedAt: new Date().toISOString(),
@@ -169,6 +186,8 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       lastSyncAt: store?.lastSyncAt?.toISOString() ?? null,
       lastSyncStatus: store?.lastSyncStatus ?? null,
       latestJob: latestSyncJob,
+      syncHealth,
+      operationalCounts: operational?.counts ?? null,
     },
     billing: subscription
       ? {
@@ -183,6 +202,118 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       : null,
   });
 });
+
+async function handleSyncHealth(req: Request, res: Response) {
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+
+  if (!shop) {
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
+  }
+
+  const [health, operational] = await Promise.all([
+    getConnectionHealth(shop, { probeApi: true }),
+    getStoreOperationalSnapshot(shop),
+  ]);
+  const syncHealth = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
+
+  return res.json({
+    shop,
+    authState: health.code,
+    connectionHealthy: health.healthy,
+    lastSyncStatus: syncHealth.status,
+    lastSyncReason: syncHealth.reason,
+    rawCounts: {
+      products: operational.counts.products,
+      orders: operational.counts.orders,
+      customers: operational.counts.customers,
+    },
+    processedCounts: {
+      pricingRows: operational.counts.pricingRows,
+      profitRows: operational.counts.profitRows,
+      timelineEvents: operational.counts.timelineEvents,
+      competitorRows: operational.counts.competitorRows,
+    },
+    lastSuccessfulPullTimestamps: {
+      sync: operational.store.lastSyncAt?.toISOString() ?? null,
+      competitor: operational.latestCompetitorAt?.toISOString() ?? null,
+    },
+    lastProcessingTimestamp: operational.latestProcessingAt?.toISOString() ?? null,
+    blockingErrors: {
+      connection: operational.store.lastConnectionError ?? null,
+      latestSyncJob: operational.latestSyncJob?.errorMessage ?? null,
+      latestCompetitorJob: operational.latestCompetitorIngestJob?.errorMessage ?? null,
+    },
+  });
+}
+
+shopifyRouter.get("/internal/debug/sync-health", handleSyncHealth);
+shopifyRouter.get("/sync-health", handleSyncHealth);
+
+async function handleBillingHealth(req: Request, res: Response) {
+  const request = req as ShopifyRequest;
+  const shop = resolveShopFromRequest(request);
+
+  if (!shop) {
+    return res.status(400).json({
+      error: {
+        code: "MISSING_SHOP",
+        message: "Missing shop.",
+      },
+    });
+  }
+
+  const [subscription, store] = await Promise.all([
+    getCurrentSubscription(shop),
+    prisma.store.findUnique({
+      where: { shop },
+      select: {
+        subscription: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  return res.json({
+    shop,
+    dbPlan: store?.subscription?.plan?.name ?? "NONE",
+    dbBillingStatus: store?.subscription?.billingStatus ?? null,
+    activeSubscriptionId: store?.subscription?.shopifyChargeId ?? null,
+    activeSubscriptionEndsAt: store?.subscription?.endsAt?.toISOString() ?? null,
+    lastBillingWebhookProcessedAt:
+      store?.subscription?.lastBillingSyncAt?.toISOString() ?? null,
+    effectivePlanUsedByFeatureGating: subscription.planName,
+    effectiveBillingStatus: subscription.billingStatus,
+    mismatchWarnings:
+      store?.subscription?.plan?.name &&
+      store.subscription.plan.name !== subscription.planName
+        ? [
+            `Persisted DB plan ${store.subscription.plan.name} does not match effective plan ${subscription.planName}.`,
+          ]
+        : [],
+  });
+}
+
+shopifyRouter.get("/internal/debug/billing-health", handleBillingHealth);
+shopifyRouter.get("/billing-health", handleBillingHealth);
 
 shopifyRouter.get("/connection-health", async (req, res) => {
   const request = req as ShopifyRequest;

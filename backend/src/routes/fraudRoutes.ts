@@ -6,13 +6,14 @@ import {
   listRecentFraudOrders,
   scoreOrderFraud,
 } from "../services/fraudService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const fraudRouter = Router();
 fraudRouter.use(requireCapability("module.trustAbuse"));
 
 fraudRouter.get("/orders", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop query parameter." });
   }
 
@@ -21,8 +22,8 @@ fraudRouter.get("/orders", async (req, res) => {
 });
 
 fraudRouter.get("/overview", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop query parameter." });
   }
 
@@ -31,11 +32,11 @@ fraudRouter.get("/overview", async (req, res) => {
 });
 
 fraudRouter.post("/score", async (req, res) => {
-  const { shop, orderId, signals } = req.body as {
-    shop: string;
+  const { orderId, signals } = req.body as {
     orderId: string;
     signals: unknown;
   };
+  const shop = resolveAuthenticatedShop(req);
   if (!shop || !orderId) {
     return res.status(400).json({ error: "Missing shop or orderId." });
   }
@@ -45,11 +46,11 @@ fraudRouter.post("/score", async (req, res) => {
 });
 
 fraudRouter.post("/action", async (req, res) => {
-  const { shop, orderId, action } = req.body as {
-    shop: string;
+  const { orderId, action } = req.body as {
     orderId: string;
     action: "allow" | "flag" | "block" | "manual_review";
   };
+  const shop = resolveAuthenticatedShop(req);
 
   if (!shop || !orderId || !action) {
     return res.status(400).json({ error: "Missing parameters." });

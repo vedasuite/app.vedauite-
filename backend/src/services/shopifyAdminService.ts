@@ -541,6 +541,7 @@ type SyncQueryResponse = {
           id: string;
           handle: string;
           title: string;
+          status: string;
           variants: {
             edges: Array<{
               node: {
@@ -670,6 +671,11 @@ export async function syncShopifyStoreData(shopDomain: string) {
   if (!normalizedShop) {
     throw new Error("Missing shop.");
   }
+  const syncStartedAt = new Date();
+  logEvent("info", "shopify.sync.started", {
+    shop: normalizedShop,
+    startedAt: syncStartedAt.toISOString(),
+  });
 
   const store = await getStoreAccess(normalizedShop);
   const data = await shopifyGraphQL<SyncQueryResponse>(
@@ -684,10 +690,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 id
                 handle
                 title
-                variants(first: 1) {
+                status
+                variants(first: 25) {
                   edges {
                     node {
                       id
+                      title
                       price
                     }
                   }
@@ -729,10 +737,33 @@ export async function syncShopifyStoreData(shopDomain: string) {
 
   const products = data.shop.products.edges.map((edge) => edge.node);
   const orders = data.shop.orders.edges.map((edge) => edge.node);
-
-  await prisma.profitOptimizationData.deleteMany({
-    where: { storeId: store.id },
-  });
+  const syncCounts = {
+    fetched: {
+      products: products.length,
+      orders: orders.length,
+      customers: orders.filter((order) => !!order.customer?.legacyResourceId).length,
+      variants: products.reduce(
+        (sum, product) => sum + product.variants.edges.length,
+        0
+      ),
+    },
+    saved: {
+      productsCreated: 0,
+      productsUpdated: 0,
+      variantsCreated: 0,
+      variantsUpdated: 0,
+      ordersCreated: 0,
+      ordersUpdated: 0,
+      customersCreated: 0,
+      customersUpdated: 0,
+      priceRowsCreated: 0,
+      priceRowsUpdated: 0,
+    },
+    skipped: {
+      products: 0,
+      variants: 0,
+    },
+  };
 
   for (const orderNode of orders) {
     let customerId: string | null = null;
@@ -762,6 +793,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
             },
           });
 
+      if (existingCustomer) {
+        syncCounts.saved.customersUpdated += 1;
+      } else {
+        syncCounts.saved.customersCreated += 1;
+      }
+
       customerId = customer.id;
     }
 
@@ -770,6 +807,11 @@ export async function syncShopifyStoreData(shopDomain: string) {
       normalizedStatus.includes("refunded") ||
       normalizedStatus.includes("partially_refunded");
     const refundRequested = refunded || orderNode.tags.some((tag) => /refund/i.test(tag));
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { shopifyOrderId: orderNode.legacyResourceId },
+      select: { id: true },
+    });
 
     await prisma.order.upsert({
       where: { shopifyOrderId: orderNode.legacyResourceId },
@@ -793,6 +835,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
         refundRequested,
       },
     });
+
+    if (existingOrder) {
+      syncCounts.saved.ordersUpdated += 1;
+    } else {
+      syncCounts.saved.ordersCreated += 1;
+    }
   }
 
   const customers = await prisma.customer.findMany({
@@ -839,13 +887,111 @@ export async function syncShopifyStoreData(shopDomain: string) {
   }
 
   for (const product of products) {
-    const firstVariant = product.variants.edges[0]?.node;
+    const variants = product.variants.edges.map((edge) => edge.node);
+    const firstVariant = variants[0];
     const currentPrice = Number(firstVariant?.price ?? 0);
-    if (!product.handle || !currentPrice) {
+    if (!product.handle || variants.length === 0 || !currentPrice) {
+      syncCounts.skipped.products += 1;
       continue;
     }
 
+    const existingProduct = await prisma.productSnapshot.findUnique({
+      where: {
+        storeId_shopifyProductId: {
+          storeId: store.id,
+          shopifyProductId: product.id,
+        },
+      },
+      select: { id: true },
+    });
+
+    const savedProduct = await prisma.productSnapshot.upsert({
+      where: {
+        storeId_shopifyProductId: {
+          storeId: store.id,
+          shopifyProductId: product.id,
+        },
+      },
+      create: {
+        storeId: store.id,
+        shopifyProductId: product.id,
+        handle: product.handle,
+        title: product.title,
+        status: product.status.toLowerCase(),
+        variantCount: variants.length,
+        currentPrice,
+        currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+        syncedAt: new Date(),
+      },
+      update: {
+        handle: product.handle,
+        title: product.title,
+        status: product.status.toLowerCase(),
+        variantCount: variants.length,
+        currentPrice,
+        currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+        syncedAt: new Date(),
+      },
+    });
+
+    if (existingProduct) {
+      syncCounts.saved.productsUpdated += 1;
+    } else {
+      syncCounts.saved.productsCreated += 1;
+    }
+
+    for (const variant of variants) {
+      if (!variant.id || !variant.title) {
+        syncCounts.skipped.variants += 1;
+        continue;
+      }
+
+      const existingVariant = await prisma.variantSnapshot.findUnique({
+        where: {
+          productSnapshotId_shopifyVariantId: {
+            productSnapshotId: savedProduct.id,
+            shopifyVariantId: variant.id,
+          },
+        },
+        select: { id: true },
+      }).catch(() => null);
+
+      await prisma.variantSnapshot.upsert({
+        where: {
+          productSnapshotId_shopifyVariantId: {
+            productSnapshotId: savedProduct.id,
+            shopifyVariantId: variant.id,
+          },
+        },
+        create: {
+          productSnapshotId: savedProduct.id,
+          shopifyVariantId: variant.id,
+          title: variant.title,
+          price: Number(variant.price),
+          currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+        },
+        update: {
+          title: variant.title,
+          price: Number(variant.price),
+          currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+        },
+      });
+
+      if (existingVariant) {
+        syncCounts.saved.variantsUpdated += 1;
+      } else {
+        syncCounts.saved.variantsCreated += 1;
+      }
+    }
+
     const recommendedPrice = computeRecommendedPrice(currentPrice, store.pricingBias);
+    const existingPriceRows = await prisma.priceHistory.count({
+      where: {
+        storeId: store.id,
+        productHandle: product.handle,
+      },
+    });
+
     await prisma.priceHistory.deleteMany({
       where: {
         storeId: store.id,
@@ -885,26 +1031,61 @@ export async function syncShopifyStoreData(shopDomain: string) {
         }),
       },
     });
+
+    if (existingPriceRows > 0) {
+      syncCounts.saved.priceRowsUpdated += 1;
+    } else {
+      syncCounts.saved.priceRowsCreated += 1;
+    }
   }
 
-  await prisma.store.update({
-    where: { id: store.id },
-    data: {
-      lastSyncAt: new Date(),
-      lastSyncStatus: "SUCCEEDED",
-      lastConnectionCheckAt: new Date(),
-      lastConnectionStatus: "OK",
-      lastConnectionError: null,
-      authErrorCode: null,
-      authErrorMessage: null,
-    },
+  const savedTotal =
+    syncCounts.saved.productsCreated +
+    syncCounts.saved.productsUpdated +
+    syncCounts.saved.variantsCreated +
+    syncCounts.saved.variantsUpdated +
+    syncCounts.saved.ordersCreated +
+    syncCounts.saved.ordersUpdated +
+    syncCounts.saved.customersCreated +
+    syncCounts.saved.customersUpdated +
+    syncCounts.saved.priceRowsCreated +
+    syncCounts.saved.priceRowsUpdated;
+
+  const fetchedTotal =
+    syncCounts.fetched.products +
+    syncCounts.fetched.orders +
+    syncCounts.fetched.customers +
+    syncCounts.fetched.variants;
+
+  if (fetchedTotal > 0 && savedTotal === 0) {
+    throw new Error(
+      "Shopify sync fetched records but nothing was persisted. Check mapping and upserts."
+    );
+  }
+
+  const status =
+    syncCounts.fetched.products === 0 &&
+    syncCounts.fetched.orders === 0 &&
+    syncCounts.fetched.customers === 0
+      ? "SUCCEEDED_NO_DATA"
+      : "SUCCEEDED";
+
+  logEvent("info", "shopify.sync.completed", {
+    shop: normalizedShop,
+    startedAt: syncStartedAt.toISOString(),
+    finishedAt: new Date().toISOString(),
+    status,
+    counts: syncCounts,
   });
 
   return {
+    startedAt: syncStartedAt.toISOString(),
     syncedAt: new Date().toISOString(),
+    status,
     productsSynced: products.length,
     ordersSynced: orders.length,
     customersSynced: orders.filter((order) => order.customer?.legacyResourceId).length,
+    counts: syncCounts,
   };
 }
 

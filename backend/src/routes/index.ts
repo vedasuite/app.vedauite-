@@ -38,4 +38,5 @@ router.use("/api/profit", profitRouter);
 router.use("/api/reports", reportsRouter);
 router.use("/api/settings", settingsRouter);
 router.use("/api/shopify", shopifyRouter);
+router.use("/api/internal/debug", shopifyRouter);
 

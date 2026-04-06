@@ -3,6 +3,11 @@ import { getCompetitorResponseEngine } from "./competitorService";
 import { getPricingRecommendations, simulatePricingChange } from "./pricingService";
 import { getProfitOpportunities } from "./profitService";
 import { getCurrentSubscription } from "./subscriptionService";
+import {
+  deriveModuleReadiness,
+  deriveSyncStatus,
+  getStoreOperationalSnapshot,
+} from "./storeOperationalStateService";
 
 async function safelyResolve<T>(work: Promise<T>, fallback: T) {
   try {
@@ -29,15 +34,36 @@ async function safelyResolveWithTimeout<T>(
 }
 
 export async function getPricingProfitOverview(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    select: { id: true },
-  });
+  const [store, operational] = await Promise.all([
+    prisma.store.findUnique({
+      where: { shop: shopDomain },
+      select: { id: true },
+    }),
+    getStoreOperationalSnapshot(shopDomain),
+  ]);
   if (!store) {
     throw new Error("Store not found");
   }
 
   const subscription = await getCurrentSubscription(shopDomain);
+  const syncState = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
+  const readiness = deriveModuleReadiness({
+    syncStatus: syncState.status,
+    rawCount: operational.counts.products + operational.counts.orders,
+    processedCount: operational.counts.pricingRows + operational.counts.profitRows,
+    lastUpdatedAt: operational.latestProcessingAt,
+    failureReason: operational.store.lastConnectionError,
+  });
 
   const [pricingRecommendations, competitorResponse] = await Promise.all([
     safelyResolveWithTimeout(getPricingRecommendations(shopDomain), [], 7000),
@@ -411,6 +437,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
 
   return {
     subscription,
+    readiness,
     summary: {
       recommendationCount,
       profitOpportunityCount,

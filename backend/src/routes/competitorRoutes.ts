@@ -8,13 +8,14 @@ import {
   listTrackedCompetitorProducts,
   updateCompetitorDomains,
 } from "../services/competitorService";
+import { resolveAuthenticatedShop } from "./routeShop";
 
 export const competitorRouter = Router();
 competitorRouter.use(requireCapability("module.competitorIntel"));
 
 competitorRouter.get("/overview", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -23,8 +24,8 @@ competitorRouter.get("/overview", async (req, res) => {
 });
 
 competitorRouter.get("/products", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -33,8 +34,8 @@ competitorRouter.get("/products", async (req, res) => {
 });
 
 competitorRouter.get("/connectors", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -43,8 +44,8 @@ competitorRouter.get("/connectors", async (req, res) => {
 });
 
 competitorRouter.get("/response-engine", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop || typeof shop !== "string") {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
   }
 
@@ -57,9 +58,7 @@ competitorRouter.post("/domains", async (req, res) => {
     shop: string;
     domains: { domain: string; label?: string }[];
   };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req) ?? body.shop;
   const domains = body.domains;
 
   if (!shop || !domains) {
@@ -72,9 +71,7 @@ competitorRouter.post("/domains", async (req, res) => {
 
 competitorRouter.post("/ingest", async (req, res) => {
   const body = req.body as { shop?: string };
-  const shop =
-    body.shop ??
-    (typeof req.query.shop === "string" ? req.query.shop : undefined);
+  const shop = resolveAuthenticatedShop(req) ?? body.shop;
 
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
