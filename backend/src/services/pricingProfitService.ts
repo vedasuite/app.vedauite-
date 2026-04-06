@@ -28,75 +28,6 @@ async function safelyResolveWithTimeout<T>(
   );
 }
 
-function buildBaselinePricingRecommendations(args: {
-  seedProducts: string[];
-  responseMode: string;
-}) {
-  const products =
-    args.seedProducts.length > 0
-      ? args.seedProducts
-      : ["hero-catalog", "promo-watch-set", "margin-guard-set"];
-
-  return products.slice(0, 3).map((productHandle, index) => {
-    const currentPrice = 24 + index * 6;
-    const recommendedPrice =
-      args.responseMode === "Respond selectively"
-        ? Number((currentPrice - 1.5).toFixed(2))
-        : args.responseMode === "Defend margin"
-        ? Number((currentPrice + 1.25).toFixed(2))
-        : currentPrice;
-
-    return {
-      id: `baseline-pricing-${index + 1}`,
-      storeId: "baseline",
-      productHandle,
-      currentPrice,
-      recommendedPrice,
-      expectedMarginDelta: args.responseMode === "Defend margin" ? 3.5 : 1.2,
-      expectedProfitGain: args.responseMode === "Hold and monitor" ? 32 : 76 - index * 12,
-      createdAt: new Date(),
-      demandScore: 56 - index * 4,
-      demandTrend: index === 0 ? "stable" : "emerging",
-      demandSignals: [
-        "Using current order, refund, and baseline pricing posture.",
-        args.responseMode === "Respond selectively"
-          ? "Competitor pressure suggests a targeted response."
-          : "Margin discipline remains the safer default posture.",
-        "Recommendation will sharpen as more live competitor and profit data arrives.",
-      ],
-      competitorPressure:
-        args.responseMode === "Respond selectively"
-          ? "medium"
-          : args.responseMode === "Defend margin"
-          ? "high"
-          : "low",
-      automationPosture: "Advisory only",
-      approvalConfidence: 64 - index * 3,
-      autoApprovalCandidate: false,
-      rationaleJson: null,
-    };
-  });
-}
-
-function buildBaselineProfitOpportunities(
-  recommendations: Array<{
-    productHandle: string;
-    currentPrice: number;
-    recommendedPrice: number;
-    expectedProfitGain?: number | null;
-  }>
-) {
-  return recommendations.slice(0, 3).map((item, index) => ({
-    productHandle: item.productHandle,
-    currentPrice: item.currentPrice,
-    recommendedPrice: item.recommendedPrice,
-    expectedMarginIncrease: 2.2 - index * 0.4,
-    projectedMonthlyProfitGain: item.expectedProfitGain ?? 42 - index * 8,
-    discountStrategy: "Protect margin with approval-led adjustments.",
-    bundleOpportunities: "Bundle complementary SKUs before broad discounting.",
-  }));
-}
-
 export async function getPricingProfitOverview(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
@@ -106,123 +37,23 @@ export async function getPricingProfitOverview(shopDomain: string) {
     throw new Error("Store not found");
   }
 
-  const [seedPriceHistory, seedProfitData] = await Promise.all([
-    prisma.priceHistory.findMany({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-      distinct: ["productHandle"],
-      take: 6,
-    }),
-    prisma.profitOptimizationData.findMany({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-      distinct: ["productHandle"],
-      take: 6,
-    }),
-  ]);
-
-  const seedProducts = [
-    ...new Set([
-      ...seedPriceHistory.map((item) => item.productHandle),
-      ...seedProfitData.map((item) => item.productHandle),
-    ]),
-  ];
-
-  const subscription = await safelyResolveWithTimeout(
-    getCurrentSubscription(shopDomain),
-    {
-      planName: "TRIAL",
-      price: 0,
-      trialDays: 3,
-      starterModule: null,
-      active: true,
-      endsAt: null,
-      trialStartedAt: null,
-      trialEndsAt: null,
-      status: "trial_active",
-      billingStatus: null,
-      starterModuleSwitchAvailableAt: null,
-      enabledModules: {
-        trustAbuse: true,
-        competitor: true,
-        pricingProfit: true,
-        reports: true,
-        settings: true,
-        fraud: true,
-        pricing: true,
-        creditScore: true,
-        profitOptimization: true,
-      },
-      featureAccess: {
-        shopperTrustScore: true,
-        returnAbuseIntelligence: true,
-        fraudReviewQueue: true,
-        supportCopilot: true,
-        evidencePackExport: true,
-        competitorMoveFeed: true,
-        competitorStrategyDetection: true,
-        weeklyCompetitorReports: true,
-        pricingRecommendations: true,
-        explainableRecommendations: true,
-        scenarioSimulator: true,
-        profitLeakDetector: true,
-        marginAtRisk: true,
-        dailyActionBoard: true,
-        advancedAutomation: true,
-        fullProfitEngine: true,
-      },
-      capabilities: {
-        "module.trustAbuse": true,
-        "module.competitorIntel": true,
-        "module.pricingProfit": true,
-        "reports.view": true,
-        "reports.export": true,
-        "settings.view": true,
-        "settings.manage": true,
-        "trust.score": true,
-        "trust.timeline": true,
-        "trust.returnAbuse": true,
-        "trust.refundOutcomeSimulator": true,
-        "trust.smartPolicyEngine": true,
-        "trust.trustRecoveryEngine": true,
-        "trust.supportCopilot": true,
-        "trust.evidencePackExport": true,
-        "trust.advancedAutomation": true,
-        "competitor.moveFeed": true,
-        "competitor.impactScore": true,
-        "competitor.actionSuggestions": true,
-        "competitor.strategyDetection": true,
-        "competitor.weeklyReports": true,
-        "competitor.advancedReports": true,
-        "pricing.basicRecommendations": true,
-        "pricing.explainableRecommendations": true,
-        "pricing.advancedModes": true,
-        "pricing.doNothingRecommendation": true,
-        "pricing.profitLeakDetector": true,
-        "pricing.dailyActionBoard": true,
-        "pricing.scenarioSimulator": true,
-        "pricing.marginAtRisk": true,
-        "pricing.advancedAutomation": true,
-        "billing.moduleSelectionStarter": false,
-        "billing.planManagement": true,
-        "billing.upgrade": true,
-        "billing.downgrade": true,
-        "billing.trialActive": true,
-      },
-    },
-    5000
-  );
+  const subscription = await getCurrentSubscription(shopDomain);
 
   const [pricingRecommendations, competitorResponse] = await Promise.all([
     safelyResolveWithTimeout(getPricingRecommendations(shopDomain), [], 7000),
-    safelyResolveWithTimeout(getCompetitorResponseEngine(shopDomain), {
-      summary: {
-        responseMode: "Monitor",
-        topPressureCount: 0,
-        automationReadiness: "Advisory mode",
+    safelyResolveWithTimeout(
+      getCompetitorResponseEngine(shopDomain),
+      {
+        summary: {
+          responseMode: "Awaiting monitored competitor data",
+          topPressureCount: 0,
+          automationReadiness:
+            "Competitor response guidance appears after monitored domains are configured and live observations are collected.",
+        },
+        responsePlans: [],
       },
-      responsePlans: [],
-    }, 7000),
+      7000
+    ),
   ]);
 
   const canUseFullProfitEngine = subscription.featureAccess.fullProfitEngine;
@@ -236,27 +67,15 @@ export async function getPricingProfitOverview(shopDomain: string) {
     subscription.capabilities["pricing.profitLeakDetector"];
   const canUseExplainablePricing =
     subscription.capabilities["pricing.explainableRecommendations"];
+
   const profitOpportunities = canUseFullProfitEngine
     ? await safelyResolveWithTimeout(getProfitOpportunities(shopDomain), [], 7000)
     : [];
 
-  const resolvedPricingRecommendations =
-    pricingRecommendations.length > 0
-      ? pricingRecommendations
-      : buildBaselinePricingRecommendations({
-          seedProducts,
-          responseMode: competitorResponse.summary.responseMode,
-        });
-
-  const resolvedProfitOpportunities =
-    profitOpportunities.length > 0
-      ? profitOpportunities
-      : buildBaselineProfitOpportunities(resolvedPricingRecommendations);
-
-  const recommendationCount = resolvedPricingRecommendations.length;
-  const profitOpportunityCount = resolvedProfitOpportunities.length;
-  const topRecommendation = resolvedPricingRecommendations[0] ?? null;
-  const topProfitOpportunity = resolvedProfitOpportunities[0] ?? null;
+  const recommendationCount = pricingRecommendations.length;
+  const profitOpportunityCount = profitOpportunities.length;
+  const topRecommendation = pricingRecommendations[0] ?? null;
+  const topProfitOpportunity = profitOpportunities[0] ?? null;
 
   const scenarioPreset = topRecommendation
     ? await safelyResolveWithTimeout(
@@ -278,24 +97,25 @@ export async function getPricingProfitOverview(shopDomain: string) {
       id: "review-top-pricing-recommendation",
       title: topRecommendation
         ? `Review pricing recommendation for ${topRecommendation.productHandle}`
-        : "Seed pricing history to unlock AI recommendations",
+        : "Run live sync to unlock pricing recommendations",
       detail: topRecommendation
         ? topRecommendation.demandSignals[0]
-        : "Use the baseline pricing lane while VedaSuite accumulates deeper market and cost signals.",
+        : "VedaSuite needs synced order, catalog, and pricing records before it can publish data-backed pricing actions.",
       actionType: topRecommendation ? "review" : "setup",
       priority: topRecommendation ? "High" : "Medium",
       expectedImpact: topRecommendation?.expectedProfitGain
         ? `Potential monthly gain of $${Math.round(topRecommendation.expectedProfitGain)}`
-        : "Unlock the first pricing queue",
+        : "Generate the first baseline pricing set",
     },
     {
       id: "respond-to-market-pressure",
       title:
         competitorResponse.summary.responseMode === "Hold and monitor"
           ? "Monitor competitor pressure"
-          : "Respond to competitor pressure",
-      detail: competitorResponse.responsePlans[0]?.rationale ??
-        "Competitor moves will drive the next pricing and profit actions.",
+          : "Review competitor pressure",
+      detail:
+        competitorResponse.responsePlans[0]?.rationale ??
+        "Competitor response suggestions will become available once monitored domains are configured and ingested.",
       actionType: "market",
       priority:
         competitorResponse.summary.responseMode === "Hold and monitor"
@@ -304,7 +124,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       expectedImpact:
         competitorResponse.summary.topPressureCount > 0
           ? `${competitorResponse.summary.topPressureCount} exposed SKU clusters`
-          : "Market is currently stable",
+          : "No concentrated market pressure yet",
     },
     {
       id: "protect-margin",
@@ -322,7 +142,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
               topRecommendation?.expectedProfitGain ??
               0
           )}`
-        : "Unlock advanced margin protection",
+        : "Unlock advanced margin analysis",
     },
   ];
 
@@ -376,7 +196,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       description:
         "Bias toward sell-through on slower SKUs with inventory drag or promo pressure.",
       available: canUseAdvancedModes,
-      recommended: canUseAdvancedModes && profitOpportunityCount === 0,
+      recommended: false,
       gate: canUseAdvancedModes ? "Included" : "Pro",
     },
     {
@@ -395,9 +215,9 @@ export async function getPricingProfitOverview(shopDomain: string) {
   const doNothingRecommendation =
     recommendationCount === 0
       ? {
-          headline: "Do nothing right now",
+          headline: "No recommendation yet",
           rationale:
-            "There is not enough aligned pricing, market, and cost pressure to justify a change today.",
+            "VedaSuite needs more synced pricing and margin data before it can justify a no-change recommendation.",
         }
       : topRecommendation &&
         Math.abs(topRecommendation.recommendedPrice - topRecommendation.currentPrice) < 1
@@ -414,20 +234,20 @@ export async function getPricingProfitOverview(shopDomain: string) {
       detail:
         recommendationCount > 0
           ? `${recommendationCount} pricing recommendations suggest preventable margin leakage from reactive discounting.`
-          : "No major discount leakage is visible yet.",
+          : "No pricing recommendations are available yet because synced pricing history is still limited.",
       severity:
         recommendationCount >= 6 ? "High" : recommendationCount >= 2 ? "Medium" : "Low",
       action:
         recommendationCount > 0
           ? "Review approval-led pricing actions"
-          : "Keep monitoring current pricing posture",
+          : "Run live sync before reviewing pricing posture",
     },
     {
       title: "Return-linked margin pressure",
       detail:
-        profitOpportunityCount > 0
+        canUseProfitLeakDetector && profitOpportunityCount > 0
           ? `${profitOpportunityCount} products show enough margin pressure to review returns, promotions, and unit economics together.`
-          : "Return-linked margin pressure is still below the action threshold.",
+          : "Profit leak detection needs more synced product economics before it can surface issues.",
       severity:
         profitOpportunityCount >= 4 ? "High" : profitOpportunityCount >= 1 ? "Medium" : "Low",
       action: canUseFullProfitEngine
@@ -439,7 +259,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       detail:
         competitorResponse.summary.topPressureCount > 0
           ? `${competitorResponse.summary.topPressureCount} SKUs are exposed to market pressure and may need a strategy response.`
-          : "Competitor pressure is currently modest across tracked SKUs.",
+          : "No live competitor pressure has been detected yet.",
       severity:
         competitorResponse.summary.topPressureCount >= 4
           ? "High"
@@ -449,7 +269,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       action:
         competitorResponse.summary.topPressureCount > 0
           ? "Coordinate pricing and response strategy"
-          : "No immediate repricing required",
+          : "Add competitor domains or continue monitoring",
     },
   ];
 
@@ -458,41 +278,43 @@ export async function getPricingProfitOverview(shopDomain: string) {
       scenario: "Hold price",
       outcome:
         competitorResponse.summary.responseMode === "Hold and monitor"
-          ? "Recommended when pressure is low and margins should be protected."
+          ? "Recommended when live market pressure is low and margins should be protected."
           : "Use when the market normalizes after a temporary competitor move.",
     },
     {
       scenario: "Selective match",
       outcome:
         competitorResponse.summary.responseMode === "Respond selectively"
-          ? "Recommended on exposed hero SKUs with concentrated price pressure."
-          : "Reserve for SKUs where the competitor signal stack becomes more intense.",
+          ? "Recommended on exposed hero SKUs with concentrated live price pressure."
+          : "Reserve for SKUs where competitor price pressure becomes more concentrated.",
     },
     {
       scenario: "Bundle defense",
       outcome:
-        competitorResponse.summary.responseMode === "Defend margin"
-          ? "Recommended when promotions spike and broad discounting would erode profit."
-          : "Best used when promotion clusters increase and the merchant wants to avoid price wars.",
-      },
+        competitorResponse.summary.topPressureCount > 0
+          ? "Use when live promotion pressure rises and broad discounting would erode profit."
+          : "Keep in reserve until competitor promotions begin clustering on important SKUs.",
+    },
   ];
 
-  const explainabilityHighlights = resolvedPricingRecommendations.slice(0, 4).map((item) => ({
+  const explainabilityHighlights = pricingRecommendations.slice(0, 4).map((item) => ({
     id: item.id,
     productHandle: item.productHandle,
     recommendation:
       item.recommendedPrice > item.currentPrice ? "Increase price" : "Reduce price",
     why:
       item.demandSignals[0] ??
-      "Recommendation is based on margin, demand, and market posture.",
+      "Recommendation is based on synced pricing records, order history, and current margin posture.",
     factors: [
-      `Demand posture: ${item.demandTrend} (${item.demandScore}/100)`,
+      typeof item.demandScore === "number"
+        ? `Demand posture: ${item.demandTrend} (${item.demandScore}/100)`
+        : `Demand posture: ${item.demandTrend}`,
       `Competitor pressure: ${item.competitorPressure}`,
       `Margin delta: ${item.expectedMarginDelta.toFixed(1)}%`,
     ],
     guardrail:
       item.autoApprovalCandidate
-        ? "High-confidence candidate for merchant approval."
+        ? "Strong candidate for merchant review."
         : "Merchant review recommended before publishing.",
   }));
 
@@ -518,7 +340,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
             title: "Margin defense",
             recommendedPrice: Number((topRecommendation.currentPrice + 2).toFixed(2)),
             summary:
-              "Protect margin by holding or slightly increasing price where demand remains durable.",
+              "Protect margin by holding or slightly increasing price where live demand and competitor pressure appear limited.",
           },
         ].map(async (scenario) => {
           const result = await safelyResolveWithTimeout(
@@ -541,35 +363,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
               result?.projectedMonthlyProfitGain ?? 0,
             expectedMarginImprovement:
               result?.expectedMarginImprovement ?? 0,
-            actionQueue: result?.actionQueue ?? "Advisory simulation only",
+            actionQueue:
+              result?.actionQueue ??
+              "Baseline simulation only. Review with live cost and demand data before acting.",
           };
         })
       )
     : [];
-
-  const resolvedSimulatorSnapshots =
-    simulatorSnapshots.length > 0
-      ? simulatorSnapshots
-      : [
-          {
-            id: "baseline-hold",
-            title: "Hold price",
-            summary:
-              "Keep current pricing while the engine gathers stronger market and margin pressure.",
-            projectedMonthlyProfitGain: topRecommendation?.expectedProfitGain ?? 28,
-            expectedMarginImprovement: 0.6,
-            actionQueue: "Advisory simulation only",
-          },
-          {
-            id: "baseline-defend",
-            title: "Margin defense",
-            summary:
-              "Favor measured pricing discipline over broad discounting when uncertainty is high.",
-            projectedMonthlyProfitGain: (topRecommendation?.expectedProfitGain ?? 28) + 18,
-            expectedMarginImprovement: 1.4,
-            actionQueue: "Merchant approval required",
-          },
-        ];
 
   const marginRiskDrivers = [
     {
@@ -577,7 +377,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       detail:
         competitorResponse.summary.topPressureCount > 0
           ? `${competitorResponse.summary.topPressureCount} competitor-driven pressure clusters need watching.`
-          : "Competitor pressure is currently low.",
+          : "No live competitor pricing pressure has been detected yet.",
       severity:
         competitorResponse.summary.topPressureCount >= 4
           ? "High"
@@ -590,7 +390,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       detail:
         competitorResponse.responsePlans[0]?.promotionSignals
           ? `${competitorResponse.responsePlans[0].promotionSignals} promotion signals are influencing the response posture.`
-          : "Promotion exposure is not yet significant.",
+          : "No live competitor promotion cluster is active yet.",
       severity:
         (competitorResponse.responsePlans[0]?.promotionSignals ?? 0) >= 3
           ? "High"
@@ -603,7 +403,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       detail:
         canUseProfitLeakDetector && profitOpportunityCount > 0
           ? `${profitOpportunityCount} products are already showing measurable profit leakage.`
-          : "Profit leakage detection will strengthen as more unit economics data lands.",
+          : "Profit leakage detection will improve after more unit economics data syncs in.",
       severity:
         profitOpportunityCount >= 4 ? "High" : profitOpportunityCount >= 1 ? "Medium" : "Low",
     },
@@ -616,7 +416,8 @@ export async function getPricingProfitOverview(shopDomain: string) {
       profitOpportunityCount,
       responseMode: competitorResponse.summary.responseMode,
       automationReadiness:
-        topRecommendation?.automationPosture ?? "Advisory only",
+        topRecommendation?.automationPosture ??
+        "Merchant review guidance updates as live pricing, order, and competitor signals sync.",
       fullProfitEngine: canUseFullProfitEngine,
       advancedModesEnabled: canUseAdvancedModes,
       scenarioSimulatorEnabled: canUseScenarioSimulator,
@@ -624,15 +425,15 @@ export async function getPricingProfitOverview(shopDomain: string) {
       profitLeakDetectorEnabled: canUseProfitLeakDetector,
       explainableRecommendationsEnabled: canUseExplainablePricing,
     },
-    pricingRecommendations: resolvedPricingRecommendations.slice(0, 8),
-    profitOpportunities: resolvedProfitOpportunities.slice(0, 8),
+    pricingRecommendations: pricingRecommendations.slice(0, 8),
+    profitOpportunities: profitOpportunities.slice(0, 8),
     dailyActionBoard,
     pricingModes,
     doNothingRecommendation,
     profitLeakSummary,
     scenarioPlaybook,
     explainabilityHighlights,
-    simulatorSnapshots: resolvedSimulatorSnapshots,
+    simulatorSnapshots,
     marginRiskDrivers,
     scenarioPreset,
     marginAtRisk: {
@@ -645,8 +446,8 @@ export async function getPricingProfitOverview(shopDomain: string) {
         0,
       summary:
         competitorResponse.summary.topPressureCount > 0
-          ? "Margin is under pressure from competitor movement and promotion activity."
-          : "Margin posture is currently stable.",
+          ? "Margin pressure is being inferred from live competitor movement and current pricing baselines."
+          : "No live margin pressure drivers are active yet.",
     },
   };
 }

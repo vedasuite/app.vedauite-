@@ -585,15 +585,6 @@ function computeRecommendedPrice(currentPrice: number, pricingBias: number) {
   return Number((currentPrice * (1 + lift)).toFixed(2));
 }
 
-function computeOptimalPrice(
-  currentPrice: number,
-  pricingBias: number,
-  profitGuardrail: number
-) {
-  const lift = Math.max(0.02, (pricingBias + profitGuardrail - 55) / 200);
-  return Number((currentPrice * (1 + lift)).toFixed(2));
-}
-
 export async function fetchCompetitorSnapshot(
   domain: string,
   productHandle: string,
@@ -738,6 +729,10 @@ export async function syncShopifyStoreData(shopDomain: string) {
   const products = data.shop.products.edges.map((edge) => edge.node);
   const orders = data.shop.orders.edges.map((edge) => edge.node);
 
+  await prisma.profitOptimizationData.deleteMany({
+    where: { storeId: store.id },
+  });
+
   for (const orderNode of orders) {
     let customerId: string | null = null;
 
@@ -849,108 +844,46 @@ export async function syncShopifyStoreData(shopDomain: string) {
       continue;
     }
 
-    const latestPriceHistory = await prisma.priceHistory.findFirst({
-      where: {
-        storeId: store.id,
-        productHandle: product.handle,
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
     const recommendedPrice = computeRecommendedPrice(currentPrice, store.pricingBias);
-    const demandScore = Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round((18 * 4) + Math.max(0, 22 - Math.abs(recommendedPrice - currentPrice) * 3))
-      )
-    );
-    if (
-      !latestPriceHistory ||
-      latestPriceHistory.currentPrice !== currentPrice ||
-      latestPriceHistory.recommendedPrice !== recommendedPrice
-    ) {
-      await prisma.priceHistory.create({
-        data: {
-          storeId: store.id,
-          productHandle: product.handle,
-          currentPrice,
-          recommendedPrice,
-          expectedMarginDelta: Number(
-            (((recommendedPrice - currentPrice) / currentPrice) * 100).toFixed(2)
-          ),
-          expectedProfitGain: Number(
-            ((recommendedPrice - currentPrice) * 40).toFixed(2)
-          ),
-          rationaleJson: JSON.stringify({
-            source: "shopify_sync",
-            productTitle: product.title,
-            shopifyProductGid: product.id,
-            shopifyVariantGid: firstVariant?.id ?? null,
-            status: "pending",
-            syncedAt: new Date().toISOString(),
-            demandScore,
-            demandTrend:
-              demandScore >= 72 ? "strong" : demandScore >= 50 ? "stable" : "softening",
-            demandSignals: [
-              `Sales velocity proxy is ${demandScore}/100 from current sync posture.`,
-              `Pricing bias is ${store.pricingBias}/100.`,
-              `Profit guardrail is ${store.profitGuardrail}%.`,
-            ],
-            competitorPressure:
-              store.pricingBias >= 70 ? "defend_margin" : "respond_if_needed",
-          }),
-        },
-      });
-    }
-
-    const latestProfitRecord = await prisma.profitOptimizationData.findFirst({
+    await prisma.priceHistory.deleteMany({
       where: {
         storeId: store.id,
         productHandle: product.handle,
       },
-      orderBy: { createdAt: "desc" },
     });
 
-    const optimalPrice = computeOptimalPrice(
-      currentPrice,
-      store.pricingBias,
-      store.profitGuardrail
-    );
-    if (
-      !latestProfitRecord ||
-      latestProfitRecord.sellingPrice !== currentPrice ||
-      latestProfitRecord.optimalPrice !== optimalPrice
-    ) {
-      const productCost = Number((currentPrice * 0.58).toFixed(2));
-      await prisma.profitOptimizationData.create({
-        data: {
-          storeId: store.id,
-          productHandle: product.handle,
-          productCost,
-          sellingPrice: currentPrice,
-          competitorAveragePrice: Number((currentPrice * 0.97).toFixed(2)),
-          advertisingSpend: Number((currentPrice * 0.12).toFixed(2)),
-          shippingCost: Number((currentPrice * 0.06).toFixed(2)),
-          returnRate: 0.08,
-          salesVelocity: 18,
-          optimalPrice,
-          projectedMarginIncrease: Number(
-            (((optimalPrice - currentPrice) / currentPrice) * 100).toFixed(2)
-          ),
-          projectedMonthlyProfit: Number(
-            ((optimalPrice - productCost) * 18 * 30).toFixed(2)
-          ),
-          bundleSuggestionsJson: JSON.stringify([
-            `Bundle ${product.title} with a complementary bestseller.`,
-          ]),
-          discountStrategyJson: JSON.stringify({
-            guardrail: store.profitGuardrail,
-            strategy: "Avoid broad discounting while competitor stock remains constrained.",
-          }),
-        },
-      });
-    }
+    await prisma.priceHistory.create({
+      data: {
+        storeId: store.id,
+        productHandle: product.handle,
+        currentPrice,
+        recommendedPrice,
+        expectedMarginDelta: Number(
+          (((recommendedPrice - currentPrice) / currentPrice) * 100).toFixed(2)
+        ),
+        expectedProfitGain: null,
+        rationaleJson: JSON.stringify({
+          source: "shopify_sync_baseline",
+          productTitle: product.title,
+          shopifyProductGid: product.id,
+          shopifyVariantGid: firstVariant?.id ?? null,
+          status: "baseline",
+          syncedAt: new Date().toISOString(),
+          demandTrend: "insufficient history",
+          demandSignals: [
+            "This baseline pricing target uses the current Shopify catalog price and merchant pricing settings.",
+            "Projected profit impact is not shown until enough live order and margin history is available.",
+            `Pricing bias is ${store.pricingBias}/100 and profit guardrail is ${store.profitGuardrail}%.`,
+          ],
+          evidenceSignals: [
+            "Current product price from Shopify catalog",
+            "Merchant pricing bias setting",
+            "Merchant profit guardrail setting",
+          ],
+          competitorPressure: "not_available",
+        }),
+      },
+    });
   }
 
   await prisma.store.update({

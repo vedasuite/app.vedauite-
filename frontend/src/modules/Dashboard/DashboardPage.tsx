@@ -33,6 +33,9 @@ type Metrics = {
   lastSyncStatus?: string;
   lastSyncAt?: string | null;
   timelineEventsGenerated?: number;
+  dataState?: string;
+  summaryTitle?: string;
+  summaryDetail?: string;
 };
 
 type WebhookStatus = {
@@ -502,14 +505,16 @@ export function DashboardPage() {
     },
     {
       title: "Watch the market",
-      description: "Check promotion surges, stock pressure, and competitor price moves.",
+      description:
+        "Review monitored competitor website signals and current market-response suggestions.",
       route: "/competitor?focus=promotions",
       cta: "Open competitor intelligence",
       tone: "info" as const,
     },
     {
-      title: "Approve pricing actions",
-      description: "Validate the next AI recommendation and protect margin expansion.",
+      title: "Review pricing baseline",
+      description:
+        "Validate the latest pricing baseline or recommendation before taking merchant action.",
       route: "/pricing-profit?focus=simulation",
       cta: "Open pricing & profit",
       tone: "success" as const,
@@ -550,16 +555,16 @@ export function DashboardPage() {
         note: "New offer or campaign movement",
       },
       {
-        title: "AI pricing suggestions",
+        title: "Pricing records",
         value: metrics.aiPricingSuggestions,
         tone: "success" as const,
-        note: "Ready for merchant approval",
+        note: "Baseline or live recommendation rows",
       },
       {
-        title: "Profit optimization opportunities",
+        title: "Profit records",
         value: metrics.profitOptimizationOpportunities,
         tone: "attention" as const,
-        note: "Best opportunities for margin lift",
+        note: "Available profit-engine rows",
       },
     ],
     [metrics]
@@ -651,16 +656,18 @@ export function DashboardPage() {
         <Layout.Section>
           <Banner
             title={
-              metrics.lastSyncStatus === "SUCCEEDED"
+              metrics.summaryTitle ??
+              (metrics.lastSyncStatus === "SUCCEEDED"
                 ? "Store signals are synced"
-                : "Run first sync to populate live intelligence"
+                : "Run first sync to populate store signals")
             }
             tone={metrics.lastSyncStatus === "SUCCEEDED" ? "info" : "warning"}
           >
             <p>
-              {metrics.lastSyncStatus === "SUCCEEDED"
-                ? `VedaSuite is showing live order, pricing, and timeline outputs${metrics.lastSyncAt ? ` from the latest sync at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}.`
-                : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes."}
+              {metrics.summaryDetail ??
+                (metrics.lastSyncStatus === "SUCCEEDED"
+                  ? `VedaSuite is showing live order, pricing, and timeline outputs${metrics.lastSyncAt ? ` from the latest sync at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}.`
+                  : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes.")}
             </p>
             <Box paddingBlockStart="300">
               <Button onClick={() => setOnboardingOpen(true)}>Open onboarding guide</Button>
@@ -971,7 +978,7 @@ export function DashboardPage() {
                     <Card>
                       <BlockStack gap="300">
                         <Text as="h3" variant="headingMd">
-                          Live detection signals
+                          Current synced signals
                         </Text>
                         <List type="bullet">
                           <List.Item>
@@ -979,12 +986,12 @@ export function DashboardPage() {
                             high-risk threshold.
                           </List.Item>
                           <List.Item>
-                            {metrics.serialReturners} customer profiles show elevated
-                            refund behavior.
+                            {metrics.serialReturners} customer profiles currently show elevated
+                            refund behavior based on synced order history.
                           </List.Item>
                           <List.Item>
-                            {metrics.competitorPriceChanges} competitor pricing
-                            movements were recorded today.
+                            {metrics.competitorPriceChanges} competitor monitoring
+                            records were captured in the last 24 hours.
                           </List.Item>
                         </List>
                       </BlockStack>
@@ -992,16 +999,15 @@ export function DashboardPage() {
                     <Card>
                       <BlockStack gap="300">
                         <Text as="h3" variant="headingMd">
-                          Merchant priorities
+                          Recommended next steps
                         </Text>
                         <List type="bullet">
                           <List.Item>Review medium and high-risk orders first.</List.Item>
                           <List.Item>
-                            Confirm whether the latest competitor promotions justify
-                            a pricing response.
+                              Check whether live competitor website monitoring shows enough pressure to justify a pricing response.
                           </List.Item>
                           <List.Item>
-                            Push winning pricing changes into next week's report.
+                              Sync store data again before relying on report exports or pricing baselines.
                           </List.Item>
                         </List>
                         <InlineStack gap="300">
@@ -1060,7 +1066,7 @@ export function DashboardPage() {
                           Current suite posture
                         </Text>
                         <Text as="p" tone="subdued">
-                          Your store is connected. Live intelligence will deepen as syncs, webhooks, and competitor ingestion complete.
+                          Your store is connected. Outputs become more specific as syncs, webhook coverage, and competitor monitoring complete.
                         </Text>
                       </BlockStack>
                     </Card>

@@ -78,6 +78,18 @@ export async function getDashboardMetrics(shopDomain: string) {
     lastSyncStatus: store.syncJobs[0]?.status ?? "NOT_RUN",
     lastSyncAt: store.syncJobs[0]?.finishedAt?.toISOString() ?? null,
     timelineEventsGenerated: store.timelineEvents.length,
+    dataState:
+      store.syncJobs[0]?.status === "SUCCEEDED"
+        ? "LIVE_DATA"
+        : "SETUP_REQUIRED",
+    summaryTitle:
+      store.syncJobs[0]?.status === "SUCCEEDED"
+        ? "Store signals are synced"
+        : "Run first sync to populate store signals",
+    summaryDetail:
+      store.syncJobs[0]?.status === "SUCCEEDED"
+        ? "Dashboard metrics are being computed from synced Shopify orders, pricing records, and timeline events."
+        : "The dashboard is connected, but most intelligence modules stay in setup mode until the first successful sync completes.",
   };
 }
 

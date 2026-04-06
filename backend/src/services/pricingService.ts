@@ -12,12 +12,12 @@ function parseRationaleJson(value?: string | null) {
 
 function deriveAutomationPosture(expectedProfitGain: number, expectedMarginDelta: number) {
   if (expectedProfitGain >= 200 && expectedMarginDelta >= 6) {
-    return "Eligible for approval-led auto-publish";
+    return "Strong candidate for merchant review";
   }
   if (expectedProfitGain >= 100) {
-    return "Ready for merchant approval queue";
+    return "Merchant review recommended";
   }
-  return "Advisory only";
+  return "Baseline estimate only";
 }
 
 export async function getPricingRecommendations(shopDomain: string) {
@@ -35,45 +35,54 @@ export async function getPricingRecommendations(shopDomain: string) {
   return history.map((row) => {
     const rationale = parseRationaleJson(row.rationaleJson);
     const demandScore =
-      typeof rationale.demandScore === "number" ? rationale.demandScore : 58;
+      typeof rationale.demandScore === "number" ? rationale.demandScore : null;
     const demandTrend =
-      typeof rationale.demandTrend === "string" ? rationale.demandTrend : "stable";
+      typeof rationale.demandTrend === "string"
+        ? rationale.demandTrend
+        : "insufficient history";
     const demandSignals = Array.isArray(rationale.demandSignals)
       ? rationale.demandSignals
       : [
-          `Sales velocity score is ${demandScore}/100.`,
-          `Demand trend is ${demandTrend}.`,
-          "Use margin guardrails before approving pricing changes.",
+          "This recommendation is currently a baseline estimate built from synced catalog pricing and merchant pricing settings.",
+          "Product-level demand history is still limited, so margin impact should be reviewed manually.",
+          "Use merchant approval before publishing price changes to Shopify.",
         ];
     const competitorPressure =
       typeof rationale.competitorPressure === "string"
         ? rationale.competitorPressure
-        : "medium";
+        : "not_available";
     const automationPosture = deriveAutomationPosture(
       row.expectedProfitGain ?? 0,
       row.expectedMarginDelta
     );
+    const evidenceSignals = Array.isArray(rationale.evidenceSignals)
+      ? rationale.evidenceSignals.filter(
+          (item): item is string => typeof item === "string" && item.trim().length > 0
+        )
+      : [];
+    const evidenceCount = Math.max(1, evidenceSignals.length);
 
     return {
       ...row,
       demandScore,
       demandTrend,
       demandSignals,
+      evidenceSignals,
       competitorPressure,
       automationPosture,
       approvalConfidence: Math.max(
-        52,
+        38,
         Math.min(
-          95,
+          78,
           Math.round(
-            58 +
-              Math.min(18, demandScore / 4) +
-              Math.min(12, (row.expectedProfitGain ?? 0) / 20)
+            34 +
+              evidenceCount * 8 +
+              Math.min(10, Math.max(0, row.expectedMarginDelta) * 2) +
+              Math.min(10, Math.max(0, row.expectedProfitGain ?? 0) / 40)
           )
         )
       ),
-      autoApprovalCandidate:
-        automationPosture === "Eligible for approval-led auto-publish",
+      autoApprovalCandidate: false,
     };
   });
 }
@@ -114,10 +123,10 @@ export async function simulatePricingChange(params: {
     ),
     actionQueue:
       projectedMonthlyProfitGain >= 200
-        ? "High priority review"
+        ? "High-priority merchant review"
         : projectedMonthlyProfitGain >= 80
-        ? "Standard approval queue"
-        : "Advisory simulation only",
+        ? "Standard merchant review"
+        : "Baseline simulation only",
   };
 }
 

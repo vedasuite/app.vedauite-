@@ -25,6 +25,7 @@ import { withRequestTimeout } from "../../lib/requestTimeout";
 
 type WeeklyReport = {
   since: string;
+  setupState?: string;
   summary: {
     totalOrders: number;
     totalRevenue: number;
@@ -97,8 +98,8 @@ function buildFallbackReport(): WeeklyReport {
     date.setDate(today.getDate() - (6 - index));
     return {
       date: date.toISOString().slice(0, 10),
-      orders: index < 4 ? 0 : 1,
-      revenue: index < 4 ? 0 : 24 + index * 6,
+      orders: 0,
+      revenue: 0,
       fraudHighRisk: 0,
       refunds: 0,
     };
@@ -106,74 +107,35 @@ function buildFallbackReport(): WeeklyReport {
 
   return {
     since,
+    setupState: "SETUP_REQUIRED",
     summary: {
-      totalOrders: 3,
-      totalRevenue: 96,
+      totalOrders: 0,
+      totalRevenue: 0,
       totalRefunds: 0,
-      averageOrderValue: 32,
+      averageOrderValue: 0,
     },
     health: {
-      revenueTrend: "Emerging",
-      fraudPressure: "Low",
-      marketPressure: "Low",
-      pricingMomentum: "Medium",
+      revenueTrend: "Awaiting first sync",
+      fraudPressure: "Awaiting first sync",
+      marketPressure: "Awaiting competitor data",
+      pricingMomentum: "Awaiting pricing data",
     },
     recommendations: [
-      "Use the trust and abuse lane to validate order posture while the first live sync completes.",
-      "Use competitor monitoring to establish a baseline before reacting to external pricing pressure.",
-      "Use Pricing & Profit to review baseline recommendations and projected margin posture.",
+      "Run your first live sync so VedaSuite can generate a report from real orders and refunds.",
+      "Add competitor domains and run ingestion to unlock competitor highlights.",
+      "Sync pricing and product history before reviewing pricing and profit recommendations.",
     ],
     fraud: { highRiskOrders: 0 },
     competitor: { intelligenceEvents: 0 },
-    pricing: { suggestionsGenerated: 1 },
-    profit: { opportunitiesIdentified: 1 },
-    sync: { latestStatus: "BASELINE", latestFinishedAt: null },
+    pricing: { suggestionsGenerated: 0 },
+    profit: { opportunitiesIdentified: 0 },
+    sync: { latestStatus: "NOT_RUN", latestFinishedAt: null },
     trends,
-    customers: {
-      topRisky: [
-        {
-          email: "sh***",
-          creditScore: 72,
-          refundRate: 0,
-          totalRefunds: 0,
-        },
-      ],
-    },
-    pricingHighlights: [
-      {
-        productHandle: "catalog-baseline",
-        currentPrice: 32,
-        recommendedPrice: 33,
-        expectedProfitGain: 24,
-      },
-    ],
-    profitHighlights: [
-      {
-        productHandle: "margin-baseline",
-        optimalPrice: 33,
-        projectedMonthlyProfit: 36,
-        projectedMarginIncrease: 1.8,
-      },
-    ],
-    competitorHighlights: [
-      {
-        productHandle: "watchlist-baseline",
-        records: 0,
-        promotions: 0,
-        priceDelta: 0,
-      },
-    ],
-    timelineHighlights: [
-      {
-        category: "sync",
-        eventType: "baseline-report",
-        title: "Baseline weekly brief is active",
-        detail:
-          "VedaSuite is showing a day-one operating brief so the merchant can act before deep history accumulates.",
-        severity: "info",
-        occurredAt: new Date().toISOString(),
-      },
-    ],
+    customers: { topRisky: [] },
+    pricingHighlights: [],
+    profitHighlights: [],
+    competitorHighlights: [],
+    timelineHighlights: [],
   };
 }
 
@@ -251,13 +213,14 @@ export function ReportsPage() {
               title={
                 report.sync?.latestStatus === "SUCCEEDED"
                   ? "Weekly report generated"
-                  : "Baseline weekly brief is active"
+                  : "Weekly report is waiting for live merchant data"
               }
               tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "info"}
             >
               <p>
-                The report below combines the core modules into a single merchant
-                decision brief, even while deeper live syncs continue in the background.
+                {report.sync?.latestStatus === "SUCCEEDED"
+                  ? "The report below combines the core modules into a single merchant decision brief."
+                  : "Run first sync and competitor ingestion to replace this setup view with a real weekly report."}
               </p>
             </Banner>
           </Layout.Section>
@@ -269,17 +232,15 @@ export function ReportsPage() {
                     <Text as="h3" variant="headingMd">
                       Executive summary
                     </Text>
-                    <Badge tone="success">Ready to share</Badge>
+                    <Badge tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "attention"}>
+                      {report.sync?.latestStatus === "SUCCEEDED" ? "Live data" : "Setup state"}
+                    </Badge>
                   </InlineStack>
                   <Text as="p" tone="subdued">
-                    One weekly brief keeps fraud, competitor moves, pricing actions,
-                    and profit opportunities aligned.
+                    {report.sync?.latestStatus === "SUCCEEDED"
+                      ? "This report summarizes the latest synced trust, competitor, pricing, and profit outputs."
+                      : "This report is in setup mode until live sync and competitor ingestion complete."}
                   </Text>
-                  <div className="vs-analytics-strip" aria-hidden="true">
-                    {[44, 58, 63, 72, 68, 80].map((width, index) => (
-                      <span key={`report-strip-${index}`} style={{ width: `${width}%` }} />
-                    ))}
-                  </div>
                   <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
                     <div className="vs-signal-stat">
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -341,7 +302,19 @@ export function ReportsPage() {
                         {report.trends.map((point) => (
                           <span
                             key={point.date}
-                            style={{ width: `${Math.max(20, point.orders * 18)}%` }}
+                            style={{
+                              width: `${
+                                report.summary.totalOrders > 0
+                                  ? Math.max(
+                                      4,
+                                      Math.round(
+                                        (point.orders / Math.max(1, report.summary.totalOrders)) *
+                                          100
+                                      )
+                                    )
+                                  : 4
+                              }%`,
+                            }}
                           />
                         ))}
                       </div>
@@ -502,58 +475,34 @@ export function ReportsPage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">
-                            Week in narrative
+                            Report status
                           </Text>
-                          <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                            <div className="vs-signal-stat">
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                Early week
-                              </Text>
-                              <Text as="p">
-                                Fraud and customer-risk signals set the tone for the week.
-                              </Text>
-                            </div>
-                            <div className="vs-signal-stat">
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                Mid week
-                              </Text>
-                              <Text as="p">
-                                Competitor signals and pricing movement determined response posture.
-                              </Text>
-                            </div>
-                            <div className="vs-signal-stat">
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                End week
-                              </Text>
-                              <Text as="p">
-                                Margin and profit opportunities were prioritized for the next cycle.
-                              </Text>
-                            </div>
-                          </InlineGrid>
+                          <Text as="p" tone="subdued">
+                            {report.sync?.latestStatus === "SUCCEEDED"
+                              ? "This report is based on the latest synced module outputs and timeline events."
+                              : "This report is still in setup mode and only reflects currently synced store records."}
+                          </Text>
                         </BlockStack>
                       </Card>
                       <Card>
-                        <Text as="p">
-                          {report.recommendations[0]}
-                        </Text>
+                          <Text as="p">{report.recommendations[0] ?? "No recommendation yet."}</Text>
                       </Card>
                       <Card>
-                        <Text as="p">
-                          {report.recommendations[1]}
-                        </Text>
+                        <Text as="p">{report.recommendations[1] ?? "No recommendation yet."}</Text>
                       </Card>
                       <Card>
-                        <Text as="p">
-                          {report.recommendations[2]}
-                        </Text>
+                        <Text as="p">{report.recommendations[2] ?? "No recommendation yet."}</Text>
                       </Card>
                       <Card>
                         <InlineStack align="space-between" blockAlign="center">
                           <Text as="p">
-                            Report confidence remains high because all major suite
-                            signals were refreshed during the latest sync window.
+                            {report.sync?.latestStatus === "SUCCEEDED"
+                              ? "This report is based on the latest synced module outputs."
+                              : "This report is still in setup mode and does not yet include a full live data brief."}
                           </Text>
-                          <Badge tone="info">Confidence 91%</Badge>
+                          <Badge tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "attention"}>
+                            {report.sync?.latestStatus === "SUCCEEDED" ? "Live data" : "Setup state"}
+                          </Badge>
                         </InlineStack>
                       </Card>
                       <Card>
@@ -561,7 +510,11 @@ export function ReportsPage() {
                           <Text as="h3" variant="headingMd">
                             Competitor momentum
                           </Text>
-                          {report.competitorHighlights.map((item) => (
+                          {report.competitorHighlights.length === 0 ? (
+                            <Text as="p" tone="subdued">
+                              No live competitor highlights are available yet.
+                            </Text>
+                          ) : report.competitorHighlights.map((item) => (
                             <InlineStack
                               key={item.productHandle}
                               align="space-between"
@@ -587,7 +540,11 @@ export function ReportsPage() {
                           <Text as="h3" variant="headingMd">
                             Highest-risk customers
                           </Text>
-                          {report.customers.topRisky.map((customer) => (
+                          {report.customers.topRisky.length === 0 ? (
+                            <Text as="p" tone="subdued">
+                              No high-risk customer profiles are available yet.
+                            </Text>
+                          ) : report.customers.topRisky.map((customer) => (
                             <InlineStack
                               key={`${customer.email ?? "unknown"}-${customer.creditScore}`}
                               align="space-between"
@@ -621,7 +578,11 @@ export function ReportsPage() {
                           <Text as="h3" variant="headingMd">
                             Pricing highlights
                           </Text>
-                          {report.pricingHighlights.map((item) => (
+                          {report.pricingHighlights.length === 0 ? (
+                            <Text as="p" tone="subdued">
+                              No live pricing highlights are available yet.
+                            </Text>
+                          ) : report.pricingHighlights.map((item) => (
                             <InlineStack
                               key={item.productHandle}
                               align="space-between"
@@ -653,7 +614,11 @@ export function ReportsPage() {
                           <Text as="h3" variant="headingMd">
                             Profit highlights
                           </Text>
-                          {report.profitHighlights.map((item) => (
+                          {report.profitHighlights.length === 0 ? (
+                            <Text as="p" tone="subdued">
+                              No live profit highlights are available yet.
+                            </Text>
+                          ) : report.profitHighlights.map((item) => (
                             <InlineStack
                               key={item.productHandle}
                               align="space-between"

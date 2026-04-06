@@ -136,7 +136,7 @@ const fallbackOverview: PricingProfitOverview = {
     recommendationCount: 0,
     profitOpportunityCount: 0,
     responseMode: "Monitor",
-    automationReadiness: "Baseline pricing and profit posture is active.",
+    automationReadiness: "Awaiting synced pricing and profit data.",
     fullProfitEngine: false,
     advancedModesEnabled: false,
     scenarioSimulatorEnabled: false,
@@ -151,8 +151,7 @@ const fallbackOverview: PricingProfitOverview = {
   marginAtRisk: {
     pressureProducts: [],
     projectedMonthlyGain: 0,
-    summary:
-      "VedaSuite is holding a baseline margin posture while it gathers deeper market and cost signals.",
+    summary: "No live margin pressure drivers are active yet.",
   },
   pricingModes: [],
   doNothingRecommendation: null,
@@ -360,10 +359,7 @@ export function PricingProfitPage() {
         {syncIssue ? (
           <Layout.Section>
             <Banner title="Using fallback pricing and profit view" tone="warning">
-              <p>
-                Live pricing or profit signals are still syncing. The module stays
-                available while VedaSuite retries in the background.
-              </p>
+              <p>Live pricing or profit signals are still syncing. VedaSuite is showing the latest available real data while retrying in the background.</p>
             </Banner>
           </Layout.Section>
         ) : null}
@@ -421,7 +417,7 @@ export function PricingProfitPage() {
           ) : (
             <Banner title="Growth plan: pricing intelligence is active" tone="warning">
               <p>
-                Growth includes pricing recommendations and baseline scenario
+                Growth includes pricing recommendations and basic scenario
                 guidance. Upgrade to Pro to unlock the full profit engine,
                 advanced pricing modes, and proactive margin protection.
               </p>
@@ -438,7 +434,7 @@ export function PricingProfitPage() {
                     Pricing mode selector
                   </Text>
                   {(overview.pricingModes ?? []).length === 0 ? (
-                    <EmptyState text="Balanced pricing posture is active while VedaSuite finalizes the best mode for this store." />
+                    <EmptyState text="No pricing modes can be recommended yet because VedaSuite is still waiting for live pricing and profit signals." />
                   ) : (
                     (overview.pricingModes ?? []).map((mode) => (
                       <div key={mode.key} className="vs-action-card">
@@ -488,7 +484,7 @@ export function PricingProfitPage() {
                     Profit leak detector
                   </Text>
                   {(overview.profitLeakSummary ?? []).length === 0 ? (
-                    <EmptyState text="No major profit leak has been identified yet, so VedaSuite is holding a baseline protection posture." />
+                    <EmptyState text="No profit leak has been identified yet, or the engine is still waiting for enough synced unit-economics data." />
                   ) : (
                     (overview.profitLeakSummary ?? []).map((item) => (
                       <div key={item.title} className="vs-action-card">
@@ -518,7 +514,7 @@ export function PricingProfitPage() {
                   {!hasProfitLeakDetector ? (
                     <Banner title="Growth plan preview" tone="info">
                       <p>
-                        Growth can review pricing posture and baseline pressure.
+                        Growth can review pricing posture and basic margin pressure.
                         Full profit leak detection becomes actionable on Pro.
                       </p>
                     </Banner>
@@ -561,7 +557,7 @@ export function PricingProfitPage() {
                   Explainable recommendations
                 </Text>
                 {(overview.explainabilityHighlights ?? []).length === 0 ? (
-                  <EmptyState text="Explainability is available, but the strongest recommendation drivers are still consolidating into a merchant-ready stack." />
+                    <EmptyState text="No explainable pricing recommendation is available yet because the engine does not have enough live inputs." />
                 ) : (
                   (overview.explainabilityHighlights ?? []).map((item) => (
                     <div key={item.id} className="vs-action-card">
@@ -611,7 +607,7 @@ export function PricingProfitPage() {
                   {overview.marginAtRisk.summary}
                 </Text>
                 {(overview.marginRiskDrivers ?? []).length === 0 ? (
-                  <EmptyState text="No severe margin drivers are active right now, so the engine is showing a stable posture." />
+                    <EmptyState text="No live margin-risk drivers are active yet." />
                 ) : (
                   (overview.marginRiskDrivers ?? []).map((driver) => (
                     <div key={driver.title} className="vs-action-card">
@@ -653,7 +649,7 @@ export function PricingProfitPage() {
                   {showingProfitFocus ? "Profit actions" : "Pricing recommendations"}
                 </Text>
                 {overview.pricingRecommendations.length === 0 ? (
-                  <EmptyState text="The engine is holding the current pricing posture until a stronger recommendation is justified." />
+                  <EmptyState text="No live pricing recommendation is available yet. Sync orders, products, and competitor data to generate actions." />
                 ) : (
                   overview.pricingRecommendations.map((recommendation) => (
                     <div key={recommendation.id} className="vs-action-card">
@@ -703,7 +699,7 @@ export function PricingProfitPage() {
                     </div>
                   ))
                 ) : (
-                  <EmptyState text="The profit engine is not seeing a strong leak yet, so it is preserving a monitor-and-defend posture." />
+                  <EmptyState text="No live profit opportunity is available yet. Profit outputs appear after synced pricing, cost, and order data are available." />
                 )}
                 <List type="bullet">
                   {overview.marginAtRisk.pressureProducts.map((item) => (

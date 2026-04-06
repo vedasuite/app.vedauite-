@@ -159,10 +159,5 @@ publicRouter.get("/launch/readiness", (_req, res) => {
       terms: env.publicContact.termsUrl,
     },
     complianceExportDir: env.complianceExportDir,
-    remainingExternalActions: [
-      "Complete protected customer data declarations in Shopify Partner Dashboard",
-      "Upload final app icon, screenshots, and review/demo video",
-      "Run final production-app install, billing, uninstall, and webhook replay QA",
-    ],
   });
 });

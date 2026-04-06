@@ -157,10 +157,5 @@ launchRouter.get("/launch/audit", async (req, res) => {
       diagnosticsHint: "Open /api/shopify/diagnostics from an authenticated embedded app session.",
     },
     checks,
-    externalActions: [
-      "Complete protected customer data declarations in Shopify Partner Dashboard",
-      "Upload app icon, screenshots, and review/demo video",
-      "Run final production QA against the connected Shopify store",
-    ],
   });
 });

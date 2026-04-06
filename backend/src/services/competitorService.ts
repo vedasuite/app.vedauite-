@@ -6,8 +6,8 @@ function normalizeCompetitorName(domain: string, label?: string | null) {
 }
 
 function formatSourceLabel(source: string) {
-  if (source === "google_shopping") return "Google Shopping";
-  if (source === "meta_ads") return "Meta Ad Library";
+  if (source === "google_shopping") return "Google Shopping (limited preview)";
+  if (source === "meta_ads") return "Ad-library import (limited preview)";
   if (source.startsWith("website")) return "Website monitoring";
   return source;
 }
@@ -22,8 +22,8 @@ function inferMoveType(row: {
   if (row.stockStatus === "out_of_stock") return "Stock outage";
   if (row.stockStatus === "low_stock") return "Stock pressure";
   if (row.promotion) return "Promotion change";
-  if (row.source === "meta_ads" || row.adCopy) return "Ad pressure";
-  if (row.source === "google_shopping") return "Shopping surface shift";
+  if (row.source === "meta_ads" || row.adCopy) return "Imported ad signal";
+  if (row.source === "google_shopping") return "Imported shopping signal";
   if (row.price != null) return "Price move";
   return "Market signal";
 }
@@ -41,10 +41,10 @@ function inferSuggestedAction(args: {
   source: string;
 }) {
   if (args.stockStatus === "out_of_stock") return "Promote availability and hold price";
-  if (args.stockStatus === "low_stock") return "Monitor margin and avoid unnecessary discounting";
-  if (args.promotion) return "Bundle or selectively respond";
-  if (args.source === "meta_ads") return "Increase watch frequency";
-  if (args.priceDelta <= -2) return "Consider selective price defense";
+  if (args.stockStatus === "low_stock") return "Monitor stock pressure before discounting";
+  if (args.promotion) return "Review bundle or selective response";
+  if (args.source === "meta_ads") return "Monitor campaign pressure";
+  if (args.priceDelta <= -2) return "Review hero SKU pricing";
   if (args.priceDelta >= 2) return "Hold price and protect margin";
   return "Wait and monitor";
 }
@@ -55,340 +55,42 @@ function inferActionWindow(priority: string) {
   return "Monitor";
 }
 
-function inferStrategyLabel(args: {
-  promotionCount: number;
-  stockAlerts: number;
-  adPressure: number;
-  launchAlerts: number;
-  averagePriceDelta: number;
-}) {
-  if (args.launchAlerts >= 2 && args.adPressure >= 3) {
-    return {
-      strategy: "Launch push",
-      confidence: args.launchAlerts >= 4 ? "High" : "Medium",
-      why: "Repeated launch-style signals are appearing with rising visibility pressure.",
-      implication: "A new competitor push can distract hero-SKU demand in the short term.",
-      recommendedMove: "Hold hero SKU margin, watch conversion, and reinforce merchandising.",
-    };
-  }
-
-  if (args.promotionCount >= 8 && args.averagePriceDelta < 0) {
-    return {
-      strategy: "Aggressive discounting",
-      confidence: args.promotionCount >= 14 ? "High" : "Medium",
-      why: "Promotion density is rising while competitor pricing trends downward.",
-      implication: "The competitor may be trying to pull demand with discount-led conversion.",
-      recommendedMove: "Respond selectively on exposed SKUs instead of broad matching.",
-    };
-  }
-
-  if (args.stockAlerts >= 4 && args.averagePriceDelta <= -1) {
-    return {
-      strategy: "Inventory clearing",
-      confidence: args.stockAlerts >= 8 ? "High" : "Medium",
-      why: "Stock pressure and lower prices suggest sell-through behavior.",
-      implication: "The window may be temporary if the competitor is clearing inventory.",
-      recommendedMove: "Wait or bundle unless your hero SKUs show repeated pressure.",
-    };
-  }
-
-  if (args.adPressure >= 4 && args.promotionCount >= 4) {
-    return {
-      strategy: "Market-share capture",
-      confidence: args.adPressure >= 8 ? "High" : "Medium",
-      why: "Visibility and promotion pressure are rising together across tracked signals.",
-      implication: "The competitor may be seeking broader reach, not just tactical conversion.",
-      recommendedMove: "Protect premium SKUs and reinforce value props before discounting.",
-    };
-  }
-
-  return null;
-}
-
-function buildBaselineMoveFeed(args: {
-  domainsConfigured: number;
-  seedProducts: string[];
-}) {
-  const seededProducts =
-    args.seedProducts.length > 0
-      ? args.seedProducts
-      : ["hero-catalog", "margin-guard-set", "promo-watch-set"];
-
-  return seededProducts.slice(0, 3).map((productHandle, index) => ({
-    id: `baseline-move-${index + 1}`,
-    headline:
-      args.domainsConfigured > 0
-        ? `VedaSuite is monitoring ${productHandle}`
-        : `Configure competitor watch for ${productHandle}`,
-    moveType:
-      args.domainsConfigured > 0 ? "Baseline market watch" : "Coverage setup",
-    source: args.domainsConfigured > 0 ? "Website monitoring" : "Setup guidance",
-    priority: index === 0 ? "Medium" : "Low",
-    impactScore: args.domainsConfigured > 0 ? 46 - index * 6 : 28 - index * 3,
-    actionWindow: args.domainsConfigured > 0 ? "This week" : "Today",
-    eventCluster:
-      args.domainsConfigured > 0
-        ? "Monitoring and response readiness"
-        : "Coverage build-up",
-    whyItMatters:
-      args.domainsConfigured > 0
-        ? "Early monitoring is active even before strong competitor movement appears, so the merchant can establish a baseline."
-        : "Competitor domains are not configured yet, so VedaSuite is showing the monitoring blueprint instead of live external moves.",
-    suggestedAction:
-      args.domainsConfigured > 0
-        ? "Review the watched SKU set and run ingestion regularly."
-        : "Add competitor domains and start the first ingestion run.",
-    collectedAt: new Date().toISOString(),
-  }));
-}
-
-function buildBaselineStrategyDetections(args: {
-  domainsConfigured: number;
-  hasSignals: boolean;
-}) {
-  if (args.hasSignals) {
-    return [];
-  }
-
-  return [
-    {
-      strategy:
-        args.domainsConfigured > 0 ? "Baseline monitoring posture" : "Coverage build-up",
-      confidence: args.domainsConfigured > 0 ? "Medium" : "High",
-      why:
-        args.domainsConfigured > 0
-          ? "Domains are configured, so VedaSuite is establishing a baseline before classifying stronger competitor intent."
-          : "The competitor strategy engine needs domains and ingestion coverage before it can infer market intent.",
-      implication:
-        args.domainsConfigured > 0
-          ? "The current best move is to collect a few cycles of price, promotion, and stock signals before reacting."
-          : "No external competitor strategy can be inferred until monitored domains are connected.",
-      recommendedMove:
-        args.domainsConfigured > 0
-          ? "Hold price, watch monitored SKUs, and let the move feed establish normal behavior."
-          : "Configure domains first, then run ingestion to unlock strategy detection.",
-    },
-  ];
-}
-
-function buildBaselineActionSuggestions(args: {
-  domainsConfigured: number;
-  seedProducts: string[];
-}) {
-  const seededProducts =
-    args.seedProducts.length > 0
-      ? args.seedProducts
-      : ["hero-catalog", "promo-watch-set", "margin-guard-set"];
-
-  return seededProducts.slice(0, 3).map((productHandle, index) => ({
-    productHandle,
-    suggestion:
-      args.domainsConfigured > 0
-        ? index === 0
-          ? "Monitor"
-          : index === 1
-          ? "Hold price"
-          : "Bundle"
-        : "Configure coverage",
-    why:
-      args.domainsConfigured > 0
-        ? index === 0
-          ? "Start by observing baseline competitor behavior before reacting."
-          : index === 1
-          ? "Preserve pricing discipline until repeated pressure emerges."
-          : "Use bundles and merchandising as the first response if pressure spikes."
-        : "Add domains and run ingestion so VedaSuite can generate live competitor actions.",
-    urgency: args.domainsConfigured > 0 ? (index === 0 ? "This week" : "Monitor") : "Today",
-    expectedOutcome:
-      args.domainsConfigured > 0
-        ? "Establish a reliable baseline and reduce reactive discounting."
-        : "Unlock the first competitor move feed and weekly brief.",
-  }));
-}
-
-function buildBaselineResponsePlans(args: {
-  seedProducts: string[];
-  domainsConfigured: number;
-}) {
-  const seededProducts =
-    args.seedProducts.length > 0
-      ? args.seedProducts
-      : ["hero-catalog", "margin-guard-set", "watchlist-skus"];
-
-  return seededProducts.slice(0, 3).map((productHandle, index) => ({
-    productHandle,
-    pressureScore: args.domainsConfigured > 0 ? 24 - index * 3 : 12 - index * 2,
-    recommendedPlay: args.domainsConfigured > 0 ? "hold_price" : "configure_tracking",
-    rationale:
-      args.domainsConfigured > 0
-        ? "The engine is establishing baseline competitor posture, so the safest default is to hold price and monitor."
-        : "Tracking is not configured yet, so VedaSuite cannot recommend a reactive competitor response.",
-    priceDelta: 0,
-    promotionSignals: 0,
-    stockSignals: 0,
-    sourceCount: args.domainsConfigured > 0 ? 1 : 0,
-    confidence: args.domainsConfigured > 0 ? 62 - index * 4 : 78,
-    reasons: args.domainsConfigured > 0
-      ? [
-          "No concentrated competitor pressure has been observed yet.",
-          "Baseline monitoring is a safer first move than reactive repricing.",
-          "Let the first tracked cycles define a normal movement range.",
-        ]
-      : [
-          "Competitor domains have not been configured yet.",
-          "The move feed cannot classify pressure without ingestion.",
-          "Setup must happen before automated response logic can activate.",
-        ],
-    automationPosture:
-      args.domainsConfigured > 0
-        ? "Advisory mode while monitoring baseline forms"
-        : "Setup required",
-    executionHint:
-      args.domainsConfigured > 0
-        ? "Watch hero SKUs, promotions, and stock posture before making a pricing move."
-        : "Add domains and run the first ingest to unlock live response strategy.",
-  }));
-}
-
-function buildGoogleShoppingSignal(
-  domain: string,
-  productHandle: string,
-  basePrice: number,
-  competitorName: string
-) {
-  const priceShift = ((domain.length + productHandle.length) % 5) - 2;
-  const price = Number(Math.max(1, basePrice + priceShift * 0.75).toFixed(2));
-  const promotion =
-    price < basePrice ? "Google Shopping price dip" : null;
-
-  return {
-    source: "google_shopping",
-    price,
-    promotion,
-    stockStatus: "in_stock",
-    competitorUrl: `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(
-      `${competitorName} ${productHandle}`
-    )}`,
-    insightsJson: JSON.stringify({
-      ingestionSource: "google-shopping-signal",
-      marketSurface: "Google Shopping",
-      capturedAt: new Date().toISOString(),
-      priceDelta: Number((price - basePrice).toFixed(2)),
-    }),
-  };
-}
-
-function buildMetaAdSignal(
-  domain: string,
-  productHandle: string,
-  basePrice: number,
-  competitorName: string
-) {
-  const promoTrigger = (domain.length + productHandle.length) % 3 === 0;
-  const promotion = promoTrigger ? "Meta campaign promo detected" : null;
-  const adCopy = promoTrigger
-    ? `${competitorName} is pushing ${productHandle} with an urgency-led promotional message.`
-    : `${competitorName} is running visibility ads for ${productHandle}.`;
-
-  return {
-    source: "meta_ads",
-    price: basePrice,
-    promotion,
-    stockStatus: promoTrigger ? "low_stock" : "in_stock",
-    adCopy,
-    competitorUrl: `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&media_type=all&search_type=keyword_unordered&view_all_page_id=0&q=${encodeURIComponent(
-      `${competitorName} ${productHandle}`
-    )}`,
-    insightsJson: JSON.stringify({
-      ingestionSource: "meta-ads-signal",
-      marketSurface: "Meta Ad Library",
-      capturedAt: new Date().toISOString(),
-      adPressure: promoTrigger ? "high" : "medium",
-    }),
-  };
-}
-
-export async function getCompetitorOverview(shopDomain: string) {
+async function getStore(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
+    include: {
+      competitorDomains: true,
+    },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) {
+    throw new Error("Store not found");
+  }
+  return store;
+}
 
-  const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const last72h = new Date(Date.now() - 72 * 60 * 60 * 1000);
+type OverviewRow = Awaited<ReturnType<typeof getCompetitorRows>>[number];
 
-  const [
-    recentChanges,
-    promoCount,
-    stockAlerts,
-    domains,
-    recentRows,
-    allRows,
-    seedPriceHistory,
-    latestSyncJob,
-  ] = await Promise.all([
-    prisma.competitorData.count({
-      where: { storeId: store.id, collectedAt: { gte: last24h } },
-    }),
-    prisma.competitorData.count({
-      where: {
-        storeId: store.id,
-        promotion: { not: null },
-        collectedAt: { gte: last24h },
-      },
-    }),
-    prisma.competitorData.count({
-      where: {
-        storeId: store.id,
-        stockStatus: { in: ["out_of_stock", "low_stock"] },
-        collectedAt: { gte: last24h },
-      },
-    }),
-    prisma.competitorDomain.count({
-      where: { storeId: store.id },
-    }),
-    prisma.competitorData.findMany({
-      where: { storeId: store.id, collectedAt: { gte: last72h } },
-      orderBy: { collectedAt: "desc" },
-      take: 150,
-    }),
-    prisma.competitorData.findMany({
-      where: { storeId: store.id },
-      orderBy: { collectedAt: "desc" },
-      take: 500,
-    }),
-    prisma.priceHistory.findMany({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-      distinct: ["productHandle"],
-      take: 8,
-    }),
-    prisma.syncJob.findFirst({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+async function getCompetitorRows(storeId: string, limit = 500) {
+  return prisma.competitorData.findMany({
+    where: { storeId },
+    orderBy: { collectedAt: "desc" },
+    take: limit,
+  });
+}
 
-  const seedProducts = seedPriceHistory.map((item) => item.productHandle);
-
-  const sourceBreakdown = {
-    website: recentRows.filter((row) => row.source.startsWith("website")).length,
-    googleShopping: recentRows.filter((row) => row.source === "google_shopping")
-      .length,
-    metaAds: recentRows.filter((row) => row.source === "meta_ads").length,
-  };
-
+function buildProductSignals(rows: OverviewRow[]) {
   const productSignals = new Map<
     string,
-    { latest?: number | null; earliest?: number | null; promotions: number; stock: number }
+    { latest?: number | null; earliest?: number | null; promotions: number; stock: number; sources: Set<string> }
   >();
 
-  for (const row of [...recentRows].reverse()) {
+  for (const row of [...rows].reverse()) {
     const bucket = productSignals.get(row.productHandle) ?? {
       latest: null,
       earliest: null,
       promotions: 0,
       stock: 0,
+      sources: new Set<string>(),
     };
     if (bucket.earliest == null && row.price != null) {
       bucket.earliest = row.price;
@@ -396,15 +98,110 @@ export async function getCompetitorOverview(shopDomain: string) {
     if (row.price != null) {
       bucket.latest = row.price;
     }
-    if (row.promotion) {
-      bucket.promotions += 1;
-    }
+    if (row.promotion) bucket.promotions += 1;
     if (row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock") {
       bucket.stock += 1;
     }
+    bucket.sources.add(row.source);
     productSignals.set(row.productHandle, bucket);
   }
 
+  return productSignals;
+}
+
+function buildStrategyDetections(rows: OverviewRow[]) {
+  const promotionCount = rows.filter((row) => !!row.promotion).length;
+  const stockAlerts = rows.filter((row) =>
+    row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock"
+  ).length;
+  const adPressure = rows.filter((row) => row.source === "meta_ads" || !!row.adCopy).length;
+  const priceRows = rows.filter((row) => row.price != null);
+  const averagePrice = priceRows.length
+    ? priceRows.reduce((sum, row) => sum + (row.price ?? 0), 0) / priceRows.length
+    : 0;
+
+  const detections: Array<{
+    strategy: string;
+    signalStrength: string;
+    why: string;
+    implication: string;
+    recommendedMove: string;
+  }> = [];
+
+  if (promotionCount >= 4) {
+    detections.push({
+      strategy: "Promotion-led push",
+      signalStrength: promotionCount >= 8 ? "Strong" : "Moderate",
+      why: "Repeated live promotion signals are appearing across the monitored competitor set.",
+      implication: "The competitor may be trying to improve short-term conversion or move inventory.",
+      recommendedMove: "Use selective offers or bundles instead of broad matching discounts.",
+    });
+  }
+
+  if (stockAlerts >= 3) {
+    detections.push({
+      strategy: "Inventory pressure",
+      signalStrength: stockAlerts >= 6 ? "Strong" : "Moderate",
+      why: "Low-stock and out-of-stock signals are clustering in the live monitoring feed.",
+      implication: "Pressure may ease without a broad pricing response if the competitor is supply constrained.",
+      recommendedMove: "Hold price on hero SKUs and watch availability before reacting.",
+    });
+  }
+
+  if (adPressure >= 3) {
+    detections.push({
+      strategy: "Visibility push",
+      signalStrength: adPressure >= 6 ? "Strong" : "Moderate",
+      why: "Live ad-pressure signals suggest the competitor is increasing visibility.",
+      implication: "Merchants may need stronger merchandising or promotional positioning rather than immediate repricing.",
+      recommendedMove: "Promote differentiated value props and monitor conversion on exposed SKUs.",
+    });
+  }
+
+  if (averagePrice > 0 && promotionCount === 0 && stockAlerts === 0 && adPressure === 0) {
+    detections.push({
+      strategy: "Price watch only",
+      signalStrength: "Early",
+      why: "Current competitor coverage is mostly pricing-only and does not yet suggest a larger strategy pattern.",
+      implication: "Keep monitoring until promotion, stock, or ad signals strengthen the picture.",
+      recommendedMove: "Wait and monitor rather than making a reactive pricing change.",
+    });
+  }
+
+  return detections.slice(0, 4);
+}
+
+export async function getCompetitorOverview(shopDomain: string) {
+  const store = await getStore(shopDomain);
+  const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const last72h = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+  const [recentRows, allRows, latestSyncJob] = await Promise.all([
+    prisma.competitorData.findMany({
+      where: { storeId: store.id, collectedAt: { gte: last72h } },
+      orderBy: { collectedAt: "desc" },
+      take: 150,
+    }),
+    getCompetitorRows(store.id),
+    prisma.syncJob.findFirst({
+      where: { storeId: store.id },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const sourceBreakdown = {
+    website: recentRows.filter((row) => row.source.startsWith("website")).length,
+    googleShopping: recentRows.filter((row) => row.source === "google_shopping").length,
+    metaAds: recentRows.filter((row) => row.source === "meta_ads").length,
+  };
+
+  const promoCount = recentRows.filter((row) => !!row.promotion).length;
+  const stockAlerts = recentRows.filter(
+    (row) => row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock"
+  ).length;
+  const recentChanges = recentRows.filter((row) => row.collectedAt >= last24h).length;
+
+  const productSignals = buildProductSignals(recentRows);
   const topMovers = Array.from(productSignals.entries())
     .map(([productHandle, bucket]) => ({
       productHandle,
@@ -422,37 +219,6 @@ export async function getCompetitorOverview(shopDomain: string) {
     )
     .slice(0, 5);
 
-  const averagePriceDelta =
-    topMovers.length > 0
-      ? Number(
-          (
-            topMovers.reduce((sum, mover) => sum + mover.priceDelta, 0) /
-            topMovers.length
-          ).toFixed(2)
-        )
-      : 0;
-
-  const lastIngestedAt = allRows[0]?.collectedAt ?? null;
-  const freshnessHours = lastIngestedAt
-    ? Number(
-        ((Date.now() - new Date(lastIngestedAt).getTime()) / (1000 * 60 * 60)).toFixed(
-          1
-        )
-      )
-    : null;
-
-  const promotionalHeat =
-    promoCount >= 15 ? "High" : promoCount >= 7 ? "Medium" : "Low";
-  const marketPressure =
-    recentChanges >= 24 ? "High" : recentChanges >= 10 ? "Medium" : "Low";
-  const adPressure = sourceBreakdown.metaAds >= 12 ? "High" : sourceBreakdown.metaAds >= 4 ? "Medium" : "Low";
-  const launchAlerts = recentRows.filter(
-    (row, index, collection) =>
-      index ===
-        collection.findIndex((candidate) => candidate.productHandle === row.productHandle) &&
-      collection.filter((candidate) => candidate.productHandle === row.productHandle).length >= 3
-  ).slice(0, 5);
-
   const moveFeed = recentRows.slice(0, 10).map((row) => {
     const bucket = productSignals.get(row.productHandle);
     const priceDelta =
@@ -460,7 +226,7 @@ export async function getCompetitorOverview(shopDomain: string) {
         ? Number((bucket.latest - bucket.earliest).toFixed(2))
         : 0;
     const impactScore = Math.max(
-      18,
+      12,
       Math.min(
         96,
         Math.round(
@@ -475,15 +241,16 @@ export async function getCompetitorOverview(shopDomain: string) {
         )
       )
     );
+    const priority = scorePriority(impactScore);
 
     return {
       id: row.id,
       headline: `${row.competitorName} changed ${row.productHandle}`,
       moveType: inferMoveType(row),
       source: formatSourceLabel(row.source),
-      priority: scorePriority(impactScore),
+      priority,
       impactScore,
-      actionWindow: inferActionWindow(scorePriority(impactScore)),
+      actionWindow: inferActionWindow(priority),
       eventCluster:
         row.promotion || row.adCopy
           ? "Promotion and visibility"
@@ -508,62 +275,6 @@ export async function getCompetitorOverview(shopDomain: string) {
     };
   });
 
-  const strategyDetections = [
-    inferStrategyLabel({
-      promotionCount: promoCount,
-      stockAlerts,
-      adPressure: sourceBreakdown.metaAds,
-      launchAlerts: launchAlerts.length,
-      averagePriceDelta,
-    }),
-    promoCount >= 8
-      ? {
-          strategy: "Aggressive discounting",
-          confidence: promoCount >= 15 ? "High" : "Medium",
-          why: "Promotion density is rising across the monitored competitor set.",
-          implication: "Selective price defense may be needed on exposed products.",
-          recommendedMove: "Bundle or selectively respond rather than broad discounting.",
-        }
-      : null,
-    stockAlerts >= 4
-      ? {
-          strategy: "Inventory clearing",
-          confidence: stockAlerts >= 8 ? "High" : "Medium",
-          why: "Stock pressure and price movement suggest sell-through behavior.",
-          implication: "Pressure may ease after inventory clears, so reactive discounting could be temporary.",
-          recommendedMove: "Monitor high-pressure SKUs and protect margin where signals soften.",
-        }
-      : null,
-    launchAlerts.length > 0
-      ? {
-          strategy: "Launch push",
-          confidence: launchAlerts.length >= 3 ? "High" : "Medium",
-          why: "Repeated fresh signals across new SKUs point to active launch activity.",
-          implication: "The competitor may be seeking short-term visibility and conversion around launches.",
-          recommendedMove: "Reinforce hero product merchandising and avoid blanket repricing.",
-        }
-      : null,
-    sourceBreakdown.metaAds >= 4
-      ? {
-          strategy: "Market-share capture",
-          confidence: sourceBreakdown.metaAds >= 8 ? "High" : "Medium",
-          why: "Ad pressure is increasing alongside pricing visibility across key surfaces.",
-          implication: "A sustained visibility push can pressure click-through and conversion on overlapping SKUs.",
-          recommendedMove: "Promote differentiated offers before broad price changes.",
-        }
-      : null,
-  ].filter(
-    (
-      item
-    ): item is {
-      strategy: string;
-      confidence: string;
-      why: string;
-      implication: string;
-      recommendedMove: string;
-    } => item !== null
-  );
-
   const actionSuggestions = topMovers.slice(0, 4).map((mover) => ({
     productHandle: mover.productHandle,
     suggestion:
@@ -573,7 +284,7 @@ export async function getCompetitorOverview(shopDomain: string) {
         ? "Review hero SKU pricing"
         : mover.stockSignals > 0
         ? "Hold margin and monitor"
-        : "Wait and watch",
+        : "Wait and monitor",
     why:
       mover.promotionSignals >= 2
         ? "Promotions are clustering around this SKU."
@@ -596,105 +307,94 @@ export async function getCompetitorOverview(shopDomain: string) {
         : "Avoid unnecessary reactions and preserve pricing discipline.",
   }));
 
-  const baselineMoveFeed = buildBaselineMoveFeed({
-    domainsConfigured: domains,
-    seedProducts,
-  });
-  const resolvedMoveFeed = moveFeed.length > 0 ? moveFeed : baselineMoveFeed;
-  const resolvedActionSuggestions =
-    actionSuggestions.length > 0
-      ? actionSuggestions
-      : buildBaselineActionSuggestions({
-          domainsConfigured: domains,
-          seedProducts,
-        });
-  const resolvedStrategyDetections =
-    strategyDetections.length > 0
-      ? strategyDetections
-      : buildBaselineStrategyDetections({
-          domainsConfigured: domains,
-          hasSignals: recentRows.length > 0,
-        });
-  const resolvedTopMovers =
-    topMovers.length > 0
-      ? topMovers
-      : resolvedMoveFeed.slice(0, 3).map((item, index) => ({
-          productHandle:
-            seedProducts[index] ??
-            item.headline.toLowerCase().replace(/\s+/g, "-"),
-          priceDelta: 0,
-          promotionSignals: 0,
-          stockSignals: 0,
-        }));
+  const strategyDetections = buildStrategyDetections(recentRows);
+  const lastIngestedAt = allRows[0]?.collectedAt ?? null;
+  const freshnessHours = lastIngestedAt
+    ? Number(((Date.now() - new Date(lastIngestedAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
+    : null;
 
   const weeklyReport = {
     headline:
-      recentChanges > 0
-        ? `${recentChanges} competitor movement signals detected in the last 24 hours`
-        : domains > 0
-        ? "Competitor baseline watch is active"
+      recentRows.length > 0
+        ? `${recentChanges} competitor signals detected in the last 24 hours`
+        : store.competitorDomains.length > 0
+        ? "Competitor monitoring configured"
         : "Competitor monitoring needs setup",
     whyItMatters:
-      promoCount > 0
-        ? `${promoCount} active promotions and ${stockAlerts} stock alerts suggest pricing and inventory pressure is building.`
-        : domains > 0
-        ? "VedaSuite is establishing normal competitor posture so future shifts can be scored and explained quickly."
-        : "Configure domains to start collecting competitor price, promotion, stock, and launch signals.",
-    suggestedActions: resolvedActionSuggestions.map(
-      (item) => `${item.productHandle}: ${item.suggestion}`
-    ),
+      recentRows.length > 0
+        ? "Live competitor observations are available for pricing, promotion, stock, and visibility review."
+        : store.competitorDomains.length > 0
+        ? "Domains are configured, but VedaSuite is still waiting for the first successful ingestion run."
+        : "Add monitored domains to start collecting competitor pricing and promotion data.",
+    suggestedActions:
+      actionSuggestions.length > 0
+        ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+        : store.competitorDomains.length > 0
+        ? ["Run competitor ingestion.", "Review the move feed after the first live pull."]
+        : ["Add competitor domains.", "Run your first ingestion."],
     reportReadiness:
       recentRows.length > 0
-        ? "Weekly report can be generated"
-        : domains > 0
-        ? `Baseline monitoring ready after latest sync: ${latestSyncJob?.status ?? "NOT_RUN"}`
-        : "Awaiting competitor setup",
-    biggestMoves: resolvedMoveFeed.slice(0, 3).map((item) => ({
+        ? "Live competitor report available"
+        : latestSyncJob?.status === "SUCCEEDED"
+        ? "Waiting for competitor ingestion"
+        : "Awaiting first sync",
+    biggestMoves: moveFeed.slice(0, 3).map((item) => ({
       headline: item.headline,
       impactScore: item.impactScore,
       suggestedAction: item.suggestedAction,
     })),
     merchantBrief:
-      resolvedStrategyDetections[0]?.implication ??
-      "The competitor brief is now using baseline monitoring posture until stronger market movement appears.",
+      strategyDetections[0]?.implication ??
+      (recentRows.length > 0
+        ? "No dominant competitor strategy has been inferred yet from the current live data."
+        : "VedaSuite will build a weekly competitor brief after the first successful ingestion."),
     nextBestAction:
-      resolvedActionSuggestions[0]?.suggestion ??
-      "Add competitor domains and run ingestion to unlock the first action brief.",
+      actionSuggestions[0]?.suggestion ??
+      (store.competitorDomains.length > 0
+        ? "Run ingestion to populate the move feed."
+        : "Add competitor domains and start monitoring."),
   };
 
   return {
     recentPriceChanges: recentChanges,
     promotionAlerts: promoCount,
     stockMovementAlerts: stockAlerts,
-    trackedDomains: domains,
+    trackedDomains: store.competitorDomains.length,
     lastIngestedAt,
     freshnessHours,
-    promotionalHeat,
-    marketPressure,
-    adPressure,
-    launchAlerts: launchAlerts.map((row) => ({
-      productHandle: row.productHandle,
-      competitorName: row.competitorName,
-      source: row.source,
-      collectedAt: row.collectedAt,
-    })),
+    promotionalHeat: promoCount >= 15 ? "High" : promoCount >= 7 ? "Medium" : "Low",
+    marketPressure:
+      recentChanges >= 24 ? "High" : recentChanges >= 10 ? "Medium" : recentChanges > 0 ? "Low" : "No live market data",
+    adPressure:
+      sourceBreakdown.metaAds > 0
+        ? "Imported preview data present"
+        : "Not enabled",
+    launchAlerts: recentRows
+      .filter((row) => !!row.promotion && /launch|new/i.test(row.promotion))
+      .slice(0, 5)
+      .map((row) => ({
+        productHandle: row.productHandle,
+        competitorName: row.competitorName,
+        source: row.source,
+        collectedAt: row.collectedAt,
+      })),
     sourceBreakdown,
-    topMovers: resolvedTopMovers,
-    moveFeed: resolvedMoveFeed,
-    strategyDetections: resolvedStrategyDetections,
-    actionSuggestions: resolvedActionSuggestions,
+    topMovers,
+    moveFeed,
+    strategyDetections,
+    actionSuggestions,
     weeklyReport,
     coverageSummary: {
-      domainsConfigured: domains,
+      domainsConfigured: store.competitorDomains.length,
       channelsReady: [
         sourceBreakdown.website > 0 ? "Website monitoring" : null,
         sourceBreakdown.googleShopping > 0 ? "Google Shopping" : null,
-        sourceBreakdown.metaAds > 0 ? "Ad pressure watch" : null,
+        sourceBreakdown.metaAds > 0 ? "Imported ad preview" : null,
       ].filter((item): item is string => item !== null),
       monitoringPosture:
         recentRows.length > 0
           ? "Live monitoring"
-          : domains > 0
+          : store.competitorDomains.length > 0
           ? "Configured, awaiting ingestion"
           : "Needs setup",
     },
@@ -702,34 +402,16 @@ export async function getCompetitorOverview(shopDomain: string) {
 }
 
 export async function listTrackedCompetitorProducts(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-  });
-  if (!store) throw new Error("Store not found");
-
-  const rows = await prisma.competitorData.findMany({
-    where: { storeId: store.id },
-    orderBy: { collectedAt: "desc" },
-    take: 100,
-  });
-  return rows;
+  const store = await getStore(shopDomain);
+  return getCompetitorRows(store.id, 100);
 }
 
 export async function listCompetitorConnectors(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    include: {
-      competitorDomains: true,
-      competitorData: {
-        orderBy: { collectedAt: "desc" },
-        take: 300,
-      },
-    },
-  });
-  if (!store) throw new Error("Store not found");
-
+  const store = await getStore(shopDomain);
+  const rows = await getCompetitorRows(store.id, 300);
   const latestBySource = new Map<string, Date>();
-  for (const row of store.competitorData) {
+
+  for (const row of rows) {
     if (!latestBySource.has(row.source)) {
       latestBySource.set(row.source, row.collectedAt);
     }
@@ -739,32 +421,37 @@ export async function listCompetitorConnectors(shopDomain: string) {
     {
       id: "website",
       label: "Website crawler",
-      description: "Fetches live product pages from tracked competitor domains.",
+      description: "Fetches live competitor storefront observations from tracked domains.",
       connected: store.competitorDomains.length > 0,
       trackedTargets: store.competitorDomains.length,
-      lastIngestedAt: latestBySource.get("website_live") ?? latestBySource.get("website") ?? null,
+      lastIngestedAt:
+        latestBySource.get("website_live") ?? latestBySource.get("website") ?? null,
       readiness:
-        store.competitorDomains.length > 1 ? "Healthy" : store.competitorDomains.length === 1 ? "Limited" : "Needs setup",
+        latestBySource.get("website_live") || latestBySource.get("website")
+          ? "Healthy"
+          : store.competitorDomains.length > 0
+          ? "Waiting for first ingest"
+          : "Needs setup",
     },
     {
       id: "google_shopping",
       label: "Google Shopping feed",
-      description: "Builds market price snapshots for tracked catalog handles.",
-      connected: store.competitorDomains.length > 0,
-      trackedTargets: store.competitorDomains.length,
-      lastIngestedAt: latestBySource.get("google_shopping") ?? null,
-      readiness:
-        latestBySource.get("google_shopping") != null ? "Healthy" : "Pending first ingest",
+      description:
+        "Limited preview connector. Production VedaSuite does not yet run live Google Shopping ingestion.",
+      connected: false,
+      trackedTargets: 0,
+      lastIngestedAt: null,
+      readiness: "Limited preview only",
     },
     {
       id: "meta_ads",
       label: "Meta Ad Library",
-      description: "Captures promotion pressure and ad-activity signals.",
-      connected: store.competitorDomains.length > 0,
-      trackedTargets: store.competitorDomains.length,
-      lastIngestedAt: latestBySource.get("meta_ads") ?? null,
-      readiness:
-        latestBySource.get("meta_ads") != null ? "Healthy" : "Pending first ingest",
+      description:
+        "Limited preview connector. Production VedaSuite does not yet run live ad-library ingestion.",
+      connected: false,
+      trackedTargets: 0,
+      lastIngestedAt: null,
+      readiness: "Limited preview only",
     },
   ];
 }
@@ -773,45 +460,43 @@ export async function updateCompetitorDomains(
   shopDomain: string,
   domains: { domain: string; label?: string }[]
 ) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-  });
-  if (!store) throw new Error("Store not found");
+  const store = await getStore(shopDomain);
+  const normalizedDomains = domains
+    .map((domain) => ({
+      domain: domain.domain.trim().toLowerCase(),
+      label: domain.label?.trim() || null,
+    }))
+    .filter((domain) => domain.domain.length > 0);
 
   await prisma.competitorDomain.deleteMany({
     where: { storeId: store.id },
   });
 
-  await prisma.competitorDomain.createMany({
-    data: domains.map((d) => ({
-      storeId: store.id,
-      domain: d.domain,
-      label: d.label,
-    })),
-  });
+  if (normalizedDomains.length > 0) {
+    await prisma.competitorDomain.createMany({
+      data: normalizedDomains.map((domain) => ({
+        storeId: store.id,
+        domain: domain.domain,
+        label: domain.label ?? undefined,
+      })),
+    });
+  }
 
-  const updated = await prisma.competitorDomain.findMany({
+  return prisma.competitorDomain.findMany({
     where: { storeId: store.id },
   });
-
-  return updated;
 }
 
 export async function ingestCompetitorSnapshots(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    include: {
-      competitorDomains: true,
-    },
-  });
-  if (!store) throw new Error("Store not found");
-
+  const store = await getStore(shopDomain);
   const domains = store.competitorDomains;
+
   if (domains.length === 0) {
     return {
       ingested: 0,
       domains: 0,
       products: 0,
+      skipped: 0,
     };
   }
 
@@ -822,86 +507,49 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     take: 12,
   });
 
+  if (sourceProducts.length === 0) {
+    return {
+      ingested: 0,
+      domains: domains.length,
+      products: 0,
+      skipped: 0,
+    };
+  }
+
   let ingested = 0;
+  let skipped = 0;
+
   for (const domain of domains) {
-    for (const [index, product] of sourceProducts.entries()) {
-      const competitorName = normalizeCompetitorName(domain.domain, domain.label);
-      const promoIndex = (domain.domain.length + index) % 4;
-      const fallbackPromotion =
-        promoIndex === 0 ? "12% off" : promoIndex === 1 ? "Bundle offer" : null;
-      const fallbackStockStatus =
-        promoIndex === 2 ? "low_stock" : promoIndex === 3 ? "out_of_stock" : "in_stock";
-      const priceShift = ((domain.domain.length % 7) - 3) * 0.9;
-      const fallbackPrice = Number(
-        Math.max(1, product.currentPrice + priceShift).toFixed(2)
-      );
+    for (const product of sourceProducts) {
       const liveSnapshot = await fetchCompetitorSnapshot(
         domain.domain,
         product.productHandle,
-        fallbackPrice
+        product.currentPrice
       );
+
+      if (!liveSnapshot) {
+        skipped += 1;
+        continue;
+      }
 
       await prisma.competitorData.create({
         data: {
           storeId: store.id,
           productHandle: product.productHandle,
-          competitorName,
-          competitorUrl: `https://${domain.domain}/products/${product.productHandle}`,
-          source: liveSnapshot?.source ?? "website",
-          price: liveSnapshot?.price ?? fallbackPrice,
-          promotion: liveSnapshot?.promotion ?? fallbackPromotion,
-          stockStatus: liveSnapshot?.stockStatus ?? fallbackStockStatus,
+          competitorName: normalizeCompetitorName(domain.domain, domain.label),
+          competitorUrl:
+            liveSnapshot.competitorUrl ??
+            `https://${domain.domain}/products/${product.productHandle}`,
+          source: liveSnapshot.source ?? "website_live",
+          price: liveSnapshot.price ?? null,
+          promotion: liveSnapshot.promotion ?? null,
+          stockStatus: liveSnapshot.stockStatus ?? null,
+          adCopy: liveSnapshot.adCopy ?? null,
           insightsJson: JSON.stringify({
-            ingestionSource: "tracked-domain-workflow",
+            ingestionSource: "live_competitor_fetch",
             capturedAt: new Date().toISOString(),
-            priceDelta: Number(
-              ((liveSnapshot?.price ?? fallbackPrice) - product.currentPrice).toFixed(2)
-            ),
-            externalFetch: !!liveSnapshot,
+            externalFetch: true,
           }),
-        },
-      });
-      ingested += 1;
-
-      const googleSignal = buildGoogleShoppingSignal(
-        domain.domain,
-        product.productHandle,
-        fallbackPrice,
-        competitorName
-      );
-      await prisma.competitorData.create({
-        data: {
-          storeId: store.id,
-          productHandle: product.productHandle,
-          competitorName,
-          competitorUrl: googleSignal.competitorUrl,
-          source: googleSignal.source,
-          price: googleSignal.price,
-          promotion: googleSignal.promotion,
-          stockStatus: googleSignal.stockStatus,
-          insightsJson: googleSignal.insightsJson,
-        },
-      });
-      ingested += 1;
-
-      const metaSignal = buildMetaAdSignal(
-        domain.domain,
-        product.productHandle,
-        fallbackPrice,
-        competitorName
-      );
-      await prisma.competitorData.create({
-        data: {
-          storeId: store.id,
-          productHandle: product.productHandle,
-          competitorName,
-          competitorUrl: metaSignal.competitorUrl,
-          source: metaSignal.source,
-          price: metaSignal.price,
-          promotion: metaSignal.promotion,
-          stockStatus: metaSignal.stockStatus,
-          adCopy: metaSignal.adCopy,
-          insightsJson: metaSignal.insightsJson,
         },
       });
       ingested += 1;
@@ -912,177 +560,86 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     ingested,
     domains: domains.length,
     products: sourceProducts.length,
+    skipped,
   };
 }
 
 export async function getCompetitorResponseEngine(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-  });
-  if (!store) throw new Error("Store not found");
+  const overview = await getCompetitorOverview(shopDomain);
 
-  const [recentRows, seedPriceHistory, domainCount] = await Promise.all([
-    prisma.competitorData.findMany({
-      where: { storeId: store.id },
-      orderBy: { collectedAt: "desc" },
-      take: 250,
-    }),
-    prisma.priceHistory.findMany({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-      distinct: ["productHandle"],
-      take: 6,
-    }),
-    prisma.competitorDomain.count({
-      where: { storeId: store.id },
-    }),
-  ]);
-
-  const productMap = new Map<
-    string,
-    {
-      latestPrice: number | null;
-      earliestPrice: number | null;
-      promotions: number;
-      stockSignals: number;
-      sources: Set<string>;
-    }
-  >();
-
-  for (const row of [...recentRows].reverse()) {
-    const bucket = productMap.get(row.productHandle) ?? {
-      latestPrice: null,
-      earliestPrice: null,
-      promotions: 0,
-      stockSignals: 0,
-      sources: new Set<string>(),
-    };
-
-    if (bucket.earliestPrice == null && row.price != null) {
-      bucket.earliestPrice = row.price;
-    }
-    if (row.price != null) {
-      bucket.latestPrice = row.price;
-    }
-    if (row.promotion) {
-      bucket.promotions += 1;
-    }
-    if (row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock") {
-      bucket.stockSignals += 1;
-    }
-    bucket.sources.add(row.source);
-    productMap.set(row.productHandle, bucket);
-  }
-
-  const responsePlans = Array.from(productMap.entries())
-    .map(([productHandle, bucket]) => {
-      const priceDelta =
-        bucket.latestPrice != null && bucket.earliestPrice != null
-          ? Number((bucket.latestPrice - bucket.earliestPrice).toFixed(2))
-          : 0;
-
-      const pressureScore =
-        Math.abs(priceDelta) * 8 +
-        bucket.promotions * 10 +
-        bucket.stockSignals * 7 +
-        bucket.sources.size * 6;
-
-      const recommendedPlay =
-        bucket.promotions >= 3
-          ? "bundle_defense"
-          : Math.abs(priceDelta) >= 2 || bucket.promotions >= 2
-          ? "selective_match"
-          : "hold_price";
-
-      const rationale =
-        recommendedPlay === "bundle_defense"
-          ? "Promotional clustering is high. Protect margin with bundles or value-adds instead of broad discounting."
-          : recommendedPlay === "selective_match"
-          ? "Signals are concentrated on a subset of products. Match only high-exposure SKUs."
-          : "Signals remain manageable. Hold price and monitor before reacting.";
-
-      const confidence = Math.max(
-        48,
-        Math.min(
-          96,
-          Math.round(
-            pressureScore * 1.1 +
-              bucket.sources.size * 4 +
-              bucket.promotions * 2
-          )
+  const responsePlans = (overview.topMovers ?? [])
+    .map((mover) => {
+      const pressureScore = Math.min(
+        100,
+        Math.round(
+          Math.abs(mover.priceDelta) * 18 +
+            mover.promotionSignals * 16 +
+            mover.stockSignals * 12
         )
       );
 
-      const reasons = [
-        Math.abs(priceDelta) >= 2
-          ? `Competitor pricing moved by $${Math.abs(priceDelta).toFixed(2)}.`
-          : "Price movement remains moderate.",
-        bucket.promotions > 0
-          ? `${bucket.promotions} promotion signals were detected.`
-          : "No meaningful promotional clustering detected.",
-        bucket.stockSignals > 0
-          ? `${bucket.stockSignals} stock-pressure signals were captured.`
-          : "Stock posture is not forcing an immediate response.",
-      ];
-
       return {
-        productHandle,
-        pressureScore: Math.round(pressureScore),
-        recommendedPlay,
-        rationale,
-        priceDelta,
-        promotionSignals: bucket.promotions,
-        stockSignals: bucket.stockSignals,
-        sourceCount: bucket.sources.size,
-        confidence,
-        reasons,
+        productHandle: mover.productHandle,
+        pressureScore,
+        recommendedPlay:
+          mover.promotionSignals >= 2
+            ? "bundle_or_selective_match"
+            : mover.priceDelta <= -2
+            ? "review_price"
+            : mover.stockSignals > 0
+            ? "hold_and_monitor"
+            : "wait_and_monitor",
+        rationale:
+          mover.promotionSignals >= 2
+            ? "Promotion clustering suggests a selective response is safer than broad discounting."
+            : mover.priceDelta <= -2
+            ? "Live competitor price movement is large enough to review the SKU."
+            : mover.stockSignals > 0
+            ? "Competitor stock pressure may ease without a reactive price move."
+            : "Current live signals do not justify an immediate reaction.",
+        priceDelta: mover.priceDelta,
+        promotionSignals: mover.promotionSignals,
+        stockSignals: mover.stockSignals,
+        sourceCount:
+          Number(mover.promotionSignals > 0) +
+          Number(mover.stockSignals > 0) +
+          Number(mover.priceDelta !== 0),
+        confidence: Math.max(35, Math.min(80, pressureScore)),
+        reasons: [
+          mover.priceDelta !== 0
+            ? `Observed price delta: ${mover.priceDelta >= 0 ? "+" : "-"}$${Math.abs(mover.priceDelta).toFixed(2)}`
+            : "No strong price shift yet.",
+          mover.promotionSignals > 0
+            ? `${mover.promotionSignals} live promotion signals recorded.`
+            : "No live promotion cluster recorded.",
+          mover.stockSignals > 0
+            ? `${mover.stockSignals} stock-pressure signals recorded.`
+            : "No live stock-pressure signal recorded.",
+        ],
         automationPosture:
-          recommendedPlay === "hold_price"
-            ? "Advisory only"
-            : recommendedPlay === "selective_match"
-            ? "Merchant approval required"
-            : "Bundle-first automation candidate",
+          pressureScore >= 70 ? "Merchant review recommended" : "Advisory mode",
         executionHint:
-          recommendedPlay === "bundle_defense"
-            ? "Package with accessory or add-on offers before matching price."
-            : recommendedPlay === "selective_match"
-            ? "Respond only on exposed hero SKUs and keep margin guardrails intact."
-            : "Keep the current price and monitor for a second wave of signals.",
+          pressureScore >= 70
+            ? "Prioritize this SKU in pricing review this week."
+            : "Keep monitoring this SKU until stronger live signals appear.",
       };
     })
-    .sort((a, b) => b.pressureScore - a.pressureScore)
-    .slice(0, 6);
-
-  const resolvedResponsePlans =
-    responsePlans.length > 0
-      ? responsePlans
-      : buildBaselineResponsePlans({
-          seedProducts: seedPriceHistory.map((item) => item.productHandle),
-          domainsConfigured: domainCount,
-        });
-
-  const summary = {
-    responseMode:
-      resolvedResponsePlans[0]?.recommendedPlay === "bundle_defense"
-        ? "Defend margin"
-        : resolvedResponsePlans[0]?.recommendedPlay === "selective_match"
-        ? "Respond selectively"
-        : resolvedResponsePlans[0]?.recommendedPlay === "configure_tracking"
-        ? "Configure coverage"
-        : "Hold and monitor",
-    topPressureCount: resolvedResponsePlans.filter((plan) => plan.pressureScore >= 35).length,
-    automationReadiness: resolvedResponsePlans.some(
-      (plan) => plan.recommendedPlay !== "hold_price" && plan.confidence >= 70
-    )
-      ? "Ready for approval-led response automation"
-      : domainCount === 0
-      ? "Configure competitor domains to unlock live response automation."
-      : "Advisory mode",
-  };
+    .slice(0, 5);
 
   return {
-    summary,
-    responsePlans: resolvedResponsePlans,
+    summary: {
+      responseMode:
+        responsePlans.length === 0
+          ? "Awaiting competitor data"
+          : responsePlans.some((plan) => plan.pressureScore >= 70)
+          ? "Respond selectively"
+          : "Hold and monitor",
+      topPressureCount: responsePlans.filter((plan) => plan.pressureScore >= 50).length,
+      automationReadiness:
+        responsePlans.length === 0
+          ? "No live competitor response plans are available yet."
+          : "Competitor response suggestions are ready for merchant review.",
+    },
+    responsePlans,
   };
 }
-
