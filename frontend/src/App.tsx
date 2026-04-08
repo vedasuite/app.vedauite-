@@ -5,7 +5,7 @@ import { DashboardPage } from "./modules/Dashboard/DashboardPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
 import { ReportsPage } from "./modules/Reports/ReportsPage";
 import { SettingsPage } from "./modules/Settings/SettingsPage";
-import { SubscriptionPage } from "./modules/SubscriptionPlans/SubscriptionPage";
+import { PricingPage } from "./modules/SubscriptionPlans/PricingPage";
 import { PricingProfitPage } from "./modules/PricingProfit/PricingProfitPage";
 import { TrustAbusePage } from "./modules/TrustAbuse/TrustAbusePage";
 
@@ -27,7 +27,7 @@ export default function App() {
         <Route path="/pricing-profit" element={<PricingProfitPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/subscription" element={<SubscriptionPage />} />
+        <Route path="/subscription" element={<PricingPage />} />
         <Route path="/fraud" element={<Navigate to="/trust-abuse" replace />} />
         <Route path="/credit-score" element={<Navigate to="/trust-abuse" replace />} />
         <Route path="/pricing" element={<Navigate to="/pricing-profit" replace />} />

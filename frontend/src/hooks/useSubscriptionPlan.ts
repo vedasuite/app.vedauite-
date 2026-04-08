@@ -10,6 +10,7 @@ import type {
   SubscriptionInfo,
   SubscriptionLifecycleStatus,
 } from "../lib/billingCapabilities";
+import { normalizeSubscriptionInfo } from "../lib/subscriptionState";
 
 export type {
   BillingPlanName,
@@ -29,8 +30,13 @@ export function useSubscriptionPlan() {
     return {
       subscription: null,
       loading: true,
-      refresh: async () => undefined,
-      applyOptimistic: (_subscription: SubscriptionInfo) => undefined,
+      refresh: async () => normalizeSubscriptionInfo(null),
+      billingFlowState: "IDLE" as const,
+      billingMessage: null,
+      billingError: null,
+      startBillingRedirect: () => undefined,
+      dismissBillingMessage: () => undefined,
+      clearBillingError: () => undefined,
     };
   }
 

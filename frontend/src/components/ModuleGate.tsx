@@ -49,8 +49,8 @@ export function ModuleGate({
         <Layout.Section>
           <Banner title={`Upgrade required: ${requiredPlan}`} tone="info">
             <p>
-              This module is part of a higher VedaSuite plan. Upgrade to unlock
-              the full experience for your store.
+              Upgrade to {requiredPlan} to unlock this module and its
+              backend-confirmed features for your store.
             </p>
           </Banner>
         </Layout.Section>

@@ -1,8 +1,7 @@
-import { Frame, Navigation, Toast } from "@shopify/polaris";
+import { Card, Frame, Navigation, Spinner, Text, Toast } from "@shopify/polaris";
 import { ReactNode, useCallback, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VedaLogo } from "../brand/VedaLogo";
-import { useBillingFlash } from "../hooks/useBillingFlash";
 import { useEmbeddedNavigation } from "../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
 import "./app-frame.css";
@@ -24,9 +23,14 @@ function starterModuleLabel(value: string | null | undefined) {
 export function AppFrame({ children }: Props) {
   const location = useLocation();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const { subscription } = useSubscriptionPlan();
-  const { message: billingMessage, dismiss: dismissBillingMessage } =
-    useBillingFlash();
+  const {
+    subscription,
+    billingFlowState,
+    billingMessage,
+    billingError,
+    dismissBillingMessage,
+    clearBillingError,
+  } = useSubscriptionPlan();
   const [toast, setToast] = useState<string | null>(null);
 
   const activePlan = subscription?.planName ?? "NONE";
@@ -111,11 +115,71 @@ export function AppFrame({ children }: Props) {
   return (
     <Frame navigation={navigation} showMobileNavigation={false}>
       <div className="vs-app-frame">
-        <div className="vs-content">{children}</div>
+        <div className="vs-content">
+          {billingFlowState === "PENDING_CONFIRMATION" ? (
+            <Card>
+              <div
+                style={{
+                  minHeight: "55vh",
+                  display: "grid",
+                  placeItems: "center",
+                  textAlign: "center",
+                  padding: "2rem",
+                }}
+              >
+                <div>
+                  <Spinner accessibilityLabel="Confirming subscription" size="large" />
+                  <div style={{ marginTop: "1rem" }}>
+                    <Text as="h2" variant="headingLg">
+                      Confirming your subscription...
+                    </Text>
+                  </div>
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <Text as="p" tone="subdued">
+                      VedaSuite is waiting for backend confirmation from Shopify
+                      before showing the updated plan.
+                    </Text>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ) : billingFlowState === "BILLING_REDIRECT" ? (
+            <Card>
+              <div
+                style={{
+                  minHeight: "55vh",
+                  display: "grid",
+                  placeItems: "center",
+                  textAlign: "center",
+                  padding: "2rem",
+                }}
+              >
+                <div>
+                  <Spinner accessibilityLabel="Redirecting to Shopify billing" size="large" />
+                  <div style={{ marginTop: "1rem" }}>
+                    <Text as="h2" variant="headingLg">
+                      Redirecting to Shopify billing...
+                    </Text>
+                  </div>
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <Text as="p" tone="subdued">
+                      Approve the selected plan in Shopify to continue.
+                    </Text>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            children
+          )}
+        </div>
       </div>
       {toast ? <Toast content={toast} onDismiss={dismissToast} /> : null}
       {!toast && billingMessage ? (
         <Toast content={billingMessage} onDismiss={dismissBillingMessage} />
+      ) : null}
+      {!toast && !billingMessage && billingError ? (
+        <Toast content={billingError} onDismiss={clearBillingError} error />
       ) : null}
     </Frame>
   );
