@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
 import { authRouter } from "./authRoutes";
-import { billingRouter } from "./billingRoutes";
+import { billingApiRouter, billingRouter } from "./billingRoutes";
 import { dashboardRouter } from "./dashboardRoutes";
 import { fraudRouter } from "./fraudRoutes";
 import { launchRouter } from "./launchRoutes";
@@ -26,6 +26,7 @@ router.use(launchRouter);
 
 router.use("/api", verifyShopifySessionToken);
 
+router.use("/api/billing", billingApiRouter);
 router.use("/api/subscription", subscriptionRouter);
 router.use("/api/dashboard", dashboardRouter);
 router.use("/api/trust-abuse", trustAbuseRouter);

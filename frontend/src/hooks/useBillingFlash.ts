@@ -4,8 +4,10 @@ import { useLocation } from "react-router-dom";
 const STORAGE_KEY = "vedasuite:billing-flash";
 
 type BillingFlash = {
-  plan: string;
+  plan?: string | null;
   starterModule?: string | null;
+  message?: string | null;
+  result?: string | null;
 };
 
 export function useBillingFlash() {
@@ -14,12 +16,13 @@ export function useBillingFlash() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const billing = params.get("billing");
+    const billingResult = params.get("billingResult");
     const plan = params.get("plan");
     const starterModule = params.get("starterModule");
+    const billingMessage = params.get("billingMessage");
 
-    if (billing === "activated" && plan) {
-      const nextFlash = { plan, starterModule };
+    if (billingResult && (plan || billingMessage)) {
+      const nextFlash = { plan, starterModule, message: billingMessage, result: billingResult };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextFlash));
       setFlash(nextFlash);
       return;
@@ -42,12 +45,28 @@ export function useBillingFlash() {
   const message = useMemo(() => {
     if (!flash) return null;
 
+    if (flash.message) {
+      return flash.message;
+    }
+
     const starterLabel =
       flash.starterModule === "trustAbuse"
         ? "Trust & Abuse Intelligence"
         : flash.starterModule === "competitor"
         ? "Competitor Intelligence"
         : flash.starterModule;
+
+    if (flash.result === "failed") {
+      return flash.plan
+        ? `Billing update failed for ${flash.plan}.`
+        : "Billing update failed.";
+    }
+
+    if (flash.result === "noop") {
+      return flash.plan
+        ? `${flash.plan} is already the active plan.`
+        : "No billing change was required.";
+    }
 
     return flash.starterModule
       ? `Billing activated: ${flash.plan} plan is live with ${starterLabel} as the Starter module.`

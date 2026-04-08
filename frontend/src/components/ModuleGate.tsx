@@ -34,7 +34,7 @@ export function ModuleGate({
     return <>{children}</>;
   }
 
-  const currentPlan = subscription?.planName ?? "TRIAL";
+  const currentPlan = subscription?.planName ?? "NONE";
   const currentStarterModule = subscription?.starterModule;
   const starterLabel =
     currentStarterModule === "trustAbuse"

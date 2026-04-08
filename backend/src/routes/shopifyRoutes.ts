@@ -8,6 +8,7 @@ import {
   ShopifyConnectionError,
   type ShopifyConnectionCode,
 } from "../services/shopifyConnectionService";
+import { getBillingManagementState } from "../services/billingManagementService";
 import {
   getCurrentSubscription,
   resolveBillingState,
@@ -95,7 +96,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
 
   await ensureInstallationMetadata(shop);
 
-  const [health, store, latestSyncJob, subscription, operational, billingState] = await Promise.all([
+  const [health, store, latestSyncJob, subscription, operational, billingState, billingManagement] = await Promise.all([
     getConnectionHealth(shop, {
       probeApi: true,
       host: context.host,
@@ -129,6 +130,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     getCurrentSubscription(shop).catch(() => null),
     getStoreOperationalSnapshot(shop).catch(() => null),
     resolveBillingState(shop).catch(() => null),
+    getBillingManagementState(shop).catch(() => null),
   ]);
 
   let webhookStatus: Awaited<ReturnType<typeof getSyncWebhookStatus>> | null = null;
@@ -212,6 +214,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
           trialEndsAt: subscription.trialEndsAt,
           planSource: billingState?.planSource ?? null,
           mismatchWarnings: billingState?.mismatchWarnings ?? [],
+          pendingIntent: billingManagement?.pendingIntent ?? null,
         }
       : null,
   });
@@ -309,9 +312,10 @@ async function handleBillingHealth(req: Request, res: Response) {
     });
   }
 
-  const [subscription, billingState] = await Promise.all([
+  const [subscription, billingState, billingManagement] = await Promise.all([
     getCurrentSubscription(shop),
     resolveBillingState(shop),
+    getBillingManagementState(shop),
   ]);
 
   return res.json({
@@ -326,6 +330,7 @@ async function handleBillingHealth(req: Request, res: Response) {
     planSource: billingState.planSource,
     effectivePlanUsedByFeatureGating: subscription.planName,
     effectiveBillingStatus: billingState.normalizedBillingStatus,
+    pendingIntent: billingManagement.pendingIntent,
     mismatchWarnings: billingState.mismatchWarnings,
   });
 }

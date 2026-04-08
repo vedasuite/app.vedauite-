@@ -181,6 +181,10 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     __dirname,
     "../dist/services/shopifyAdminService.js"
   );
+  const billingManagementServicePath = path.resolve(
+    __dirname,
+    "../dist/services/billingManagementService.js"
+  );
   const subscriptionServicePath = path.resolve(
     __dirname,
     "../dist/services/subscriptionService.js"
@@ -192,6 +196,7 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
   resetModule(operationalServicePath);
   resetModule(syncJobServicePath);
   resetModule(adminServicePath);
+  resetModule(billingManagementServicePath);
   resetModule(subscriptionServicePath);
 
   require(prismaPath).prisma.store.findUnique = async () => ({
@@ -292,6 +297,39 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     lastBillingResolutionSource: "webhook_app_subscriptions_update",
     mismatchWarnings: [],
   });
+  require(billingManagementServicePath).getBillingManagementState = async () => ({
+    subscription: {
+      planName: "PRO",
+      status: "active_paid",
+      billingStatus: "ACTIVE",
+      active: true,
+      starterModule: null,
+      endsAt: null,
+      trialEndsAt: null,
+    },
+    billing: {
+      planName: "PRO",
+      normalizedBillingStatus: "ACTIVE",
+      active: true,
+      status: "active_paid",
+      starterModule: null,
+      endsAt: null,
+      subscriptionId: "subscription-1",
+      shopifyChargeId: "gid://shopify/AppSubscription/123",
+      planSource: "database",
+      dbPlanName: "PRO",
+      dbBillingStatus: "ACTIVE",
+      mismatchWarnings: [],
+    },
+    pendingIntent: null,
+    availableActions: {
+      canManagePlans: true,
+      canCancelSubscription: true,
+      canChangeStarterModule: false,
+      awaitingApproval: false,
+    },
+    plans: [],
+  });
 
   resetModule(routesPath);
   const { shopifyRouter } = require(routesPath);
@@ -321,13 +359,36 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
 });
 
 test("billing health route uses normalized billing resolver output", async () => {
+  const billingManagementServicePath = path.resolve(
+    __dirname,
+    "../dist/services/billingManagementService.js"
+  );
   const subscriptionServicePath = path.resolve(
     __dirname,
     "../dist/services/subscriptionService.js"
   );
   const routesPath = path.resolve(__dirname, "../dist/routes/shopifyRoutes.js");
 
+  resetModule(billingManagementServicePath);
   resetModule(subscriptionServicePath);
+  require(billingManagementServicePath).getBillingManagementState = async () => ({
+    pendingIntent: {
+      id: "intent-1",
+      requestedPlanName: "PRO",
+      requestedStarterModule: null,
+      actionType: "upgrade",
+      status: "PENDING_APPROVAL",
+      confirmationUrl: "https://shopify.test/confirm",
+      shopifyChargeId: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: "2026-04-08T05:01:00.000Z",
+      updatedAt: "2026-04-08T05:01:00.000Z",
+      confirmedAt: null,
+      cancelledAt: null,
+      expiresAt: "2026-04-08T06:01:00.000Z",
+    },
+  });
   const subscriptionService = require(subscriptionServicePath);
   subscriptionService.getCurrentSubscription = async () => ({
     planName: "PRO",
@@ -374,6 +435,7 @@ test("billing health route uses normalized billing resolver output", async () =>
     assert.match(response.body, /"lastBillingWebhookProcessedAt":"2026-04-08T05:05:00.000Z"/);
     assert.match(response.body, /"billingResolutionSource":"webhook_app_subscriptions_update"/);
     assert.match(response.body, /"planSource":"shopify_reconciled"/);
+    assert.match(response.body, /"pendingIntent"/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -430,36 +492,263 @@ test("connection health exposes reconnect-required state for missing offline tok
   }
 });
 
-test("billing activation callback persists the active Shopify plan and redirects back to the app", async () => {
-  const prismaPath = path.resolve(__dirname, "../dist/db/prismaClient.js");
-  const adminServicePath = path.resolve(
+test("billing state route returns current management state", async () => {
+  const billingManagementServicePath = path.resolve(
     __dirname,
-    "../dist/services/shopifyAdminService.js"
+    "../dist/services/billingManagementService.js"
   );
   const routesPath = path.resolve(__dirname, "../dist/routes/billingRoutes.js");
 
-  resetModule(prismaPath);
-  resetModule(adminServicePath);
+  resetModule(billingManagementServicePath);
+  require(billingManagementServicePath).getBillingManagementState = async () => ({
+    subscription: {
+      planName: "GROWTH",
+      status: "active_paid",
+      billingStatus: "ACTIVE",
+      active: true,
+      starterModule: null,
+      endsAt: "2026-05-06T00:00:00.000Z",
+      trialEndsAt: null,
+    },
+    billing: {
+      planName: "GROWTH",
+      normalizedBillingStatus: "ACTIVE",
+      active: true,
+      status: "active_paid",
+      starterModule: null,
+      endsAt: "2026-05-06T00:00:00.000Z",
+      subscriptionId: "subscription-1",
+      shopifyChargeId: "gid://shopify/AppSubscription/123",
+      planSource: "database",
+      dbPlanName: "GROWTH",
+      dbBillingStatus: "ACTIVE",
+      mismatchWarnings: [],
+    },
+    pendingIntent: null,
+    availableActions: {
+      canManagePlans: true,
+      canCancelSubscription: true,
+      canChangeStarterModule: false,
+      awaitingApproval: false,
+    },
+    plans: [],
+  });
 
-  const prismaModule = require(prismaPath);
-  prismaModule.prisma.store.findUnique = async () => ({
-    id: "store-1",
-    shop: "test-shop.myshopify.com",
+  resetModule(routesPath);
+  const { billingApiRouter } = require(routesPath);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
   });
-  prismaModule.prisma.subscriptionPlan.findFirst = async () => ({
-    id: "plan-1",
-    name: "PRO",
-    price: 99,
-    trialDays: 3,
-  });
-  prismaModule.prisma.storeSubscription.upsert = async () => ({
-    id: "subscription-1",
+  app.use("/billing", billingApiRouter);
+  const server = app.listen(0);
+
+  try {
+    const response = await request(server, "/billing/state");
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /"planName":"GROWTH"/);
+    assert.match(response.body, /"canCancelSubscription":true/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("change-plan route returns Shopify confirmation URL and pending intent", async () => {
+  const billingManagementServicePath = path.resolve(
+    __dirname,
+    "../dist/services/billingManagementService.js"
+  );
+  const routesPath = path.resolve(__dirname, "../dist/routes/billingRoutes.js");
+
+  resetModule(billingManagementServicePath);
+  require(billingManagementServicePath).requestBillingPlanChange = async () => ({
+    outcome: "REDIRECT_REQUIRED",
+    confirmationUrl: "https://shopify.test/confirm",
+    pendingIntent: {
+      id: "intent-1",
+      requestedPlanName: "PRO",
+      requestedStarterModule: null,
+      actionType: "upgrade",
+      status: "PENDING_APPROVAL",
+      confirmationUrl: "https://shopify.test/confirm",
+      shopifyChargeId: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: "2026-04-08T05:01:00.000Z",
+      updatedAt: "2026-04-08T05:01:00.000Z",
+      confirmedAt: null,
+      cancelledAt: null,
+      expiresAt: "2026-04-08T06:01:00.000Z",
+    },
+    state: {
+      subscription: {
+        planName: "TRIAL",
+        status: "trial_active",
+        billingStatus: null,
+        active: true,
+        starterModule: null,
+        endsAt: null,
+        trialEndsAt: "2026-04-10T00:00:00.000Z",
+      },
+      billing: {
+        planName: "TRIAL",
+        normalizedBillingStatus: null,
+        active: true,
+        status: "trial_active",
+        starterModule: null,
+        endsAt: "2026-04-10T00:00:00.000Z",
+        subscriptionId: null,
+        shopifyChargeId: null,
+        planSource: "trial",
+        dbPlanName: "NONE",
+        dbBillingStatus: null,
+        mismatchWarnings: [],
+      },
+      pendingIntent: null,
+      availableActions: {
+        canManagePlans: true,
+        canCancelSubscription: false,
+        canChangeStarterModule: false,
+        awaitingApproval: true,
+      },
+      plans: [],
+    },
   });
 
-  require(adminServicePath).getActiveAppSubscription = async () => ({
-    id: "gid://shopify/AppSubscription/123",
-    status: "ACTIVE",
-    currentPeriodEnd: "2026-05-06T00:00:00.000Z",
+  resetModule(routesPath);
+  const { billingApiRouter } = require(routesPath);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.use("/billing", billingApiRouter);
+  const server = app.listen(0);
+
+  try {
+    const response = await request(server, "/billing/change-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "PRO", returnPath: "/subscription" }),
+    });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /"outcome":"REDIRECT_REQUIRED"/);
+    assert.match(response.body, /"confirmationUrl":"https:\/\/shopify.test\/confirm"/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("cancel-plan route returns refreshed billing state", async () => {
+  const billingManagementServicePath = path.resolve(
+    __dirname,
+    "../dist/services/billingManagementService.js"
+  );
+  const routesPath = path.resolve(__dirname, "../dist/routes/billingRoutes.js");
+
+  resetModule(billingManagementServicePath);
+  require(billingManagementServicePath).cancelBillingPlan = async () => ({
+    subscription: {
+      planName: "NONE",
+      status: "inactive",
+      billingStatus: "CANCELLED",
+      active: false,
+      starterModule: null,
+      endsAt: null,
+      trialEndsAt: null,
+    },
+    billing: {
+      planName: "NONE",
+      normalizedBillingStatus: "CANCELLED",
+      active: false,
+      status: "inactive",
+      starterModule: null,
+      endsAt: null,
+      subscriptionId: "subscription-1",
+      shopifyChargeId: "gid://shopify/AppSubscription/123",
+      planSource: "none",
+      dbPlanName: "PRO",
+      dbBillingStatus: "CANCELLED",
+      mismatchWarnings: [],
+    },
+    pendingIntent: null,
+    availableActions: {
+      canManagePlans: true,
+      canCancelSubscription: false,
+      canChangeStarterModule: false,
+      awaitingApproval: false,
+    },
+    plans: [],
+  });
+
+  resetModule(routesPath);
+  const { billingApiRouter } = require(routesPath);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.use("/billing", billingApiRouter);
+  const server = app.listen(0);
+
+  try {
+    const response = await request(server, "/billing/cancel-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    });
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /"planName":"NONE"/);
+    assert.match(response.body, /"billingStatus":"CANCELLED"/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("billing activation callback confirms the billing intent and redirects back to the app", async () => {
+  const billingManagementServicePath = path.resolve(
+    __dirname,
+    "../dist/services/billingManagementService.js"
+  );
+  const routesPath = path.resolve(__dirname, "../dist/routes/billingRoutes.js");
+
+  resetModule(billingManagementServicePath);
+  require(billingManagementServicePath).confirmBillingApprovalReturn = async () => ({
+    subscription: {
+      planName: "PRO",
+      status: "active_paid",
+      billingStatus: "ACTIVE",
+      active: true,
+      starterModule: null,
+      endsAt: "2026-05-06T00:00:00.000Z",
+      trialEndsAt: null,
+    },
+    billing: {
+      planName: "PRO",
+      normalizedBillingStatus: "ACTIVE",
+      active: true,
+      status: "active_paid",
+      starterModule: null,
+      endsAt: "2026-05-06T00:00:00.000Z",
+      subscriptionId: "subscription-1",
+      shopifyChargeId: "gid://shopify/AppSubscription/123",
+      planSource: "shopify_reconciled",
+      dbPlanName: "PRO",
+      dbBillingStatus: "ACTIVE",
+      mismatchWarnings: [],
+    },
+    pendingIntent: null,
+    availableActions: {
+      canManagePlans: true,
+      canCancelSubscription: true,
+      canChangeStarterModule: false,
+      awaitingApproval: false,
+    },
+    plans: [],
   });
 
   resetModule(routesPath);
@@ -471,10 +760,11 @@ test("billing activation callback persists the active Shopify plan and redirects
   try {
     const response = await request(
       server,
-      "/billing/activate?shop=test-shop.myshopify.com&plan=PRO&host=embedded-host"
+      "/billing/activate?shop=test-shop.myshopify.com&intentId=intent-1&host=embedded-host"
     );
     assert.equal(response.statusCode, 200);
-    assert.match(response.body, /billing=activated/);
+    assert.match(response.body, /billingResult=confirmed/);
+    assert.match(response.body, /intentId=intent-1/);
     assert.match(response.body, /plan=PRO/);
   } finally {
     await new Promise((resolve) => server.close(resolve));

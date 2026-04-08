@@ -29,13 +29,13 @@ export function AppFrame({ children }: Props) {
     useBillingFlash();
   const [toast, setToast] = useState<string | null>(null);
 
-  const activePlan = subscription?.planName ?? "TRIAL";
+  const activePlan = subscription?.planName ?? "NONE";
   const moduleStatus = {
-    trustAbuse: subscription?.enabledModules?.trustAbuse ?? true,
-    competitor: subscription?.enabledModules?.competitor ?? true,
+    trustAbuse: subscription?.enabledModules?.trustAbuse ?? false,
+    competitor: subscription?.enabledModules?.competitor ?? false,
     pricingProfit: subscription?.enabledModules?.pricingProfit ?? false,
-    reports: subscription?.enabledModules?.reports ?? true,
-    settings: subscription?.enabledModules?.settings ?? true,
+    reports: subscription?.enabledModules?.reports ?? false,
+    settings: subscription?.enabledModules?.settings ?? false,
   };
 
   const dismissToast = useCallback(() => setToast(null), []);
@@ -69,6 +69,7 @@ export function AppFrame({ children }: Props) {
       createNavItem("/reports", "Reports", {
         badge: moduleStatus.reports ? undefined : "Upgrade",
       }),
+      createNavItem("/subscription", "Billing"),
       createNavItem("/settings", "Settings"),
     ],
     [

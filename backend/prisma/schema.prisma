@@ -49,6 +49,7 @@ model Store {
   priceHistory      PriceHistory[]
   profitData        ProfitOptimizationData[]
   billingAuditLogs  BillingAuditLog[]
+  billingPlanIntents BillingPlanIntent[]
   timelineEvents    TimelineEvent[]
   syncJobs          SyncJob[]
 
@@ -140,6 +141,29 @@ model BillingAuditLog {
   billingStatus       String?
   metadataJson        String?
   createdAt           DateTime           @default(now())
+}
+
+model BillingPlanIntent {
+  id                   String   @id @default(cuid())
+  store                Store    @relation(fields: [storeId], references: [id])
+  storeId              String
+  requestedPlanName    String
+  requestedStarterModule String?
+  actionType           String
+  status               String   @default("CREATING")
+  confirmationUrl      String?
+  shopifyChargeId      String?
+  host                 String?
+  returnPath           String?
+  errorCode            String?
+  errorMessage         String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  confirmedAt          DateTime?
+  cancelledAt          DateTime?
+  expiresAt            DateTime?
+
+  @@index([storeId, status, createdAt])
 }
 
 model Customer {

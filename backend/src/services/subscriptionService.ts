@@ -96,6 +96,10 @@ function deriveLifecycleStatus(input: {
     return input.billingStatus === "CANCELLED" ? "cancelled" : "inactive";
   }
 
+  if (input.billingStatus === "CANCELLED") {
+    return "cancelled";
+  }
+
   if (input.active) {
     return "active_paid";
   }
@@ -502,6 +506,16 @@ export async function cancelSubscription(shopDomain: string) {
   if (!store) throw new Error("Store not found");
   if (!store.subscription) throw new Error("No active subscription");
 
+  const activeSubscriptionBeforeCancel =
+    store.subscription.shopifyChargeId
+      ? await getActiveAppSubscription(shopDomain).catch(() => null)
+      : null;
+  const currentPeriodEnd = activeSubscriptionBeforeCancel?.currentPeriodEnd
+    ? new Date(activeSubscriptionBeforeCancel.currentPeriodEnd)
+    : store.subscription.endsAt;
+  const accessRemainsActive =
+    !!currentPeriodEnd && currentPeriodEnd.getTime() > Date.now();
+
   if (store.subscription.shopifyChargeId) {
     await cancelAppSubscription(shopDomain, store.subscription.shopifyChargeId, false);
   }
@@ -509,13 +523,13 @@ export async function cancelSubscription(shopDomain: string) {
   const cancelled = await prisma.storeSubscription.update({
     where: { id: store.subscription.id },
     data: {
-      active: false,
+      active: accessRemainsActive,
       billingStatus: "CANCELLED",
       cancelledAt: new Date(),
       lastBillingSyncAt: new Date(),
       lastBillingResolutionSource: "cancel_api",
       lastBillingSubscriptionName: store.subscription.plan.name,
-      endsAt: store.subscription.endsAt ?? new Date(),
+      endsAt: currentPeriodEnd ?? new Date(),
     } as any,
     include: {
       plan: true,
@@ -531,6 +545,10 @@ export async function cancelSubscription(shopDomain: string) {
     previousStarterModule: store.subscription.starterModule,
     nextStarterModule: null,
     billingStatus: "CANCELLED",
+    metadata: {
+      accessRemainsActive,
+      currentPeriodEnd: currentPeriodEnd?.toISOString() ?? null,
+    },
   });
 
   return getCurrentSubscription(shopDomain);
@@ -681,10 +699,15 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       return null;
     }
 
+    const accessRemainsActive =
+      normalizedStatus === "CANCELLED" &&
+      !!currentPeriodEnd &&
+      currentPeriodEnd.getTime() > Date.now();
+
     const updated = await prisma.storeSubscription.update({
       where: { id: store.subscription.id },
       data: {
-        active: false,
+        active: accessRemainsActive,
         billingStatus: normalizedStatus,
         cancelledAt: new Date(),
         lastBillingSyncAt: new Date(),
@@ -706,6 +729,8 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       billingStatus: normalizedStatus,
       metadata: {
         shopifyChargeId: input.shopifyChargeId ?? null,
+        accessRemainsActive,
+        currentPeriodEnd: currentPeriodEnd?.toISOString() ?? null,
       },
     });
 

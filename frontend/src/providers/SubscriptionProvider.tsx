@@ -9,12 +9,7 @@ import { embeddedShopRequest } from "../lib/embeddedShopRequest";
 import {
   fallbackSubscription,
   normalizeSubscriptionInfo,
-  readOptimisticSubscriptionFromSearch,
 } from "../lib/subscriptionState";
-
-function isPaidSubscription(subscription: SubscriptionInfo | null | undefined) {
-  return !!subscription && subscription.planName !== "TRIAL" && !!subscription.active;
-}
 
 type SubscriptionContextValue = {
   subscription: SubscriptionInfo | null;
@@ -36,13 +31,10 @@ export function SubscriptionProvider({ children }: Props) {
   const cachedSubscription = rawCachedSubscription
     ? normalizeSubscriptionInfo(rawCachedSubscription)
     : null;
-  const optimisticSubscription = readOptimisticSubscriptionFromSearch(
-    window.location.search
-  );
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(
-    optimisticSubscription ?? cachedSubscription ?? fallbackSubscription
+    cachedSubscription ?? fallbackSubscription
   );
-  const [loading, setLoading] = useState(!cachedSubscription && !optimisticSubscription);
+  const [loading, setLoading] = useState(!cachedSubscription);
 
   const applyOptimistic = useCallback((nextSubscription: SubscriptionInfo) => {
     const normalizedSubscription = normalizeSubscriptionInfo(nextSubscription);
@@ -57,38 +49,12 @@ export function SubscriptionProvider({ children }: Props) {
     );
     const normalizedSubscription = normalizeSubscriptionInfo(res.subscription);
 
-    setSubscription((currentSubscription) => {
-      const shouldPreserveOptimisticPaidPlan =
-        isPaidSubscription(currentSubscription) &&
-        normalizedSubscription.planName === "TRIAL";
-
-      const nextSubscription = shouldPreserveOptimisticPaidPlan
-        ? currentSubscription
-        : normalizedSubscription;
-
-      if (nextSubscription) {
-        writeModuleCache("subscription-plan", nextSubscription);
-      }
-
-      return nextSubscription;
-    });
+    setSubscription(normalizedSubscription);
+    writeModuleCache("subscription-plan", normalizedSubscription);
   }, []);
 
   useEffect(() => {
     let mounted = true;
-
-    if (optimisticSubscription) {
-      applyOptimistic(optimisticSubscription);
-      const nextUrl = new URL(window.location.href);
-      nextUrl.searchParams.delete("billing");
-      nextUrl.searchParams.delete("plan");
-      nextUrl.searchParams.delete("starterModule");
-      window.history.replaceState(
-        {},
-        "",
-        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
-      );
-    }
 
     refresh()
       .then(() => {
@@ -96,10 +62,7 @@ export function SubscriptionProvider({ children }: Props) {
       })
       .catch(() => {
         if (!mounted) return;
-        if (
-          !cachedSubscription &&
-          !optimisticSubscription
-        ) {
+        if (!cachedSubscription) {
           applyOptimistic(fallbackSubscription);
           clearModuleCache("subscription-plan");
         }
@@ -112,7 +75,7 @@ export function SubscriptionProvider({ children }: Props) {
     return () => {
       mounted = false;
     };
-  }, [refresh]);
+  }, [applyOptimistic, cachedSubscription, refresh]);
 
   return (
     <SubscriptionContext.Provider

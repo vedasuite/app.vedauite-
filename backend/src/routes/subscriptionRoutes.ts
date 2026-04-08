@@ -6,6 +6,7 @@ import {
   getCurrentSubscription,
   updateStarterModuleSelection,
 } from "../services/subscriptionService";
+import { getBillingManagementState } from "../services/billingManagementService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const subscriptionRouter = Router();
@@ -16,7 +17,8 @@ subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), asy
     return res.status(400).json({ error: "Missing shop." });
   }
   const plan = await getCurrentSubscription(shop);
-  return res.json({ subscription: plan });
+  const billing = await getBillingManagementState(shop).catch(() => null);
+  return res.json({ subscription: plan, billing });
 });
 
 subscriptionRouter.post("/cancel", requireCapability("billing.downgrade"), async (req, res) => {
