@@ -36,24 +36,37 @@ type Overview = {
   automationRules?: Array<{ id: string; title: string; status: string; detail: string }>;
 };
 
-const fallbackOverview: Overview = {
-  subscription: { featureAccess: { supportCopilot: false, evidencePackExport: false } },
-  summary: { shopperTrustProfiles: 0, returnAbuseProfiles: 0, highRiskOrders: 0, manualReviewCount: 0, sharedFraudNetworkEnabled: false, automationReadiness: "Trust and abuse signals are syncing." },
-  scoreBands: { low: "0-30", medium: "31-70", high: "71-100" },
-  trustTierSummary: [],
-  fraudReviewQueue: [],
-  returnAbuseSignals: [],
-  wardrobingSignals: [],
-  networkMatches: [],
-  chargebackCandidates: [],
-  supportCopilot: { status: "preview", playbooks: [], cases: [] },
-  evidencePack: { status: "preview", exports: [], templates: [] },
-  behaviorTimeline: [],
-  refundOutcomeSimulator: { likelyChannel: "Store credit or exchange", merchantOutcome: "Trust-aware refund handling becomes available once enough signals sync.", recoveryRate: "Recovery insights will appear after shopper and refund history is available.", recommendedAction: "Enable trust-aware refund routing once live signals are ready.", options: [] },
-  smartPolicyRecommendations: [],
-  trustRecoveryActions: [],
-  automationRules: [],
-};
+function createEmptyOverview(
+  readinessState = "SYNC_REQUIRED",
+  reason = "Run the first live sync to populate trust and abuse outputs."
+): Overview {
+  return {
+    subscription: { featureAccess: { supportCopilot: false, evidencePackExport: false } },
+    readiness: { readinessState, reason, processingState: "NOT_STARTED", lastUpdatedAt: null },
+    summary: {
+      shopperTrustProfiles: 0,
+      returnAbuseProfiles: 0,
+      highRiskOrders: 0,
+      manualReviewCount: 0,
+      sharedFraudNetworkEnabled: false,
+      automationReadiness: reason,
+    },
+    scoreBands: { low: "0-30", medium: "31-70", high: "71-100" },
+    trustTierSummary: [],
+    fraudReviewQueue: [],
+    returnAbuseSignals: [],
+    wardrobingSignals: [],
+    networkMatches: [],
+    chargebackCandidates: [],
+    supportCopilot: { status: "preview", playbooks: [], cases: [] },
+    evidencePack: { status: "preview", exports: [], templates: [] },
+    behaviorTimeline: [],
+    refundOutcomeSimulator: undefined,
+    smartPolicyRecommendations: [],
+    trustRecoveryActions: [],
+    automationRules: [],
+  };
+}
 
 function toneForScore(score: number) {
   if (score >= 80) return "success";
@@ -75,14 +88,14 @@ function EmptyState({ text }: { text: string }) {
 export function TrustAbusePage() {
   const { subscription } = useSubscriptionPlan();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const [overview, setOverview] = useState<Overview>(fallbackOverview);
+  const [overview, setOverview] = useState<Overview>(createEmptyOverview());
   const [loading, setLoading] = useState(false);
   const [syncIssue, setSyncIssue] = useState(false);
   const allowed = !!subscription?.enabledModules?.trustAbuse;
 
   useEffect(() => {
     if (!allowed) {
-      setOverview(fallbackOverview);
+      setOverview(createEmptyOverview());
       setLoading(false);
       setSyncIssue(false);
       return;
@@ -93,26 +106,18 @@ export function TrustAbusePage() {
     embeddedShopRequest<{ overview: Overview }>("/api/trust-abuse/overview", { timeoutMs: 30000 })
       .then((res) => {
         if (!mounted) return;
-        setOverview({
-          ...fallbackOverview,
-          ...res.overview,
-          summary: { ...fallbackOverview.summary, ...res.overview.summary },
-          scoreBands: {
-            low: res.overview.scoreBands?.low ?? "0-30",
-            medium: res.overview.scoreBands?.medium ?? "31-70",
-            high: res.overview.scoreBands?.high ?? "71-100",
-          },
-          subscription: {
-            ...fallbackOverview.subscription,
-            ...res.overview.subscription,
-            featureAccess: {
-              ...fallbackOverview.subscription.featureAccess,
-              ...res.overview.subscription?.featureAccess,
-            },
-          },
-        });
+        setOverview(res.overview);
       })
-      .catch(() => mounted && setSyncIssue(true))
+      .catch(() => {
+        if (!mounted) return;
+        setOverview(
+          createEmptyOverview(
+            "FAILED",
+            "VedaSuite could not load persisted trust and abuse outputs."
+          )
+        );
+        setSyncIssue(true);
+      })
       .finally(() => mounted && setLoading(false));
     return () => {
       mounted = false;

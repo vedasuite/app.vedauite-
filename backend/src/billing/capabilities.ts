@@ -76,7 +76,7 @@ export type FeatureAccess = {
   fullProfitEngine: boolean;
 };
 
-export type SubscriptionLifecycleStatus =
+export type SubscriptionLifeCycleStatus =
   | "trial_active"
   | "trial_expired"
   | "active_paid"
@@ -92,7 +92,7 @@ export type CurrentSubscription = {
   endsAt: string | null;
   trialStartedAt: string | null;
   trialEndsAt: string | null;
-  status: SubscriptionLifecycleStatus;
+  status: SubscriptionLifeCycleStatus;
   billingStatus: string | null;
   starterModuleSwitchAvailableAt: string | null;
   enabledModules: ModuleAccess;

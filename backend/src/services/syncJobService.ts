@@ -6,6 +6,7 @@ import { ShopifyConnectionError } from "./shopifyConnectionService";
 import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
+  type StoreSyncStatus,
 } from "./storeOperationalStateService";
 
 export type SyncTriggerSource =
@@ -17,7 +18,107 @@ export type SyncTriggerSource =
   | "customers_update"
   | "system";
 
-const ACTIVE_SYNC_STATUSES = ["PENDING", "RUNNING"] as const;
+const ACTIVE_SYNC_STATUSES = ["PENDING", "RUNNING", "SYNC_IN_PROGRESS"] as const;
+
+function mapDerivedSyncStatusToJobStatus(status: StoreSyncStatus) {
+  switch (status) {
+    case "READY_WITH_DATA":
+      return "READY_WITH_DATA";
+    case "EMPTY_STORE_DATA":
+      return "SUCCEEDED_NO_DATA";
+    case "SYNC_COMPLETED_PROCESSING_PENDING":
+      return "SUCCEEDED_PROCESSING_PENDING";
+    case "FAILED":
+      return "FAILED";
+    case "SYNC_IN_PROGRESS":
+      return "SYNC_IN_PROGRESS";
+    case "NOT_CONNECTED":
+      return "FAILED";
+    case "SYNC_REQUIRED":
+    default:
+      return "SUCCEEDED_NO_DATA";
+  }
+}
+
+async function finalizeSyncSuccess(params: {
+  storeId: string;
+  jobId: string;
+  shopDomain: string;
+  triggerSource: SyncTriggerSource;
+  syncResult: Awaited<ReturnType<typeof syncShopifyStoreData>>;
+  recomputeResult: Awaited<ReturnType<typeof recomputeStoreDerivedData>>;
+}) {
+  const operational = await getStoreOperationalSnapshot(params.shopDomain);
+  const derivedSync = deriveSyncStatus({
+    connectionStatus: operational.store.lastConnectionStatus,
+    latestSyncJobStatus: params.syncResult.status,
+    lastSyncStatus: operational.store.lastSyncStatus,
+    products: operational.counts.products,
+    orders: operational.counts.orders,
+    customers: operational.counts.customers,
+    priceRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    timelineEvents: operational.counts.timelineEvents,
+  });
+  const finalJobStatus = mapDerivedSyncStatusToJobStatus(derivedSync.status);
+  const finishedAt = new Date();
+
+  const completed = await prisma.syncJob.update({
+    where: { id: params.jobId },
+    data: {
+      status: finalJobStatus,
+      finishedAt,
+      summaryJson: JSON.stringify({
+        syncResult: {
+          ...params.syncResult,
+          status: finalJobStatus,
+        },
+        recomputeResult: {
+          ...params.recomputeResult,
+          status:
+            derivedSync.status === "READY_WITH_DATA"
+              ? "SUCCEEDED"
+              : derivedSync.status === "FAILED"
+              ? "FAILED"
+              : "SUCCEEDED_NO_DATA",
+        },
+        operationalCounts: operational.counts,
+        derivedSync,
+      }),
+      errorMessage:
+        derivedSync.status === "FAILED" ? derivedSync.reason : null,
+    },
+  });
+
+  await prisma.store.update({
+    where: { id: params.storeId },
+    data: {
+      lastSyncAt: finishedAt,
+      lastSyncStatus: derivedSync.status,
+      lastConnectionCheckAt: finishedAt,
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
+    },
+  });
+
+  logEvent("info", "sync_job.completed", {
+    shop: params.shopDomain,
+    triggerSource: params.triggerSource,
+    jobId: completed.id,
+    syncStatus: params.syncResult.status,
+    finalJobStatus,
+    derivedStatus: derivedSync.status,
+    counts: operational.counts,
+  });
+
+  return {
+    completed,
+    derivedSync,
+    operational,
+  };
+}
 
 async function resolveStore(shopDomain: string) {
   const store = await prisma.store.findUnique({
@@ -76,7 +177,7 @@ export async function runStoreSyncJob(
       storeId: store.id,
       jobType: "shopify_sync",
       triggerSource,
-      status: "RUNNING",
+      status: "SYNC_IN_PROGRESS",
       startedAt: new Date(),
     },
   });
@@ -85,64 +186,19 @@ export async function runStoreSyncJob(
     await prisma.store.update({
       where: { id: store.id },
       data: {
-        lastSyncStatus: "RUNNING",
+        lastSyncStatus: "SYNC_IN_PROGRESS",
       },
     });
 
     const syncResult = await syncShopifyStoreData(shopDomain);
     const recomputeResult = await recomputeStoreDerivedData(shopDomain);
-    const operational = await getStoreOperationalSnapshot(shopDomain);
-    const derivedSync = deriveSyncStatus({
-      connectionStatus: operational.store.lastConnectionStatus,
-      latestSyncJobStatus: syncResult.status,
-      lastSyncStatus: operational.store.lastSyncStatus,
-      products: operational.counts.products,
-      orders: operational.counts.orders,
-      customers: operational.counts.customers,
-      priceRows: operational.counts.pricingRows,
-      profitRows: operational.counts.profitRows,
-      timelineEvents: operational.counts.timelineEvents,
-    });
-
-    const completed = await prisma.syncJob.update({
-      where: { id: job.id },
-      data: {
-        status:
-          syncResult.status === "FAILED" || derivedSync.status === "FAILED"
-            ? "FAILED"
-            : "SUCCEEDED",
-        finishedAt: new Date(),
-        summaryJson: JSON.stringify({
-          syncResult,
-          recomputeResult,
-          operationalCounts: operational.counts,
-          derivedSync,
-        }),
-        errorMessage:
-          derivedSync.status === "FAILED" ? derivedSync.reason : null,
-      },
-    });
-
-    await prisma.store.update({
-      where: { id: store.id },
-      data: {
-        lastSyncAt: new Date(),
-        lastSyncStatus: syncResult.status,
-        lastConnectionCheckAt: new Date(),
-        lastConnectionStatus: "OK",
-        lastConnectionError: null,
-        authErrorCode: null,
-        authErrorMessage: null,
-      },
-    });
-
-    logEvent("info", "sync_job.completed", {
-      shop: shopDomain,
+    const { completed } = await finalizeSyncSuccess({
+      storeId: store.id,
+      jobId: job.id,
+      shopDomain,
       triggerSource,
-      jobId: completed.id,
-      syncStatus: syncResult.status,
-      derivedStatus: derivedSync.status,
-      counts: operational.counts,
+      syncResult,
+      recomputeResult,
     });
 
     return {
@@ -166,10 +222,10 @@ export async function runStoreSyncJob(
     await prisma.store.update({
       where: { id: store.id },
       data: {
-        lastSyncStatus: "FAILED",
-        lastConnectionCheckAt: new Date(),
-        lastConnectionStatus: failure.status,
-        lastConnectionError: failure.message,
+          lastSyncStatus: "FAILED",
+          lastConnectionCheckAt: new Date(),
+          lastConnectionStatus: failure.status,
+          lastConnectionError: failure.message,
         authErrorCode: failure.code,
         authErrorMessage: failure.message,
       },
@@ -226,71 +282,37 @@ export async function startStoreSyncJob(
       await prisma.store.update({
         where: { id: store.id },
         data: {
-          lastSyncStatus: "RUNNING",
+          lastSyncStatus: "SYNC_IN_PROGRESS",
         },
       });
 
       await prisma.syncJob.update({
         where: { id: createdJob.id },
         data: {
-          status: "RUNNING",
+          status: "SYNC_IN_PROGRESS",
           startedAt: new Date(),
         },
       });
 
       const syncResult = await syncShopifyStoreData(shopDomain);
       const recomputeResult = await recomputeStoreDerivedData(shopDomain);
-      const operational = await getStoreOperationalSnapshot(shopDomain);
-      const derivedSync = deriveSyncStatus({
-        connectionStatus: operational.store.lastConnectionStatus,
-        latestSyncJobStatus: syncResult.status,
-        lastSyncStatus: operational.store.lastSyncStatus,
-        products: operational.counts.products,
-        orders: operational.counts.orders,
-        customers: operational.counts.customers,
-        priceRows: operational.counts.pricingRows,
-        profitRows: operational.counts.profitRows,
-        timelineEvents: operational.counts.timelineEvents,
-      });
+      const { completed, derivedSync, operational } =
+        await finalizeSyncSuccess({
+          storeId: store.id,
+          jobId: createdJob.id,
+          shopDomain,
+          triggerSource,
+          syncResult,
+          recomputeResult,
+        });
 
-      await prisma.syncJob.update({
-        where: { id: createdJob.id },
-        data: {
-          status:
-            syncResult.status === "FAILED" || derivedSync.status === "FAILED"
-              ? "FAILED"
-              : "SUCCEEDED",
-          finishedAt: new Date(),
-          summaryJson: JSON.stringify({
-            syncResult,
-            recomputeResult,
-            operationalCounts: operational.counts,
-            derivedSync,
-          }),
-          errorMessage:
-            derivedSync.status === "FAILED" ? derivedSync.reason : null,
-        },
-      });
-
-      await prisma.store.update({
-        where: { id: store.id },
-        data: {
-          lastSyncAt: new Date(),
-          lastSyncStatus: syncResult.status,
-          lastConnectionCheckAt: new Date(),
-          lastConnectionStatus: "OK",
-          lastConnectionError: null,
-          authErrorCode: null,
-          authErrorMessage: null,
-        },
-      });
-
-      logEvent("info", "sync_job.completed", {
+      logEvent("info", "sync_job.completed.background", {
         shop: shopDomain,
         triggerSource,
-        jobId: createdJob.id,
+        jobId: completed.id,
         mode: "background",
         syncStatus: syncResult.status,
+        finalJobStatus: completed.status,
         derivedStatus: derivedSync.status,
         counts: operational.counts,
       });

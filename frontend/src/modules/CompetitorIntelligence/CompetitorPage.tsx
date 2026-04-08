@@ -146,86 +146,64 @@ type CompetitorResponseEngine = {
 
 const resourceName = { singular: "competitor product", plural: "competitor products" };
 
-const fallbackOverview: CompetitorOverview = {
-  recentPriceChanges: 0,
-  promotionAlerts: 0,
-  stockMovementAlerts: 0,
-  trackedDomains: 0,
-  lastIngestedAt: null,
-  freshnessHours: null,
-  promotionalHeat: "Low",
-  marketPressure: "Low",
-  adPressure: "Low",
-  launchAlerts: [],
-  sourceBreakdown: { website: 0, googleShopping: 0, metaAds: 0 },
-  topMovers: [],
-  moveFeed: [],
-  strategyDetections: [],
-  actionSuggestions: [],
-  weeklyReport: {
-    headline: "Awaiting competitor ingestion",
-    whyItMatters:
-      "Add monitored domains and run ingestion to build an event-driven competitor feed.",
-    suggestedActions: [
-      "Add competitor domains.",
-      "Run the first ingestion.",
-      "Review the move feed before reacting.",
-    ],
-    reportReadiness: "Awaiting competitor ingestion",
-    biggestMoves: [],
-    merchantBrief:
-      "The weekly brief will explain why competitor moves matter for your store once signals are live.",
-    nextBestAction: "Add competitor domains and run your first ingestion.",
-  },
-  coverageSummary: {
-    domainsConfigured: 0,
-    channelsReady: [],
-    monitoringPosture: "Needs setup",
-  },
-};
+function createEmptyOverview(
+  readinessState = "SYNC_REQUIRED",
+  reason = "Add monitored domains and run the first competitor ingestion."
+): CompetitorOverview {
+  return {
+    readiness: {
+      readinessState,
+      reason,
+      processingState: "NOT_STARTED",
+      lastUpdatedAt: null,
+    },
+    recentPriceChanges: 0,
+    promotionAlerts: 0,
+    stockMovementAlerts: 0,
+    trackedDomains: 0,
+    lastIngestedAt: null,
+    freshnessHours: null,
+    promotionalHeat: "Unavailable",
+    marketPressure: "Unavailable",
+    adPressure: "Unavailable",
+    launchAlerts: [],
+    sourceBreakdown: { website: 0, googleShopping: 0, metaAds: 0 },
+    topMovers: [],
+    moveFeed: [],
+    strategyDetections: [],
+    actionSuggestions: [],
+    weeklyReport: undefined,
+    coverageSummary: {
+      domainsConfigured: 0,
+      channelsReady: [],
+      monitoringPosture: reason,
+    },
+  };
+}
 
-const fallbackConnectors: CompetitorConnector[] = [
-  {
-    id: "website",
-    label: "Website monitoring",
-    description: "Track competitor pricing, promotions, and stock posture across monitored storefronts.",
-    connected: false,
-    trackedTargets: 0,
-    readiness: "Add competitor domains to begin monitoring",
-  },
-  {
-    id: "shopping",
-    label: "Google Shopping signals",
-    description:
-      "Limited preview only. Production VedaSuite does not yet run live Google Shopping ingestion.",
-    connected: false,
-    trackedTargets: 0,
-    readiness: "Available after monitored products are ingested",
-  },
-  {
-    id: "ads",
-    label: "Ad pressure watch",
-    description:
-      "Limited preview only. Production VedaSuite does not yet run live ad-library ingestion.",
-    connected: false,
-    trackedTargets: 0,
-    readiness: "Build your tracked domain set first",
-  },
-];
+function createEmptyConnectors(): CompetitorConnector[] {
+  return [];
+}
 
-const fallbackResponseEngine: CompetitorResponseEngine = {
-  summary: {
-    responseMode: "Awaiting monitored competitor data",
-    topPressureCount: 0,
-    automationReadiness:
-      "Response suggestions appear after live website monitoring data is collected.",
-  },
-  responsePlans: [],
-};
+function createEmptyResponseEngine(
+  reason = "Response suggestions appear after successful competitor ingestion."
+): CompetitorResponseEngine {
+  return {
+    summary: {
+      responseMode: "Awaiting monitored competitor data",
+      topPressureCount: 0,
+      automationReadiness: reason,
+    },
+    responsePlans: [],
+  };
+}
 
 function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
   return {
-    ...fallbackOverview,
+    ...createEmptyOverview(
+      input.readiness?.readinessState,
+      input.readiness?.reason
+    ),
     ...input,
     sourceBreakdown: {
       website: input.sourceBreakdown?.website ?? 0,
@@ -240,38 +218,40 @@ function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
     weeklyReport: {
       headline:
         input.weeklyReport?.headline ??
-        fallbackOverview.weeklyReport!.headline,
+        "Awaiting competitor ingestion",
       whyItMatters:
         input.weeklyReport?.whyItMatters ??
-        fallbackOverview.weeklyReport!.whyItMatters,
+        "Add monitored domains and run ingestion to build an event-driven competitor feed.",
       suggestedActions:
-        input.weeklyReport?.suggestedActions ??
-        fallbackOverview.weeklyReport!.suggestedActions,
+        input.weeklyReport?.suggestedActions ?? [],
       reportReadiness:
-        input.weeklyReport?.reportReadiness ??
-        fallbackOverview.weeklyReport!.reportReadiness,
-      biggestMoves:
-        input.weeklyReport?.biggestMoves ??
-        fallbackOverview.weeklyReport!.biggestMoves,
+        input.weeklyReport?.reportReadiness ?? "Awaiting competitor ingestion",
+      biggestMoves: input.weeklyReport?.biggestMoves ?? [],
       merchantBrief:
-        input.weeklyReport?.merchantBrief ??
-        fallbackOverview.weeklyReport!.merchantBrief,
+        input.weeklyReport?.merchantBrief ?? reasonForWeeklyBrief(input),
       nextBestAction:
         input.weeklyReport?.nextBestAction ??
-        fallbackOverview.weeklyReport!.nextBestAction,
+        "Add competitor domains and run your first ingestion.",
     },
     coverageSummary: {
       domainsConfigured:
         input.coverageSummary?.domainsConfigured ??
-        fallbackOverview.coverageSummary!.domainsConfigured,
+        0,
       channelsReady:
         input.coverageSummary?.channelsReady ??
-        fallbackOverview.coverageSummary!.channelsReady,
+        [],
       monitoringPosture:
         input.coverageSummary?.monitoringPosture ??
-        fallbackOverview.coverageSummary!.monitoringPosture,
+        "Needs setup",
     },
   };
+}
+
+function reasonForWeeklyBrief(input: CompetitorOverview) {
+  return (
+    input.readiness?.reason ??
+    "The weekly brief will populate after live competitor monitoring data is collected."
+  );
 }
 
 function toneForPriority(value: string) {
@@ -331,14 +311,16 @@ export function CompetitorPage() {
     readModuleCache<CompetitorRow[]>("competitor-rows") ?? []
   );
   const [overview, setOverview] = useState<CompetitorOverview>(
-    readModuleCache<CompetitorOverview>("competitor-overview") ?? fallbackOverview
+    readModuleCache<CompetitorOverview>("competitor-overview") ??
+      createEmptyOverview()
   );
   const [connectors, setConnectors] = useState<CompetitorConnector[]>(
-    readModuleCache<CompetitorConnector[]>("competitor-connectors") ?? fallbackConnectors
+    readModuleCache<CompetitorConnector[]>("competitor-connectors") ??
+      createEmptyConnectors()
   );
   const [responseEngine, setResponseEngine] = useState<CompetitorResponseEngine>(
     readModuleCache<CompetitorResponseEngine>("competitor-response-engine") ??
-      fallbackResponseEngine
+      createEmptyResponseEngine()
   );
   const [loading, setLoading] = useState(
     rows.length === 0 && (overview.moveFeed?.length ?? 0) === 0
@@ -379,15 +361,33 @@ export function CompetitorPage() {
         const nextOverview = normalizeOverview(overviewResponse);
         setRows(productsResponse.products);
         setOverview(nextOverview);
-        setConnectors(connectorsResponse.connectors.length > 0 ? connectorsResponse.connectors : fallbackConnectors);
-        setResponseEngine(responseEngineResponse.responseEngine ?? fallbackResponseEngine);
+        setConnectors(connectorsResponse.connectors);
+        setResponseEngine(
+          responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
+        );
         writeModuleCache("competitor-rows", productsResponse.products);
         writeModuleCache("competitor-overview", nextOverview);
-        writeModuleCache("competitor-connectors", connectorsResponse.connectors.length > 0 ? connectorsResponse.connectors : fallbackConnectors);
-        writeModuleCache("competitor-response-engine", responseEngineResponse.responseEngine ?? fallbackResponseEngine);
+        writeModuleCache("competitor-connectors", connectorsResponse.connectors);
+        writeModuleCache(
+          "competitor-response-engine",
+          responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
+        );
       })
       .catch(() => {
-        if (mounted) setToast("Using fallback competitor intelligence while live monitoring syncs.");
+        if (!mounted) return;
+        setOverview(
+          createEmptyOverview(
+            "FAILED",
+            "VedaSuite could not load persisted competitor monitoring outputs."
+          )
+        );
+        setConnectors(createEmptyConnectors());
+        setResponseEngine(
+          createEmptyResponseEngine(
+            "Response suggestions are unavailable until competitor monitoring loads."
+          )
+        );
+        setToast("Unable to load competitor intelligence right now.");
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -447,12 +447,17 @@ export function CompetitorPage() {
       const nextOverview = normalizeOverview(overviewResponse);
       setRows(productsResponse.products);
       setOverview(nextOverview);
-      setConnectors(connectorsResponse.connectors.length > 0 ? connectorsResponse.connectors : fallbackConnectors);
-      setResponseEngine(responseEngineResponse.responseEngine ?? fallbackResponseEngine);
+      setConnectors(connectorsResponse.connectors);
+      setResponseEngine(
+        responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
+      );
       writeModuleCache("competitor-rows", productsResponse.products);
       writeModuleCache("competitor-overview", nextOverview);
-      writeModuleCache("competitor-connectors", connectorsResponse.connectors.length > 0 ? connectorsResponse.connectors : fallbackConnectors);
-      writeModuleCache("competitor-response-engine", responseEngineResponse.responseEngine ?? fallbackResponseEngine);
+      writeModuleCache("competitor-connectors", connectorsResponse.connectors);
+      writeModuleCache(
+        "competitor-response-engine",
+        responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
+      );
       if (ingestResponse.result.status === "SUCCEEDED") {
         setToast(`Competitor ingestion completed with ${ingestResponse.result.ingested} fresh market records.`);
       } else {
@@ -468,7 +473,11 @@ export function CompetitorPage() {
     }
   };
 
-  const sourceBreakdown = overview.sourceBreakdown ?? fallbackOverview.sourceBreakdown!;
+  const sourceBreakdown = overview.sourceBreakdown ?? {
+    website: 0,
+    googleShopping: 0,
+    metaAds: 0,
+  };
 
   return (
     <ModuleGate
@@ -675,7 +684,7 @@ export function CompetitorPage() {
                     </InlineStack>
                     <Text as="p" tone="subdued">{connector.description}</Text>
                     <Text as="p" variant="bodySm" tone="subdued">{`Targets: ${connector.trackedTargets}`}</Text>
-                    <Text as="p" variant="bodySm" tone="subdued">{`Status: ${connector.readiness ?? "Ready"}`}</Text>
+                    <Text as="p" variant="bodySm" tone="subdued">{`Status: ${connector.readiness ?? "Not configured"}`}</Text>
                     <Text as="p" variant="bodySm" tone="subdued">
                       {connector.lastIngestedAt ? `Last ingested ${new Date(connector.lastIngestedAt).toLocaleString()}` : "No ingestion yet"}
                     </Text>

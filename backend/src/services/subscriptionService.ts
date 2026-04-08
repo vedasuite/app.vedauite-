@@ -18,7 +18,7 @@ import {
   type BillingPlanName,
   type CurrentSubscription,
   type StarterModule,
-  type SubscriptionLifecycleStatus,
+  type SubscriptionLifeCycleStatus,
 } from "../billing/capabilities";
 
 export type {
@@ -69,7 +69,7 @@ function deriveLifecycleStatus(input: {
   active: boolean;
   billingStatus: string | null;
   trialEndsAt: Date | null;
-}): SubscriptionLifecycleStatus {
+}): SubscriptionLifeCycleStatus {
   if (input.planName === "TRIAL") {
     return isDateInFuture(input.trialEndsAt) ? "trial_active" : "trial_expired";
   }

@@ -273,7 +273,7 @@ function labelForReadiness(value?: string | null) {
   }
 }
 
-const fallbackMetrics: Metrics = {
+const EMPTY_METRICS: Metrics = {
   fraudAlertsToday: 0,
   highRiskOrders: 0,
   serialReturners: 0,
@@ -288,8 +288,8 @@ export function DashboardPage() {
   const { shop, host } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
   const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
-  const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? fallbackMetrics);
-  const [loading, setLoading] = useState(false);
+  const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? EMPTY_METRICS);
+  const [loading, setLoading] = useState(!cachedMetrics);
   const [selectedTab, setSelectedTab] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
@@ -343,11 +343,19 @@ export function DashboardPage() {
         continue;
       }
 
-      if (latestJob.status === "SUCCEEDED") {
+      if (
+        latestJob.status === "READY_WITH_DATA" ||
+        latestJob.status === "SUCCEEDED_NO_DATA" ||
+        latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
+      ) {
         loadMetrics();
         void loadDiagnostics();
         setToast(
-          "Shopify sync completed. VedaSuite is now validating persisted records and module processing state."
+          latestJob.status === "READY_WITH_DATA"
+            ? "Shopify sync completed and VedaSuite now has live processed store data."
+            : latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
+            ? "Shopify sync completed. Processing is still catching up in the background."
+            : "Shopify sync completed, but the store currently has no synced merchant data to process."
         );
         return;
       }
@@ -365,6 +373,7 @@ export function DashboardPage() {
   };
 
   const loadMetrics = () => {
+    setLoading(true);
     embeddedShopRequest<Metrics>("/api/dashboard/metrics", {
       timeoutMs: 30000,
     })
@@ -372,7 +381,15 @@ export function DashboardPage() {
         setMetrics(res);
         writeModuleCache("dashboard-metrics", res);
       })
-      .catch(() => setMetrics(fallbackMetrics))
+      .catch((error) => {
+        setActionError({
+          title: "Dashboard data needs attention",
+          detail: getApiErrorMessage(
+            error,
+            "VedaSuite could not load persisted dashboard metrics."
+          ),
+        });
+      })
       .finally(() => setLoading(false));
   };
 
@@ -766,7 +783,7 @@ export function DashboardPage() {
           <Banner
             title={
               metrics.summaryTitle ??
-              (metrics.lastSyncStatus === "SUCCEEDED"
+              (metrics.lastSyncStatus === "READY_WITH_DATA"
                 ? "Store sync completed"
                 : "Run first sync to populate store signals")
             }
@@ -774,7 +791,7 @@ export function DashboardPage() {
           >
             <p>
               {metrics.summaryDetail ??
-                (metrics.lastSyncStatus === "SUCCEEDED"
+                (metrics.lastSyncStatus === "READY_WITH_DATA"
                   ? `Shopify sync completed${metrics.lastSyncAt ? ` at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}, and VedaSuite is validating persisted module outputs.`
                   : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes.")}
             </p>

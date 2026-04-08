@@ -139,7 +139,11 @@ export function deriveSyncStatus(input: {
     };
   }
 
-  if (latestStatus === "PENDING" || latestStatus === "RUNNING") {
+  if (
+    latestStatus === "PENDING" ||
+    latestStatus === "RUNNING" ||
+    latestStatus === "SYNC_IN_PROGRESS"
+  ) {
     return {
       status: "SYNC_IN_PROGRESS" as StoreSyncStatus,
       reason: "Shopify sync is currently running.",
@@ -150,6 +154,23 @@ export function deriveSyncStatus(input: {
     return {
       status: "FAILED" as StoreSyncStatus,
       reason: "The most recent Shopify sync failed.",
+    };
+  }
+
+  if (latestStatus === "SUCCEEDED_PROCESSING_PENDING") {
+    return {
+      status: "SYNC_COMPLETED_PROCESSING_PENDING" as StoreSyncStatus,
+      reason: "Raw Shopify data synced, but derived processing outputs are not ready yet.",
+    };
+  }
+
+  if (
+    latestStatus === "SUCCEEDED_READY_WITH_DATA" ||
+    latestStatus === "READY_WITH_DATA"
+  ) {
+    return {
+      status: "READY_WITH_DATA" as StoreSyncStatus,
+      reason: "Shopify data and derived module outputs are available.",
     };
   }
 
@@ -167,7 +188,11 @@ export function deriveSyncStatus(input: {
     };
   }
 
-  if (latestStatus === "SUCCEEDED" && processedResourceCount === 0) {
+  if (
+    (latestStatus === "SUCCEEDED" ||
+      latestStatus === "SUCCEEDED_PROCESSING_PENDING") &&
+    processedResourceCount === 0
+  ) {
     return {
       status: "SYNC_COMPLETED_PROCESSING_PENDING" as StoreSyncStatus,
       reason: "Raw Shopify data synced, but derived processing outputs are not ready yet.",

@@ -128,45 +128,56 @@ type PricingProfitOverview = {
   }>;
 };
 
-const fallbackOverview: PricingProfitOverview = {
-  subscription: {
-    capabilities: {},
-    featureAccess: {
-      fullProfitEngine: false,
-      dailyActionBoard: false,
-      scenarioSimulator: false,
-      marginAtRisk: false,
+function createEmptyOverview(
+  readinessState = "SYNC_REQUIRED",
+  reason = "Run the first live sync to populate pricing and profit outputs."
+): PricingProfitOverview {
+  return {
+    subscription: {
+      capabilities: {},
+      featureAccess: {
+        fullProfitEngine: false,
+        dailyActionBoard: false,
+        scenarioSimulator: false,
+        marginAtRisk: false,
+      },
     },
-  },
-  summary: {
-    recommendationCount: 0,
-    profitOpportunityCount: 0,
-    responseMode: "Monitor",
-    automationReadiness: "Awaiting synced pricing and profit data.",
-    fullProfitEngine: false,
-    advancedModesEnabled: false,
-    scenarioSimulatorEnabled: false,
-    marginAtRiskEnabled: false,
-    profitLeakDetectorEnabled: false,
-    explainableRecommendationsEnabled: false,
-  },
-  pricingRecommendations: [],
-  profitOpportunities: [],
-  dailyActionBoard: [],
-  scenarioPreset: null,
-  marginAtRisk: {
-    pressureProducts: [],
-    projectedMonthlyGain: 0,
-    summary: "No live margin pressure drivers are active yet.",
-  },
-  pricingModes: [],
-  doNothingRecommendation: null,
-  profitLeakSummary: [],
-  scenarioPlaybook: [],
-  explainabilityHighlights: [],
-  simulatorSnapshots: [],
-  marginRiskDrivers: [],
-};
+    readiness: {
+      readinessState,
+      reason,
+      processingState: "NOT_STARTED",
+      lastUpdatedAt: null,
+    },
+    summary: {
+      recommendationCount: 0,
+      profitOpportunityCount: 0,
+      responseMode: "Monitor",
+      automationReadiness: reason,
+      fullProfitEngine: false,
+      advancedModesEnabled: false,
+      scenarioSimulatorEnabled: false,
+      marginAtRiskEnabled: false,
+      profitLeakDetectorEnabled: false,
+      explainableRecommendationsEnabled: false,
+    },
+    pricingRecommendations: [],
+    profitOpportunities: [],
+    dailyActionBoard: [],
+    scenarioPreset: null,
+    marginAtRisk: {
+      pressureProducts: [],
+      projectedMonthlyGain: 0,
+      summary: reason,
+    },
+    pricingModes: [],
+    doNothingRecommendation: null,
+    profitLeakSummary: [],
+    scenarioPlaybook: [],
+    explainabilityHighlights: [],
+    simulatorSnapshots: [],
+    marginRiskDrivers: [],
+  };
+}
 
 const PRICING_PROFIT_CACHE_KEY = "pricing-profit-overview";
 
@@ -196,11 +207,9 @@ export function PricingProfitPage() {
   const [searchParams] = useSearchParams();
   const { subscription } = useSubscriptionPlan();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const cachedOverview = readModuleCache<PricingProfitOverview>(
-    PRICING_PROFIT_CACHE_KEY
-  );
+  const cachedOverview = readModuleCache<PricingProfitOverview>(PRICING_PROFIT_CACHE_KEY);
   const [overview, setOverview] = useState<PricingProfitOverview>(
-    cachedOverview ?? fallbackOverview
+    cachedOverview ?? createEmptyOverview()
   );
   const [loading, setLoading] = useState(!cachedOverview);
   const [syncIssue, setSyncIssue] = useState(false);
@@ -231,7 +240,7 @@ export function PricingProfitPage() {
     if (!allowed) {
       setLoading(false);
       setSyncIssue(false);
-      setOverview(cachedOverview ?? fallbackOverview);
+      setOverview(cachedOverview ?? createEmptyOverview());
       return;
     }
 
@@ -245,42 +254,19 @@ export function PricingProfitPage() {
     )
       .then((res) => {
         if (!mounted) return;
-        const nextOverview: PricingProfitOverview = {
-          ...fallbackOverview,
-          ...res.overview,
-          subscription: {
-            ...fallbackOverview.subscription,
-            ...res.overview.subscription,
-            capabilities: {
-              ...fallbackOverview.subscription.capabilities,
-              ...res.overview.subscription?.capabilities,
-            },
-            featureAccess: {
-              ...fallbackOverview.subscription.featureAccess,
-              ...res.overview.subscription?.featureAccess,
-            },
-          },
-          summary: {
-            ...fallbackOverview.summary,
-            ...res.overview.summary,
-          },
-          marginAtRisk: {
-            ...fallbackOverview.marginAtRisk,
-            ...res.overview.marginAtRisk,
-          },
-        };
+        const nextOverview = res.overview;
         setOverview(nextOverview);
         writeModuleCache(PRICING_PROFIT_CACHE_KEY, nextOverview);
       })
       .catch(() => {
         if (!mounted) return;
         setOverview((current) =>
-          current.pricingRecommendations.length > 0 ||
-          current.profitOpportunities.length > 0 ||
-          current.dailyActionBoard.length > 0 ||
-          (current.explainabilityHighlights ?? []).length > 0
+          current.readiness?.readinessState === "READY_WITH_DATA"
             ? current
-            : fallbackOverview
+            : createEmptyOverview(
+                "FAILED",
+                "VedaSuite could not load persisted pricing and profit outputs."
+              )
         );
         setSyncIssue(true);
       })
