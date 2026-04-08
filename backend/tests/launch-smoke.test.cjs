@@ -171,3 +171,67 @@ test("app uninstall webhook marks installation as inactive instead of deleting s
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("app subscription update webhook is accepted and routed to billing reconciliation", async () => {
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
+  );
+  const routesPath = path.resolve(
+    __dirname,
+    "../dist/routes/shopifyWebhookRoutes.js"
+  );
+
+  resetModule(subscriptionServicePath);
+  let reconcilePayload = null;
+  require(subscriptionServicePath).reconcileStoreSubscriptionFromWebhook = async (
+    payload
+  ) => {
+    reconcilePayload = payload;
+    return { id: "subscription-1" };
+  };
+
+  resetModule(routesPath);
+  const { shopifyWebhookRouter } = require(routesPath);
+  const app = express();
+  app.use("/webhooks/shopify", express.raw({ type: "application/json" }));
+  app.use("/webhooks/shopify", shopifyWebhookRouter);
+  const server = app.listen(0);
+
+  try {
+    const rawBody = Buffer.from(
+      JSON.stringify({
+        admin_graphql_api_id: "gid://shopify/AppSubscription/123",
+        name: "PRO",
+        status: "ACTIVE",
+        current_period_end: "2026-05-06T00:00:00.000Z",
+      })
+    );
+    const signature = buildWebhookHmac(rawBody, process.env.SHOPIFY_API_SECRET);
+
+    const response = await request(
+      server,
+      "/webhooks/shopify/app_subscriptions_update",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-shopify-shop-domain": "test-shop.myshopify.com",
+          "x-shopify-hmac-sha256": signature,
+        },
+        body: rawBody,
+      }
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.ok(reconcilePayload);
+    assert.equal(reconcilePayload.shopDomain, "test-shop.myshopify.com");
+    assert.equal(
+      reconcilePayload.shopifyChargeId,
+      "gid://shopify/AppSubscription/123"
+    );
+    assert.equal(reconcilePayload.planName, "PRO");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -1,20 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
 import type { Capability } from "../billing/capabilities";
 import { getCurrentSubscription } from "../services/subscriptionService";
-
-function resolveShop(req: Request) {
-  const queryShop = typeof req.query.shop === "string" ? req.query.shop : undefined;
-  const bodyShop =
-    typeof req.body?.shop === "string" ? (req.body.shop as string) : undefined;
-  const sessionShop = (req as Request & { shopifySession?: { shop?: string } })
-    .shopifySession?.shop;
-
-  return queryShop ?? bodyShop ?? sessionShop;
-}
+import { resolveAuthenticatedShop } from "../routes/routeShop";
 
 export function requireCapability(capability: Capability) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const shop = resolveShop(req);
+    const shop = resolveAuthenticatedShop(req);
     const sessionShop = (req as Request & { shopifySession?: { shop?: string } })
       .shopifySession?.shop;
 

@@ -73,6 +73,20 @@ type RefreshAccessTokenResponse = {
 const SHOP_REGEX = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
 const ACCESS_TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
+function deriveTokenAcquisitionMode(installation: {
+  refreshToken?: string | null;
+  accessTokenExpiresAt?: Date | null;
+  tokenAcquisitionMode?: string | null;
+}) {
+  if (installation.refreshToken || installation.accessTokenExpiresAt) {
+    return "offline_expiring";
+  }
+
+  return installation.tokenAcquisitionMode === "offline_expiring"
+    ? "offline_legacy"
+    : installation.tokenAcquisitionMode ?? "offline_legacy";
+}
+
 export class ShopifyConnectionError extends Error {
   code: ShopifyConnectionCode;
   reauthorizeUrl?: string;
@@ -147,11 +161,63 @@ export function buildReauthorizeUrl(
   return url.toString();
 }
 
+export async function ensureInstallationMetadata(shop?: string | null) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    return null;
+  }
+
+  const installation = await prisma.store.findUnique({
+    where: { shop: normalizedShop },
+  });
+
+  if (!installation) {
+    return null;
+  }
+
+  const installedAt = installation.installedAt ?? installation.createdAt ?? new Date();
+  const reauthorizedAt = installation.reauthorizedAt ?? installedAt;
+  const grantedScopes = installation.grantedScopes ?? env.shopifyScopes;
+  const tokenAcquisitionMode = deriveTokenAcquisitionMode(installation);
+
+  const needsUpdate =
+    !installation.installedAt ||
+    !installation.reauthorizedAt ||
+    !installation.grantedScopes ||
+    installation.tokenAcquisitionMode !== tokenAcquisitionMode;
+
+  if (!needsUpdate) {
+    return installation;
+  }
+
+  const updated = await prisma.store.update({
+    where: { id: installation.id },
+    data: {
+      installedAt,
+      reauthorizedAt,
+      grantedScopes,
+      tokenAcquisitionMode,
+    },
+  });
+
+  logEvent("info", "shopify.installation.metadata_backfilled", {
+    shop: normalizedShop,
+    installedAt: updated.installedAt?.toISOString() ?? null,
+    reauthorizedAt: updated.reauthorizedAt?.toISOString() ?? null,
+    tokenAcquisitionMode: updated.tokenAcquisitionMode ?? null,
+    grantedScopes: updated.grantedScopes ?? null,
+  });
+
+  return updated;
+}
+
 export async function getOfflineInstallation(shop?: string | null) {
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
     return null;
   }
+
+  await ensureInstallationMetadata(normalizedShop);
 
   return prisma.store.findUnique({
     where: { shop: normalizedShop },
@@ -255,7 +321,7 @@ async function refreshOfflineAccessToken(
         refreshTokenExpiresAt: nextRefreshTokenExpiresAt,
         tokenAcquisitionMode: response.data.refresh_token
           ? "offline_expiring"
-          : installation.tokenAcquisitionMode ?? "offline_expiring",
+          : deriveTokenAcquisitionMode(installation),
         reauthorizedAt: now,
         authErrorCode: null,
         authErrorMessage: null,

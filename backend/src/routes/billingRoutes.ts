@@ -259,8 +259,10 @@ billingRouter.get("/activate", async (req, res) => {
       planActivatedAt: new Date(),
       cancelledAt: null,
       lastBillingSyncAt: new Date(),
+      lastBillingResolutionSource: "billing_activate_callback",
+      lastBillingSubscriptionName: normalizedPlan,
       endsAt: currentPeriodEnd,
-    },
+    } as any,
     create: {
       storeId: store.id,
       planId: planRecord.id,
@@ -273,8 +275,10 @@ billingRouter.get("/activate", async (req, res) => {
       billingStatus: activeSubscription.status?.toUpperCase() ?? "ACTIVE",
       planActivatedAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingResolutionSource: "billing_activate_callback",
+      lastBillingSubscriptionName: normalizedPlan,
       endsAt: currentPeriodEnd,
-    },
+    } as any,
   });
 
   const redirectUrl = new URL(`${env.shopifyAppUrl}/subscription`);

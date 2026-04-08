@@ -169,6 +169,10 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     __dirname,
     "../dist/services/shopifyConnectionService.js"
   );
+  const operationalServicePath = path.resolve(
+    __dirname,
+    "../dist/services/storeOperationalStateService.js"
+  );
   const syncJobServicePath = path.resolve(
     __dirname,
     "../dist/services/syncJobService.js"
@@ -185,6 +189,7 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
 
   resetModule(prismaPath);
   resetModule(connectionServicePath);
+  resetModule(operationalServicePath);
   resetModule(syncJobServicePath);
   resetModule(adminServicePath);
   resetModule(subscriptionServicePath);
@@ -206,6 +211,7 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     authErrorCode: null,
     authErrorMessage: null,
   });
+  require(connectionServicePath).ensureInstallationMetadata = async () => undefined;
   require(connectionServicePath).getConnectionHealth = async () => ({
     shop: "test-shop.myshopify.com",
     code: "OK",
@@ -224,9 +230,36 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     reauthRequired: false,
     message: "Shopify connection is healthy.",
   });
+  require(operationalServicePath).getStoreOperationalSnapshot = async () => ({
+    store: {
+      lastConnectionStatus: "OK",
+      lastSyncStatus: "READY_WITH_DATA",
+    },
+    counts: {
+      products: 17,
+      orders: 2,
+      customers: 2,
+      pricingRows: 43,
+      profitRows: 38,
+      timelineEvents: 5,
+      competitorDomains: 2,
+      competitorRows: 74,
+    },
+    latestSyncJob: {
+      status: "READY_WITH_DATA",
+      errorMessage: null,
+    },
+    latestCompetitorIngestJob: null,
+    latestCompetitorAt: new Date("2026-04-06T02:15:00.000Z"),
+    latestProcessingAt: new Date("2026-04-06T02:20:00.000Z"),
+  });
+  require(operationalServicePath).deriveSyncStatus = () => ({
+    status: "READY_WITH_DATA",
+    reason: "Shopify data and derived module outputs are available.",
+  });
   require(syncJobServicePath).getLatestSyncJob = async () => ({
     id: "job-1",
-    status: "SUCCEEDED",
+    status: "READY_WITH_DATA",
   });
   require(adminServicePath).getSyncWebhookStatus = async () => ({
     registeredCount: 6,
@@ -241,6 +274,23 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     starterModule: null,
     endsAt: null,
     trialEndsAt: null,
+  });
+  require(subscriptionServicePath).resolveBillingState = async () => ({
+    planName: "PRO",
+    normalizedBillingStatus: "ACTIVE",
+    active: true,
+    status: "active_paid",
+    starterModule: null,
+    endsAt: null,
+    subscriptionId: "subscription-1",
+    shopifyChargeId: "gid://shopify/AppSubscription/123",
+    planSource: "database",
+    dbPlanName: "PRO",
+    dbBillingStatus: "ACTIVE",
+    lastBillingSyncAt: "2026-04-06T02:00:00.000Z",
+    lastBillingWebhookProcessedAt: "2026-04-06T02:10:00.000Z",
+    lastBillingResolutionSource: "webhook_app_subscriptions_update",
+    mismatchWarnings: [],
   });
 
   resetModule(routesPath);
@@ -262,6 +312,68 @@ test("diagnostics route reports installation, webhook, sync, and billing state",
     assert.match(response.body, /"planName":"PRO"/);
     assert.match(response.body, /"reconnectRequired":false/);
     assert.match(response.body, /"tokenRefreshHealthy":true/);
+    assert.match(response.body, /"planSource":"database"/);
+    assert.match(response.body, /"billingStatus":"ACTIVE"/);
+    assert.match(response.body, /"operationalCounts"/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("billing health route uses normalized billing resolver output", async () => {
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
+  );
+  const routesPath = path.resolve(__dirname, "../dist/routes/shopifyRoutes.js");
+
+  resetModule(subscriptionServicePath);
+  const subscriptionService = require(subscriptionServicePath);
+  subscriptionService.getCurrentSubscription = async () => ({
+    planName: "PRO",
+    status: "active_paid",
+    billingStatus: "ACTIVE",
+    active: true,
+    starterModule: null,
+    endsAt: "2026-05-06T00:00:00.000Z",
+    trialEndsAt: null,
+  });
+  subscriptionService.resolveBillingState = async () => ({
+    planName: "PRO",
+    normalizedBillingStatus: "ACTIVE",
+    active: true,
+    status: "active_paid",
+    starterModule: null,
+    endsAt: "2026-05-06T00:00:00.000Z",
+    subscriptionId: "subscription-1",
+    shopifyChargeId: "gid://shopify/AppSubscription/123",
+    planSource: "shopify_reconciled",
+    dbPlanName: "PRO",
+    dbBillingStatus: "ACTIVE",
+    lastBillingSyncAt: "2026-04-08T05:00:00.000Z",
+    lastBillingWebhookProcessedAt: "2026-04-08T05:05:00.000Z",
+    lastBillingResolutionSource: "webhook_app_subscriptions_update",
+    mismatchWarnings: [],
+  });
+
+  resetModule(routesPath);
+  const { shopifyRouter } = require(routesPath);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.use("/shopify", shopifyRouter);
+  const server = app.listen(0);
+
+  try {
+    const response = await request(server, "/shopify/internal/debug/billing-health");
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body, /"dbPlan":"PRO"/);
+    assert.match(response.body, /"lastBillingWebhookProcessedAt":"2026-04-08T05:05:00.000Z"/);
+    assert.match(response.body, /"billingResolutionSource":"webhook_app_subscriptions_update"/);
+    assert.match(response.body, /"planSource":"shopify_reconciled"/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

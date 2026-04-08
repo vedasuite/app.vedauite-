@@ -3,11 +3,15 @@ import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
 import {
   buildReauthorizeUrl,
+  ensureInstallationMetadata,
   getConnectionHealth,
   ShopifyConnectionError,
   type ShopifyConnectionCode,
 } from "../services/shopifyConnectionService";
-import { getCurrentSubscription } from "../services/subscriptionService";
+import {
+  getCurrentSubscription,
+  resolveBillingState,
+} from "../services/subscriptionService";
 import {
   getSyncWebhookStatus,
   registerSyncWebhooks,
@@ -89,7 +93,9 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     });
   }
 
-  const [health, store, latestSyncJob, subscription, operational] = await Promise.all([
+  await ensureInstallationMetadata(shop);
+
+  const [health, store, latestSyncJob, subscription, operational, billingState] = await Promise.all([
     getConnectionHealth(shop, {
       probeApi: true,
       host: context.host,
@@ -122,6 +128,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     getLatestSyncJob(shop),
     getCurrentSubscription(shop).catch(() => null),
     getStoreOperationalSnapshot(shop).catch(() => null),
+    resolveBillingState(shop).catch(() => null),
   ]);
 
   let webhookStatus: Awaited<ReturnType<typeof getSyncWebhookStatus>> | null = null;
@@ -175,7 +182,10 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       webhookCoverageReady: health.webhookCoverageReady,
       reconnectRequired: health.reauthRequired,
       uninstallState: !!store?.uninstalledAt,
-      billingStatus: subscription?.billingStatus ?? null,
+      billingStatus:
+        billingState?.normalizedBillingStatus ??
+        subscription?.billingStatus ??
+        null,
     },
     webhooks: {
       registeredAt: store?.webhooksRegisteredAt?.toISOString() ?? null,
@@ -191,13 +201,17 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     },
     billing: subscription
       ? {
-          planName: subscription.planName,
-          status: subscription.status,
-          billingStatus: subscription.billingStatus ?? null,
-          active: subscription.active,
-          starterModule: subscription.starterModule ?? null,
-          endsAt: subscription.endsAt,
+          planName: billingState?.planName ?? subscription.planName,
+          status: billingState?.status ?? subscription.status,
+          billingStatus:
+            billingState?.normalizedBillingStatus ?? subscription.billingStatus ?? null,
+          active: billingState?.active ?? subscription.active,
+          starterModule:
+            billingState?.starterModule ?? subscription.starterModule ?? null,
+          endsAt: billingState?.endsAt ?? subscription.endsAt,
           trialEndsAt: subscription.trialEndsAt,
+          planSource: billingState?.planSource ?? null,
+          mismatchWarnings: billingState?.mismatchWarnings ?? [],
         }
       : null,
   });
@@ -238,12 +252,29 @@ async function handleSyncHealth(req: Request, res: Response) {
     connectionHealthy: health.healthy,
     lastSyncStatus: syncHealth.status,
     lastSyncReason: syncHealth.reason,
+    countsExplanation: {
+      rawCounts:
+        "Persisted raw Shopify records currently stored in VedaSuite.",
+      processedCounts:
+        "Derived engine output rows currently stored for dashboard and module readiness.",
+    },
     rawCounts: {
       products: operational.counts.products,
       orders: operational.counts.orders,
       customers: operational.counts.customers,
     },
+    rawStoredCounts: {
+      products: operational.counts.products,
+      orders: operational.counts.orders,
+      customers: operational.counts.customers,
+    },
     processedCounts: {
+      pricingRows: operational.counts.pricingRows,
+      profitRows: operational.counts.profitRows,
+      timelineEvents: operational.counts.timelineEvents,
+      competitorRows: operational.counts.competitorRows,
+    },
+    processedOutputCounts: {
       pricingRows: operational.counts.pricingRows,
       profitRows: operational.counts.profitRows,
       timelineEvents: operational.counts.timelineEvents,
@@ -278,37 +309,24 @@ async function handleBillingHealth(req: Request, res: Response) {
     });
   }
 
-  const [subscription, store] = await Promise.all([
+  const [subscription, billingState] = await Promise.all([
     getCurrentSubscription(shop),
-    prisma.store.findUnique({
-      where: { shop },
-      select: {
-        subscription: {
-          include: {
-            plan: true,
-          },
-        },
-      },
-    }),
+    resolveBillingState(shop),
   ]);
 
   return res.json({
     shop,
-    dbPlan: store?.subscription?.plan?.name ?? "NONE",
-    dbBillingStatus: store?.subscription?.billingStatus ?? null,
-    activeSubscriptionId: store?.subscription?.shopifyChargeId ?? null,
-    activeSubscriptionEndsAt: store?.subscription?.endsAt?.toISOString() ?? null,
-    lastBillingWebhookProcessedAt:
-      store?.subscription?.lastBillingSyncAt?.toISOString() ?? null,
+    dbPlan: billingState.dbPlanName,
+    dbBillingStatus: billingState.dbBillingStatus,
+    activeSubscriptionId: billingState.shopifyChargeId,
+    activeSubscriptionEndsAt: billingState.endsAt,
+    lastBillingWebhookProcessedAt: billingState.lastBillingWebhookProcessedAt,
+    lastBillingSyncAt: billingState.lastBillingSyncAt,
+    billingResolutionSource: billingState.lastBillingResolutionSource,
+    planSource: billingState.planSource,
     effectivePlanUsedByFeatureGating: subscription.planName,
-    effectiveBillingStatus: subscription.billingStatus,
-    mismatchWarnings:
-      store?.subscription?.plan?.name &&
-      store.subscription.plan.name !== subscription.planName
-        ? [
-            `Persisted DB plan ${store.subscription.plan.name} does not match effective plan ${subscription.planName}.`,
-          ]
-        : [],
+    effectiveBillingStatus: billingState.normalizedBillingStatus,
+    mismatchWarnings: billingState.mismatchWarnings,
   });
 }
 

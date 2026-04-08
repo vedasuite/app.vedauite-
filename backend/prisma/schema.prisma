@@ -118,6 +118,9 @@ model StoreSubscription {
   cancelledAt     DateTime?
   endsAt          DateTime?
   lastBillingSyncAt DateTime?
+  lastBillingWebhookProcessedAt DateTime?
+  lastBillingResolutionSource String?
+  lastBillingSubscriptionName String?
   moduleSwitchedAt  DateTime?
 
   auditLogs BillingAuditLog[]

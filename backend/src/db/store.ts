@@ -1,4 +1,5 @@
 import { prisma } from "./prismaClient";
+import { env } from "../config/env";
 import {
   normalizeShopDomain,
   resolveOfflineInstallation,
@@ -15,6 +16,7 @@ export async function saveStore(shop: string, accessToken: string) {
     create: {
       shop: normalizedShop,
       accessToken,
+      grantedScopes: env.shopifyScopes,
       tokenAcquisitionMode: "offline_legacy",
       isOffline: true,
       installedAt: new Date(),
@@ -25,6 +27,7 @@ export async function saveStore(shop: string, accessToken: string) {
     },
     update: {
       accessToken,
+      grantedScopes: env.shopifyScopes,
       tokenAcquisitionMode: "offline_legacy",
       reauthorizedAt: new Date(),
       uninstalledAt: null,

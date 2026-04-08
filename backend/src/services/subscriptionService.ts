@@ -31,6 +31,24 @@ export type {
   StarterModule,
 } from "../billing/capabilities";
 
+export type ResolvedBillingState = {
+  planName: BillingPlanName;
+  normalizedBillingStatus: string | null;
+  active: boolean;
+  status: SubscriptionLifeCycleStatus;
+  starterModule: StarterModule | null;
+  endsAt: string | null;
+  subscriptionId: string | null;
+  shopifyChargeId: string | null;
+  planSource: "database" | "shopify_reconciled" | "trial" | "none";
+  dbPlanName: BillingPlanName;
+  dbBillingStatus: string | null;
+  lastBillingSyncAt: string | null;
+  lastBillingWebhookProcessedAt: string | null;
+  lastBillingResolutionSource: string | null;
+  mismatchWarnings: string[];
+};
+
 const storeWithSubscriptionArgs =
   Prisma.validator<Prisma.StoreDefaultArgs>()({
     include: {
@@ -238,9 +256,11 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
       billingStatus,
       planActivatedAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingResolutionSource: "shopify_api_reconcile",
+      lastBillingSubscriptionName: activeSubscription.name,
       cancelledAt: null,
       endsAt: currentPeriodEnd,
-    },
+    } as any,
     create: {
       storeId: store.id,
       planId: plan.id,
@@ -250,8 +270,10 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
       billingStatus,
       planActivatedAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingResolutionSource: "shopify_api_reconcile",
+      lastBillingSubscriptionName: activeSubscription.name,
       endsAt: currentPeriodEnd,
-    },
+    } as any,
     include: {
       plan: true,
     },
@@ -288,6 +310,123 @@ function isPaidSubscriptionActive(subscription?: { active: boolean; endsAt: Date
   return subscription.endsAt.getTime() > Date.now();
 }
 
+export async function resolveBillingState(
+  shopDomain: string
+): Promise<ResolvedBillingState> {
+  const store = await prisma.store.findUnique({
+    where: { shop: shopDomain },
+    ...storeWithSubscriptionArgs,
+  });
+
+  if (!store) {
+    throw new Error("Store not found");
+  }
+
+  const { trialEndsAt } = await ensureStoreTrialState(store);
+  const dbPlanName = normalizePlanName(store.subscription?.plan?.name) ?? "NONE";
+  const dbBillingStatus = store.subscription?.billingStatus ?? null;
+  let subscription = store.subscription;
+  let planSource: ResolvedBillingState["planSource"] = "none";
+  let reconciledFromShopify = false;
+
+  if (!isPaidSubscriptionActive(subscription) || !subscription?.plan) {
+    const reconciled = await reconcileCurrentSubscriptionFromShopify(store);
+    if (reconciled) {
+      subscription = reconciled;
+      reconciledFromShopify = true;
+    }
+  }
+
+  if (subscription?.plan && isPaidSubscriptionActive(subscription)) {
+    const planName = normalizePlanName(subscription.plan.name) ?? "NONE";
+    planSource = reconciledFromShopify ? "shopify_reconciled" : "database";
+    return {
+      planName,
+      normalizedBillingStatus: subscription.billingStatus,
+      active: subscription.active,
+      status: deriveLifecycleStatus({
+        planName,
+        active: subscription.active,
+        billingStatus: subscription.billingStatus,
+        trialEndsAt,
+      }),
+      starterModule: normalizeStarterModule(subscription.starterModule),
+      endsAt: subscription.endsAt?.toISOString() ?? null,
+      subscriptionId: subscription.id,
+      shopifyChargeId: subscription.shopifyChargeId ?? null,
+      planSource,
+      dbPlanName,
+      dbBillingStatus,
+      lastBillingSyncAt: subscription.lastBillingSyncAt?.toISOString() ?? null,
+      lastBillingWebhookProcessedAt:
+        (subscription as any).lastBillingWebhookProcessedAt?.toISOString() ?? null,
+      lastBillingResolutionSource:
+        (subscription as any).lastBillingResolutionSource ?? null,
+      mismatchWarnings:
+        dbPlanName !== "NONE" && dbPlanName !== planName
+          ? [
+              `Persisted DB plan ${dbPlanName} does not match effective plan ${planName}.`,
+            ]
+          : [],
+    };
+  }
+
+  if (isDateInFuture(trialEndsAt)) {
+    return {
+      planName: "TRIAL",
+      normalizedBillingStatus: null,
+      active: true,
+      status: deriveLifecycleStatus({
+        planName: "TRIAL",
+        active: true,
+        billingStatus: null,
+        trialEndsAt,
+      }),
+      starterModule: null,
+      endsAt: trialEndsAt?.toISOString() ?? null,
+      subscriptionId: store.subscription?.id ?? null,
+      shopifyChargeId: store.subscription?.shopifyChargeId ?? null,
+      planSource: "trial",
+      dbPlanName,
+      dbBillingStatus,
+      lastBillingSyncAt: store.subscription?.lastBillingSyncAt?.toISOString() ?? null,
+      lastBillingWebhookProcessedAt:
+        (store.subscription as any)?.lastBillingWebhookProcessedAt?.toISOString() ?? null,
+      lastBillingResolutionSource:
+        (store.subscription as any)?.lastBillingResolutionSource ?? null,
+      mismatchWarnings: [],
+    };
+  }
+
+  return {
+    planName: "NONE",
+    normalizedBillingStatus: store.subscription?.billingStatus ?? "INACTIVE",
+    active: false,
+    status: deriveLifecycleStatus({
+      planName: "NONE",
+      active: false,
+      billingStatus: store.subscription?.billingStatus ?? "INACTIVE",
+      trialEndsAt,
+    }),
+    starterModule: null,
+    endsAt:
+      store.subscription?.endsAt?.toISOString() ??
+      trialEndsAt?.toISOString() ??
+      null,
+    subscriptionId: store.subscription?.id ?? null,
+    shopifyChargeId: store.subscription?.shopifyChargeId ?? null,
+    planSource: "none",
+    dbPlanName,
+    dbBillingStatus,
+    lastBillingSyncAt: store.subscription?.lastBillingSyncAt?.toISOString() ?? null,
+    lastBillingWebhookProcessedAt:
+      (store.subscription as any)?.lastBillingWebhookProcessedAt?.toISOString() ?? null,
+    lastBillingResolutionSource:
+      (store.subscription as any)?.lastBillingResolutionSource ?? null,
+    mismatchWarnings: [],
+  };
+}
+
 export async function getCurrentSubscription(
   shopDomain: string
 ): Promise<CurrentSubscription> {
@@ -302,35 +441,27 @@ export async function getCurrentSubscription(
 
   const { trialStartedAt, trialEndsAt } = await ensureStoreTrialState(store);
 
-  let subscription = store.subscription;
-  let subscriptionIsActive = isPaidSubscriptionActive(subscription);
+  const resolved = await resolveBillingState(shopDomain);
 
-  if (!subscriptionIsActive || !subscription?.plan) {
-    const reconciled = await reconcileCurrentSubscriptionFromShopify(store);
-    if (reconciled) {
-      subscription = reconciled;
-      subscriptionIsActive = isPaidSubscriptionActive(reconciled);
-    }
-  }
-
-  if (subscriptionIsActive && subscription?.plan) {
+  if (resolved.planName !== "NONE" && resolved.planName !== "TRIAL") {
     return buildSubscriptionPayload({
-      planName: normalizePlanName(subscription.plan.name) ?? "NONE",
-      price: subscription.plan.price,
-      trialDays: subscription.plan.trialDays,
-      starterModule: normalizeStarterModule(subscription.starterModule),
-      active: subscription.active,
-      endsAt: subscription.endsAt,
+      planName: resolved.planName,
+      price: getPlanPrice(resolved.planName),
+      trialDays:
+        store.subscription?.plan?.trialDays ?? env.billing.trialDays,
+      starterModule: resolved.starterModule,
+      active: resolved.active,
+      endsAt: resolved.endsAt ? new Date(resolved.endsAt) : null,
       trialStartedAt,
       trialEndsAt,
-      billingStatus: subscription.billingStatus,
+      billingStatus: resolved.normalizedBillingStatus,
       starterModuleSwitchAvailableAt: getStarterModuleSwitchAvailableAt(
-        subscription.moduleSwitchedAt
+        store.subscription?.moduleSwitchedAt
       ),
     });
   }
 
-  if (isDateInFuture(trialEndsAt)) {
+  if (resolved.planName === "TRIAL") {
     return buildSubscriptionPayload({
       planName: "TRIAL",
       price: 0,
@@ -350,10 +481,10 @@ export async function getCurrentSubscription(
     trialDays: env.billing.trialDays,
     starterModule: null,
     active: false,
-    endsAt: subscription?.endsAt ?? trialEndsAt,
+    endsAt: store.subscription?.endsAt ?? trialEndsAt,
     trialStartedAt,
     trialEndsAt,
-    billingStatus: subscription?.billingStatus ?? "INACTIVE",
+    billingStatus: store.subscription?.billingStatus ?? "INACTIVE",
   });
 }
 
@@ -382,8 +513,10 @@ export async function cancelSubscription(shopDomain: string) {
       billingStatus: "CANCELLED",
       cancelledAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingResolutionSource: "cancel_api",
+      lastBillingSubscriptionName: store.subscription.plan.name,
       endsAt: store.subscription.endsAt ?? new Date(),
-    },
+    } as any,
     include: {
       plan: true,
     },
@@ -495,7 +628,8 @@ export async function updateStarterModuleSelection(
       starterModule: normalizedStarterModule,
       moduleSwitchedAt: new Date(),
       lastBillingSyncAt: new Date(),
-    },
+      lastBillingResolutionSource: "starter_module_switch",
+    } as any,
     include: {
       plan: true,
     },
@@ -554,8 +688,11 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
         billingStatus: normalizedStatus,
         cancelledAt: new Date(),
         lastBillingSyncAt: new Date(),
+        lastBillingWebhookProcessedAt: new Date(),
+        lastBillingResolutionSource: "webhook_app_subscriptions_update",
+        lastBillingSubscriptionName: input.planName ?? store.subscription.plan.name,
         endsAt: currentPeriodEnd ?? new Date(),
-      },
+      } as any,
     });
 
     await recordBillingAuditLog({
@@ -572,7 +709,10 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       },
     });
 
-    return updated;
+    return {
+      ...updated,
+      plan: store.subscription.plan,
+    };
   }
 
   if (!planName || planName === "TRIAL" || planName === "NONE") {
@@ -590,13 +730,16 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       billingStatus: normalizedStatus,
       planActivatedAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingWebhookProcessedAt: new Date(),
+      lastBillingResolutionSource: "webhook_app_subscriptions_update",
+      lastBillingSubscriptionName: input.planName ?? planName,
       cancelledAt: null,
       endsAt: currentPeriodEnd,
       starterModule:
         planName === "STARTER"
           ? normalizeStarterModule(store.subscription?.starterModule) ?? "trustAbuse"
           : null,
-    },
+    } as any,
     create: {
       storeId: store.id,
       planId: plan.id,
@@ -605,8 +748,14 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       billingStatus: normalizedStatus,
       planActivatedAt: new Date(),
       lastBillingSyncAt: new Date(),
+      lastBillingWebhookProcessedAt: new Date(),
+      lastBillingResolutionSource: "webhook_app_subscriptions_update",
+      lastBillingSubscriptionName: input.planName ?? planName,
       endsAt: currentPeriodEnd,
       starterModule: planName === "STARTER" ? "trustAbuse" : null,
+    } as any,
+    include: {
+      plan: true,
     },
   });
 

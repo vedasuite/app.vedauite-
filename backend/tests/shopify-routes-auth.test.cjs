@@ -205,3 +205,95 @@ test("oauth callback persists offline installation and triggers repair tasks", a
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("oauth callback preserves first install timestamp and updates reauthorization metadata", async () => {
+  const prismaPath = path.resolve(__dirname, "../dist/db/prismaClient.js");
+  const axiosPath = require.resolve("axios");
+  const bootstrapPath = path.resolve(__dirname, "../dist/services/bootstrapService.js");
+  const adminServicePath = path.resolve(__dirname, "../dist/services/shopifyAdminService.js");
+  const syncJobServicePath = path.resolve(__dirname, "../dist/services/syncJobService.js");
+  const connectionServicePath = path.resolve(__dirname, "../dist/services/shopifyConnectionService.js");
+  const routesPath = path.resolve(__dirname, "../dist/routes/authRoutes.js");
+
+  resetModule(prismaPath);
+  resetModule(axiosPath);
+  resetModule(bootstrapPath);
+  resetModule(adminServicePath);
+  resetModule(syncJobServicePath);
+  resetModule(connectionServicePath);
+  resetModule(routesPath);
+
+  const prismaModule = require(prismaPath);
+  let upsertPayload = null;
+  const originalInstalledAt = new Date("2026-04-01T00:00:00.000Z");
+  prismaModule.prisma.store.findUnique = async () => ({
+    installedAt: originalInstalledAt,
+    trialStartedAt: originalInstalledAt,
+    trialEndsAt: new Date("2026-04-04T00:00:00.000Z"),
+    createdAt: originalInstalledAt,
+  });
+  prismaModule.prisma.store.upsert = async (payload) => {
+    upsertPayload = payload;
+    return { id: "store-1", shop: payload.where.shop };
+  };
+
+  const axiosModule = require(axiosPath);
+  axiosModule.post = async () => ({
+    data: {
+      access_token: "offline-token",
+      scope: "read_products,read_orders,read_customers",
+    },
+  });
+  if (axiosModule.default) {
+    axiosModule.default.post = axiosModule.post;
+  }
+
+  require(bootstrapPath).ensureStoreBootstrapped = async () => undefined;
+  require(adminServicePath).registerSyncWebhooks = async () => ({ created: [], totalTracked: 6 });
+  require(syncJobServicePath).runStoreSyncJob = async () => ({ id: "job-1", status: "READY_WITH_DATA" });
+  require(connectionServicePath).updateConnectionDiagnostics = async () => undefined;
+
+  const { authRouter } = require(routesPath);
+  const app = express();
+  app.use(cookieParser());
+  app.use("/auth", authRouter);
+  const server = app.listen(0);
+
+  try {
+    const start = await request(
+      server,
+      "/auth/reconnect?shop=test-shop.myshopify.com&host=embedded-host&returnTo=%2F"
+    );
+    const cookieHeader = start.headers["set-cookie"];
+    const setCookie = Array.isArray(cookieHeader) ? cookieHeader[0] : cookieHeader;
+    const stateMatch = start.body.match(/state=([a-f0-9]+)/i);
+    const query = {
+      code: "temporary-code",
+      shop: "test-shop.myshopify.com",
+      state: stateMatch[1],
+      timestamp: "1712345678",
+    };
+    const hmac = buildOAuthHmac(query, process.env.SHOPIFY_API_SECRET);
+
+    const callback = await request(
+      server,
+      `/auth/callback?shop=${encodeURIComponent(query.shop)}&code=${encodeURIComponent(
+        query.code
+      )}&state=${encodeURIComponent(query.state)}&timestamp=${query.timestamp}&hmac=${hmac}`,
+      {
+        headers: {
+          Cookie: setCookie,
+        },
+      }
+    );
+
+    assert.equal(callback.statusCode, 200);
+    assert.ok(upsertPayload);
+    assert.equal(upsertPayload.update.installedAt.getTime(), originalInstalledAt.getTime());
+    assert.ok(upsertPayload.update.reauthorizedAt instanceof Date);
+    assert.equal(upsertPayload.update.grantedScopes, "read_products,read_orders,read_customers");
+    assert.equal(upsertPayload.update.tokenAcquisitionMode, "offline_legacy");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

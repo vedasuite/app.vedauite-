@@ -108,7 +108,10 @@ async function handleAppUninstalled(req: any, res: any) {
           active: false,
           billingStatus: "UNINSTALLED",
           cancelledAt: new Date(),
-        },
+          lastBillingWebhookProcessedAt: new Date(),
+          lastBillingResolutionSource: "webhook_app_uninstalled",
+          lastBillingSubscriptionName: null,
+        } as any,
       });
     }
 
@@ -210,6 +213,9 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
 
   logEvent("info", "webhook.app_subscription_updated", {
     shop: envelope.shopDomain,
+    route: req.path,
+    processedAt: new Date().toISOString(),
+    subscriptionId: payload.admin_graphql_api_id ?? null,
     status: payload.status ?? null,
     planName: payload.name ?? null,
   });
