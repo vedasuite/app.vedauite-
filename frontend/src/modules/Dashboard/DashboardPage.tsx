@@ -73,13 +73,38 @@ type Metrics = {
       label: string;
       route: string;
     };
+    progress?: {
+      completedSteps: number;
+      totalSteps: number;
+      percent: number;
+    };
     steps: Array<{
       key: string;
       label: string;
       complete: boolean;
       active: boolean;
+      locked?: boolean;
       description: string;
+      helper?: string;
     }>;
+    hero?: {
+      headline: string;
+      subtext: string;
+      benefits: string[];
+    };
+    stateSummary?: {
+      tone: "success" | "info" | "attention" | "critical";
+      title: string;
+      description: string;
+      badge: string;
+    };
+    planSummary?: {
+      planName: string;
+      billingActive: boolean;
+      unlockedFeatures: string[];
+      lockedFeatures: string[];
+      manageRoute: string;
+    };
     currentPlan: string;
     limitedDataReason: string | null;
     recommendedModuleRoute: string;
@@ -759,56 +784,66 @@ export function DashboardPage() {
               <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingLg">
-                    {onboarding?.title ??
+                    {onboarding?.hero?.headline ??
+                      onboarding?.title ??
                       metrics.summaryTitle ??
                       "VedaSuite dashboard"}
                   </Text>
                   <Text as="p" tone="subdued">
-                    {onboarding?.description ??
+                    {onboarding?.hero?.subtext ??
+                      onboarding?.description ??
                       metrics.summaryDetail ??
                       "Sync Shopify store data, process trust, pricing, and competitor signals, and then move into the next best workflow."}
                   </Text>
                 </BlockStack>
-                <Badge tone={toneForReadiness(onboarding?.dashboardEntryState ?? syncHealthState?.status ?? metrics.dataState)}>
-                  {labelForReadiness(onboarding?.dashboardEntryState ?? syncHealthState?.status ?? metrics.dataState)}
+                <Badge
+                  tone={
+                    onboarding?.stateSummary?.tone ??
+                    toneForReadiness(
+                      onboarding?.dashboardEntryState ??
+                        syncHealthState?.status ??
+                        metrics.dataState
+                    )
+                  }
+                >
+                  {onboarding?.stateSummary?.badge ??
+                    labelForReadiness(
+                      onboarding?.dashboardEntryState ??
+                        syncHealthState?.status ??
+                        metrics.dataState
+                    )}
                 </Badge>
               </InlineStack>
               <InlineStack gap="300">
                 <Button variant="primary" onClick={runOnboardingAction}>
-                  {onboarding?.nextAction.label ?? "Continue setup"}
+                  Start Analysis
                 </Button>
-                <Button onClick={() => navigateEmbedded("/onboarding")}>
-                  Open guided onboarding
+                <Button onClick={() => navigateEmbedded("/onboarding#sample-insights")}>
+                  View Demo Insights
                 </Button>
                 <Button onClick={() => navigateEmbedded("/subscription")}>
-                  View pricing plans
+                  View Pricing
                 </Button>
               </InlineStack>
               <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    What VedaSuite does
-                  </Text>
-                  <Text as="p">
-                    Syncs Shopify data, processes store signals, and turns them into module guidance.
-                  </Text>
-                </div>
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Current plan
-                  </Text>
-                  <Text as="p">{onboarding?.currentPlan ?? subscription?.planName ?? "NONE"}</Text>
-                </div>
-                <div className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    What to do first
-                  </Text>
-                  <Text as="p">{onboarding?.nextAction.label ?? "Run first sync"}</Text>
-                </div>
+                {(onboarding?.hero?.benefits ?? [
+                  "Detect refund & fraud abuse",
+                  "Track competitor pricing & ads",
+                  "Optimize pricing for profit",
+                ]).map((benefit) => (
+                  <div key={benefit} className="vs-signal-stat">
+                    <Text as="p" variant="headingSm">
+                      {benefit}
+                    </Text>
+                  </div>
+                ))}
               </InlineGrid>
-              {onboarding?.limitedDataReason ? (
-                <Banner title="Why some insights may still look limited" tone="info">
-                  <p>{onboarding.limitedDataReason}</p>
+              {onboarding?.stateSummary ? (
+                <Banner
+                  title={onboarding.stateSummary.title}
+                  tone={onboarding.stateSummary.tone}
+                >
+                  <p>{onboarding.stateSummary.description}</p>
                 </Banner>
               ) : null}
             </BlockStack>
@@ -939,14 +974,14 @@ export function DashboardPage() {
                 <InlineStack align="space-between" blockAlign="center">
                   <div>
                     <Text as="h2" variant="headingLg">
-                      Setup progress
+                    Setup progress
                     </Text>
                     <Text as="p" tone="subdued">
-                      Backend-driven onboarding steps for this store.
+                      Follow the next required setup step for this store.
                     </Text>
                   </div>
                   <Badge tone="info">
-                    {`${onboarding?.steps.filter((item) => item.complete).length ?? 0}/${onboarding?.steps.length ?? 0} complete`}
+                    {`${onboarding?.progress?.completedSteps ?? onboarding?.steps.filter((item) => item.complete).length ?? 0}/${onboarding?.progress?.totalSteps ?? onboarding?.steps.length ?? 0} complete`}
                   </Badge>
                 </InlineStack>
                 <BlockStack gap="300">
@@ -960,15 +995,26 @@ export function DashboardPage() {
                           <Text as="p" tone="subdued">
                             {item.description}
                           </Text>
-                          <Badge tone={item.complete ? "success" : "attention"}>
-                            {item.complete ? "Complete" : item.active ? "Current" : "Upcoming"}
+                          {item.helper ? (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {item.helper}
+                            </Text>
+                          ) : null}
+                          <Badge tone={item.complete ? "success" : item.locked ? "info" : "attention"}>
+                            {item.complete
+                              ? "Complete"
+                              : item.locked
+                              ? "Locked"
+                              : item.active
+                              ? "Current"
+                              : "Next"}
                           </Badge>
                         </BlockStack>
                         <Button
                           variant={item.complete ? "secondary" : "primary"}
                           onClick={() => navigateEmbedded("/onboarding")}
                         >
-                          {item.complete ? "Review" : "Continue"}
+                          {item.complete ? "Review" : "Continue setup"}
                         </Button>
                       </InlineStack>
                     </div>
