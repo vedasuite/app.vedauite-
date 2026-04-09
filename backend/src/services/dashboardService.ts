@@ -126,6 +126,14 @@ export async function getDashboardMetrics(shopDomain: string) {
         failureReason: operational.store.lastConnectionError,
       })
     : null;
+  const lastRefreshedAt = operational
+    ? (
+        operational.latestProcessingAt ??
+        operational.latestCompetitorAt ??
+        operational.store.lastSyncAt ??
+        null
+      )?.toISOString() ?? null
+    : null;
 
   return {
     fraudAlertsToday: todayHighRiskOrders,
@@ -139,6 +147,7 @@ export async function getDashboardMetrics(shopDomain: string) {
     lastSyncAt: store.syncJobs[0]?.finishedAt?.toISOString() ?? null,
     timelineEventsGenerated: store.timelineEvents.length,
     dataState: syncState.status,
+    lastRefreshedAt,
     summaryTitle:
       syncState.status === "READY_WITH_DATA"
         ? "Store data and module outputs are ready"

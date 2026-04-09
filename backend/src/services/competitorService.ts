@@ -6,6 +6,35 @@ import {
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
 
+type CompetitorSetupStatus =
+  | "READY"
+  | "NO_DOMAINS"
+  | "NO_MONITORED_PRODUCTS";
+
+type CompetitorSyncStatus =
+  | "NOT_STARTED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "SUCCEEDED_NO_DATA"
+  | "FAILED";
+
+type CompetitorCrawlStatus =
+  | "NOT_STARTED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "PARTIAL"
+  | "FAILED";
+
+type CompetitorSnapshotStatus =
+  | "NOT_STARTED"
+  | "READY"
+  | "NO_MATCHES"
+  | "NO_CHANGES"
+  | "PARTIAL"
+  | "FAILED";
+
+type CompetitorFreshnessStatus = "UNKNOWN" | "FRESH" | "STALE";
+
 function normalizeCompetitorName(domain: string, label?: string | null) {
   return label ?? domain.replace(/\..+$/, "").replace(/[-_]/g, " ");
 }
@@ -196,6 +225,23 @@ export async function getCompetitorOverview(shopDomain: string) {
       orderBy: { createdAt: "desc" },
     }),
   ]);
+  const latestCompetitorJob = operational.latestCompetitorIngestJob;
+  const latestCompetitorSummary = latestCompetitorJob?.summaryJson
+    ? (() => {
+        try {
+          return JSON.parse(latestCompetitorJob.summaryJson) as {
+            ingested?: number;
+            domains?: number;
+            products?: number;
+            skipped?: number;
+            status?: string;
+            reason?: string | null;
+          };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
   const syncState = deriveSyncStatus({
     connectionStatus: operational.store.lastConnectionStatus,
     latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
@@ -328,9 +374,75 @@ export async function getCompetitorOverview(shopDomain: string) {
 
   const strategyDetections = buildStrategyDetections(recentRows);
   const lastIngestedAt = allRows[0]?.collectedAt ?? null;
+  const lastSuccessAt =
+    latestCompetitorJob &&
+    (latestCompetitorJob.status === "SUCCEEDED" ||
+      latestCompetitorJob.status === "SUCCEEDED_NO_DATA")
+      ? latestCompetitorJob.finishedAt ?? null
+      : lastIngestedAt;
+  const lastAttemptAt =
+    latestCompetitorJob?.finishedAt ??
+    latestCompetitorJob?.startedAt ??
+    null;
   const freshnessHours = lastIngestedAt
     ? Number(((Date.now() - new Date(lastIngestedAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
     : null;
+  const checkedDomainsCount =
+    latestCompetitorSummary?.domains ?? store.competitorDomains.length;
+  const monitoredProductsCount =
+    latestCompetitorSummary?.products ??
+    new Set(allRows.map((row) => row.productHandle)).size;
+  const matchedProductsCount = new Set(recentRows.map((row) => row.productHandle)).size;
+  const detectedPriceChangesCount = topMovers.filter(
+    (item) => item.priceDelta !== 0
+  ).length;
+  const detectedPromotionChangesCount = promoCount;
+  const setupStatus: CompetitorSetupStatus =
+    store.competitorDomains.length === 0
+      ? "NO_DOMAINS"
+      : (latestCompetitorSummary?.products ?? monitoredProductsCount) === 0
+      ? "NO_MONITORED_PRODUCTS"
+      : "READY";
+  const syncStatusLabel: CompetitorSyncStatus =
+    latestCompetitorJob?.status === "RUNNING"
+      ? "RUNNING"
+      : latestCompetitorJob?.status === "FAILED"
+      ? "FAILED"
+      : latestCompetitorJob?.status === "SUCCEEDED_NO_DATA"
+      ? "SUCCEEDED_NO_DATA"
+      : latestCompetitorJob?.status === "SUCCEEDED"
+      ? "SUCCEEDED"
+      : "NOT_STARTED";
+  const crawlStatus: CompetitorCrawlStatus =
+    syncStatusLabel === "RUNNING"
+      ? "RUNNING"
+      : syncStatusLabel === "FAILED"
+      ? "FAILED"
+      : syncStatusLabel === "NOT_STARTED"
+      ? "NOT_STARTED"
+      : latestCompetitorSummary?.skipped && latestCompetitorSummary.skipped > 0 && (latestCompetitorSummary.ingested ?? 0) > 0
+      ? "PARTIAL"
+      : syncStatusLabel === "SUCCEEDED" || syncStatusLabel === "SUCCEEDED_NO_DATA"
+      ? "SUCCEEDED"
+      : "NOT_STARTED";
+  const freshnessStatus: CompetitorFreshnessStatus =
+    freshnessHours == null ? "UNKNOWN" : freshnessHours > 72 ? "STALE" : "FRESH";
+  const snapshotStatus: CompetitorSnapshotStatus =
+    syncStatusLabel === "FAILED"
+      ? "FAILED"
+      : setupStatus !== "READY"
+      ? "NOT_STARTED"
+      : syncStatusLabel === "RUNNING"
+      ? "NOT_STARTED"
+      : monitoredProductsCount === 0
+      ? "NOT_STARTED"
+      : matchedProductsCount === 0
+      ? "NO_MATCHES"
+      : detectedPriceChangesCount === 0 && detectedPromotionChangesCount === 0
+      ? "NO_CHANGES"
+      : crawlStatus === "PARTIAL"
+      ? "PARTIAL"
+      : "READY";
   const freshnessFailureReason =
     freshnessHours != null && freshnessHours > 72
       ? `Competitor monitoring is stale. Last successful ingestion was ${freshnessHours} hours ago.`
@@ -396,6 +508,24 @@ export async function getCompetitorOverview(shopDomain: string) {
   };
 
   return {
+    monitoringStatus: {
+      setupStatus,
+      syncStatus: syncStatusLabel,
+      crawlStatus,
+      snapshotStatus,
+      freshnessStatus,
+      lastSuccessAt,
+      lastAttemptAt,
+      checkedDomainsCount,
+      monitoredProductsCount,
+      matchedProductsCount,
+      detectedPriceChangesCount,
+      detectedPromotionChangesCount,
+      latestSyncReason:
+        latestCompetitorSummary?.reason ??
+        latestCompetitorJob?.errorMessage ??
+        null,
+    },
     readiness,
     recentPriceChanges: recentChanges,
     promotionAlerts: promoCount,
@@ -557,6 +687,7 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         skipped: 0,
         status: "SUCCEEDED_NO_DATA",
         reason: "No competitor domains are configured for this store.",
+        merchantMessage: "Add competitor domains before running a refresh.",
       };
 
       await prisma.syncJob.update({
@@ -587,6 +718,8 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         status: "SUCCEEDED_NO_DATA",
         reason:
           "Pricing history is not available yet, so competitor ingestion has no product handles to monitor.",
+        merchantMessage:
+          "Refresh completed, but there were no monitored products available for competitor matching yet.",
       };
 
       await prisma.syncJob.update({
@@ -652,6 +785,12 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         ingested > 0
           ? null
           : "Competitor pages were fetched, but no live competitor snapshots were captured for the monitored products.",
+      merchantMessage:
+        ingested > 0
+          ? "Competitor monitoring refreshed successfully."
+          : skipped > 0
+          ? "Refresh completed, but some products could not be matched to competitor snapshots."
+          : "Refresh completed. No competitor changes detected.",
     };
 
     await prisma.syncJob.update({

@@ -8,6 +8,8 @@ import {
   InlineStack,
   Layout,
   Page,
+  SkeletonBodyText,
+  SkeletonDisplayText,
   Spinner,
   Text,
   Toast,
@@ -30,6 +32,7 @@ type Metrics = {
   dataState?: string;
   summaryTitle?: string;
   summaryDetail?: string;
+  lastRefreshedAt?: string | null;
   moduleReadiness?: {
     trustAbuse?: {
       readinessState: string;
@@ -83,8 +86,32 @@ type SyncJobResponse = {
     id?: string;
     jobId?: string;
     status: string;
+    summaryJson?: string | null;
+    startedAt?: string | null;
+    finishedAt?: string | null;
     errorMessage?: string | null;
   } | null;
+};
+
+type DashboardPayload = {
+  metrics: Metrics;
+  diagnostics: Diagnostics;
+};
+
+type DashboardRefreshResult = {
+  startedAt: string;
+  finishedAt: string;
+  refreshStatus: "success" | "partial" | "failure";
+  dashboardDataChanged: boolean;
+  changedSections: string[];
+  unchangedSections: string[];
+  lastRefreshedAt: string | null;
+  moduleRefreshResults: {
+    fraud: "updated" | "unchanged" | "partial" | "failed";
+    competitor: "updated" | "unchanged" | "partial" | "failed";
+    pricing: "updated" | "unchanged" | "partial" | "failed";
+  };
+  summary: string;
 };
 
 function toneForReadiness(value?: string | null) {
@@ -137,6 +164,190 @@ function formatRelativeTimestamp(value: string) {
   return date.toLocaleString();
 }
 
+function equalJson(value: unknown, nextValue: unknown) {
+  return JSON.stringify(value) === JSON.stringify(nextValue);
+}
+
+function deriveRefreshResult(args: {
+  previous: DashboardPayload | null;
+  next: DashboardPayload;
+  job: SyncJobResponse["result"];
+}): DashboardRefreshResult {
+  const previousMetrics = args.previous?.metrics ?? null;
+  const previousDiagnostics = args.previous?.diagnostics ?? null;
+  const nextMetrics = args.next.metrics;
+  const nextDiagnostics = args.next.diagnostics;
+
+  const sections = [
+    {
+      label: "KPI cards",
+      changed:
+        !previousMetrics ||
+        !equalJson(
+          {
+            fraudAlertsToday: previousMetrics.fraudAlertsToday,
+            competitorPriceChanges: previousMetrics.competitorPriceChanges,
+            aiPricingSuggestions: previousMetrics.aiPricingSuggestions,
+            profitOptimizationOpportunities:
+              previousMetrics.profitOptimizationOpportunities,
+          },
+          {
+            fraudAlertsToday: nextMetrics.fraudAlertsToday,
+            competitorPriceChanges: nextMetrics.competitorPriceChanges,
+            aiPricingSuggestions: nextMetrics.aiPricingSuggestions,
+            profitOptimizationOpportunities:
+              nextMetrics.profitOptimizationOpportunities,
+          }
+        ),
+    },
+    {
+      label: "Recent insights",
+      changed:
+        !previousMetrics ||
+        !equalJson(
+          previousMetrics.recentInsights?.map((item) => item.id) ?? [],
+          nextMetrics.recentInsights?.map((item) => item.id) ?? []
+        ),
+    },
+    {
+      label: "Quick access readiness",
+      changed:
+        !previousMetrics ||
+        !equalJson(previousMetrics.moduleReadiness, nextMetrics.moduleReadiness),
+    },
+    {
+      label: "Sync health",
+      changed:
+        !previousMetrics ||
+        !previousDiagnostics ||
+        !equalJson(
+          {
+            dataState: previousMetrics.dataState,
+            summaryTitle: previousMetrics.summaryTitle,
+            summaryDetail: previousMetrics.summaryDetail,
+            syncHealth: previousDiagnostics.sync.syncHealth,
+          },
+          {
+            dataState: nextMetrics.dataState,
+            summaryTitle: nextMetrics.summaryTitle,
+            summaryDetail: nextMetrics.summaryDetail,
+            syncHealth: nextDiagnostics.sync.syncHealth,
+          }
+        ),
+    },
+  ];
+
+  const changedSections = sections.filter((item) => item.changed).map((item) => item.label);
+  const unchangedSections = sections
+    .filter((item) => !item.changed)
+    .map((item) => item.label);
+
+  const fraudChanged =
+    !previousMetrics ||
+    !equalJson(
+      {
+        fraudAlertsToday: previousMetrics.fraudAlertsToday,
+        highRiskOrders: previousMetrics.highRiskOrders,
+        serialReturners: previousMetrics.serialReturners,
+        readiness: previousMetrics.moduleReadiness?.trustAbuse,
+      },
+      {
+        fraudAlertsToday: nextMetrics.fraudAlertsToday,
+        highRiskOrders: nextMetrics.highRiskOrders,
+        serialReturners: nextMetrics.serialReturners,
+        readiness: nextMetrics.moduleReadiness?.trustAbuse,
+      }
+    );
+  const competitorChanged =
+    !previousMetrics ||
+    !equalJson(
+      {
+        competitorPriceChanges: previousMetrics.competitorPriceChanges,
+        promotionAlerts: previousMetrics.promotionAlerts,
+        readiness: previousMetrics.moduleReadiness?.competitor,
+      },
+      {
+        competitorPriceChanges: nextMetrics.competitorPriceChanges,
+        promotionAlerts: nextMetrics.promotionAlerts,
+        readiness: nextMetrics.moduleReadiness?.competitor,
+      }
+    );
+  const pricingChanged =
+    !previousMetrics ||
+    !equalJson(
+      {
+        aiPricingSuggestions: previousMetrics.aiPricingSuggestions,
+        profitOptimizationOpportunities:
+          previousMetrics.profitOptimizationOpportunities,
+        readiness: previousMetrics.moduleReadiness?.pricingProfit,
+      },
+      {
+        aiPricingSuggestions: nextMetrics.aiPricingSuggestions,
+        profitOptimizationOpportunities:
+          nextMetrics.profitOptimizationOpportunities,
+        readiness: nextMetrics.moduleReadiness?.pricingProfit,
+      }
+    );
+
+  const refreshStatus =
+    args.job?.status === "FAILED"
+      ? "failure"
+      : args.job?.status === "SUCCEEDED_PROCESSING_PENDING" ||
+        args.job?.status === "SUCCEEDED_NO_DATA"
+      ? "partial"
+      : "success";
+
+  const dashboardDataChanged = changedSections.length > 0;
+  const summary =
+    refreshStatus === "failure"
+      ? "Refresh failed. Retry the sync to update dashboard signals."
+      : refreshStatus === "partial"
+      ? dashboardDataChanged
+        ? `Refresh completed with limited changes. Updated ${changedSections.join(", ")}.`
+        : "Refresh completed with limited updates. Some module outputs are still catching up."
+      : dashboardDataChanged
+      ? `Last refresh updated ${changedSections.join(", ")}.`
+      : "Store data refreshed successfully. No new alerts or metric changes were detected.";
+
+  return {
+    startedAt: args.job?.startedAt ?? new Date().toISOString(),
+    finishedAt: args.job?.finishedAt ?? new Date().toISOString(),
+    refreshStatus,
+    dashboardDataChanged,
+    changedSections,
+    unchangedSections,
+    lastRefreshedAt:
+      nextMetrics.lastRefreshedAt ?? args.job?.finishedAt ?? new Date().toISOString(),
+    moduleRefreshResults: {
+      fraud:
+        refreshStatus === "failure"
+          ? "failed"
+          : refreshStatus === "partial" && fraudChanged
+          ? "partial"
+          : fraudChanged
+          ? "updated"
+          : "unchanged",
+      competitor:
+        refreshStatus === "failure"
+          ? "failed"
+          : refreshStatus === "partial" && competitorChanged
+          ? "partial"
+          : competitorChanged
+          ? "updated"
+          : "unchanged",
+      pricing:
+        refreshStatus === "failure"
+          ? "failed"
+          : refreshStatus === "partial" && pricingChanged
+          ? "partial"
+          : pricingChanged
+          ? "updated"
+          : "unchanged",
+    },
+    summary,
+  };
+}
+
 export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { host, shop } = useAppBridge();
@@ -149,6 +360,9 @@ export function DashboardPage() {
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshResult, setRefreshResult] = useState<DashboardRefreshResult | null>(
+    null
+  );
 
   const fallbackReauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
@@ -156,7 +370,7 @@ export function DashboardPage() {
       }&returnTo=${encodeURIComponent("/app/dashboard")}`
     : null;
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (): Promise<DashboardPayload> => {
     const [metricsResponse, diagnosticsResponse] = await Promise.all([
       embeddedShopRequest<Metrics>("/api/dashboard/metrics", { timeoutMs: 30000 }),
       embeddedShopRequest<Diagnostics>("/api/shopify/diagnostics", {
@@ -164,8 +378,15 @@ export function DashboardPage() {
       }),
     ]);
 
-    setMetrics(metricsResponse);
-    setDiagnostics(diagnosticsResponse);
+    return {
+      metrics: metricsResponse,
+      diagnostics: diagnosticsResponse,
+    };
+  }, []);
+
+  const applyDashboardPayload = useCallback((payload: DashboardPayload) => {
+    setMetrics(payload.metrics);
+    setDiagnostics(payload.diagnostics);
     setError(null);
   }, []);
 
@@ -173,6 +394,10 @@ export function DashboardPage() {
     let mounted = true;
     setLoading(true);
     loadDashboard()
+      .then((payload) => {
+        if (!mounted) return;
+        applyDashboardPayload(payload);
+      })
       .catch((nextError) => {
         if (!mounted) return;
         setError(
@@ -189,7 +414,7 @@ export function DashboardPage() {
     return () => {
       mounted = false;
     };
-  }, [loadDashboard]);
+  }, [applyDashboardPayload, loadDashboard]);
 
   const pollSyncJob = useCallback(
     async (jobId?: string | null) => {
@@ -217,14 +442,23 @@ export function DashboardPage() {
           latestJob.status === "SUCCEEDED_NO_DATA" ||
           latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
         ) {
-          await Promise.all([loadDashboard(), refreshOnboarding()]);
-          setToast(
-            latestJob.status === "READY_WITH_DATA"
-              ? "Store analysis refreshed successfully."
-              : latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
-              ? "Store synced. Some insights are still being processed."
-              : "Store synced, but Shopify returned limited historical data."
-          );
+          const previousPayload =
+            metrics && diagnostics
+              ? {
+                  metrics,
+                  diagnostics,
+                }
+              : null;
+          const nextPayload = await loadDashboard();
+          applyDashboardPayload(nextPayload);
+          await refreshOnboarding();
+          const nextRefreshResult = deriveRefreshResult({
+            previous: previousPayload,
+            next: nextPayload,
+            job: latestJob,
+          });
+          setRefreshResult(nextRefreshResult);
+          setToast(nextRefreshResult.summary);
           return;
         }
 
@@ -237,12 +471,14 @@ export function DashboardPage() {
 
       throw new Error("Sync is still running. Check back in a moment.");
     },
-    [loadDashboard, refreshOnboarding]
+    [applyDashboardPayload, diagnostics, loadDashboard, metrics, refreshOnboarding]
   );
 
   const syncLiveStoreData = useCallback(async () => {
     setSyncing(true);
     setError(null);
+    setRefreshResult(null);
+    const startedAt = new Date().toISOString();
     try {
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
         method: "POST",
@@ -259,10 +495,25 @@ export function DashboardPage() {
           ? nextError.message
           : "Unable to sync Shopify data right now."
       );
+      setRefreshResult({
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        refreshStatus: "failure",
+        dashboardDataChanged: false,
+        changedSections: [],
+        unchangedSections: ["KPI cards", "Recent insights", "Quick access readiness", "Sync health"],
+        lastRefreshedAt: metrics?.lastRefreshedAt ?? null,
+        moduleRefreshResults: {
+          fraud: "failed",
+          competitor: "failed",
+          pricing: "failed",
+        },
+        summary: "Refresh failed. Retry the sync to update dashboard signals.",
+      });
     } finally {
       setSyncing(false);
     }
-  }, [host, pollSyncJob]);
+  }, [host, metrics?.lastRefreshedAt, pollSyncJob]);
 
   const registerWebhooks = useCallback(async () => {
     setRegisteringWebhooks(true);
@@ -276,7 +527,8 @@ export function DashboardPage() {
         },
         timeoutMs: 90000,
       });
-      await loadDashboard();
+      const nextPayload = await loadDashboard();
+      applyDashboardPayload(nextPayload);
       setToast("Shopify webhooks verified successfully.");
     } catch (nextError) {
       setError(
@@ -287,7 +539,7 @@ export function DashboardPage() {
     } finally {
       setRegisteringWebhooks(false);
     }
-  }, [host, loadDashboard]);
+  }, [applyDashboardPayload, host, loadDashboard]);
 
   const metricsCards = useMemo(
     () => [
@@ -314,6 +566,22 @@ export function DashboardPage() {
     ],
     [metrics]
   );
+  const currentRefreshSummary =
+    syncing
+      ? "Refreshing dashboard data and checking for updated metrics."
+      : refreshResult?.summary ??
+    (metrics?.lastRefreshedAt
+      ? `Refreshed at ${formatRelativeTimestamp(metrics.lastRefreshedAt)}.`
+      : "Refresh the dashboard to pull the latest Shopify data.");
+
+  const syncHealthLabel =
+    diagnostics?.sync.syncHealth?.status
+      ? labelForReadiness(diagnostics.sync.syncHealth.status)
+      : labelForReadiness(metrics?.dataState);
+  const syncHealthTone =
+    diagnostics?.sync.syncHealth?.status
+      ? toneForReadiness(diagnostics.sync.syncHealth.status)
+      : toneForReadiness(metrics?.dataState);
 
   if (loading) {
     return (
@@ -335,6 +603,7 @@ export function DashboardPage() {
         content: "Sync Data",
         onAction: () => void syncLiveStoreData(),
         loading: syncing,
+        disabled: syncing,
       }}
     >
       <Layout>
@@ -418,22 +687,104 @@ export function DashboardPage() {
         ) : null}
 
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="300">
-            {metricsCards.map((item) => (
-              <Card key={item.title}>
-                <BlockStack gap="150">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {item.title}
-                  </Text>
-                  <Text as="p" variant="heading2xl">
-                    {item.value}
-                  </Text>
+          <Card>
+            <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+              <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Last refreshed
+                </Text>
+                <Text as="p" variant="headingMd">
+                  {metrics?.lastRefreshedAt
+                    ? formatRelativeTimestamp(metrics.lastRefreshedAt)
+                    : "Not refreshed yet"}
+                </Text>
+              </BlockStack>
+              <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Sync health
+                </Text>
+                <InlineStack gap="200" blockAlign="center">
+                  <Badge tone={syncHealthTone}>{syncHealthLabel}</Badge>
                   <Text as="p" tone="subdued">
-                    {item.note}
+                    {diagnostics?.sync.syncHealth?.reason ?? metrics?.summaryDetail}
                   </Text>
-                </BlockStack>
-              </Card>
-            ))}
+                </InlineStack>
+              </BlockStack>
+              <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Refresh result
+                </Text>
+                <Text as="p">{currentRefreshSummary}</Text>
+              </BlockStack>
+            </InlineGrid>
+          </Card>
+        </Layout.Section>
+
+        {refreshResult ? (
+          <Layout.Section>
+            <Banner
+              title={
+                refreshResult.refreshStatus === "success"
+                  ? "Dashboard refresh completed"
+                  : refreshResult.refreshStatus === "partial"
+                  ? "Dashboard refresh completed with partial updates"
+                  : "Dashboard refresh failed"
+              }
+              tone={
+                refreshResult.refreshStatus === "success"
+                  ? "success"
+                  : refreshResult.refreshStatus === "partial"
+                  ? "attention"
+                  : "critical"
+              }
+            >
+              <BlockStack gap="200">
+                <p>{refreshResult.summary}</p>
+                <InlineStack gap="300">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Fraud: {refreshResult.moduleRefreshResults.fraud}
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Competitor: {refreshResult.moduleRefreshResults.competitor}
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Pricing: {refreshResult.moduleRefreshResults.pricing}
+                  </Text>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
+        <Layout.Section>
+          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="300">
+            {syncing
+              ? metricsCards.map((item) => (
+                  <Card key={item.title}>
+                    <BlockStack gap="150">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {item.title}
+                      </Text>
+                      <SkeletonDisplayText size="medium" />
+                      <SkeletonBodyText lines={1} />
+                    </BlockStack>
+                  </Card>
+                ))
+              : metricsCards.map((item) => (
+                  <Card key={item.title}>
+                    <BlockStack gap="150">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {item.title}
+                      </Text>
+                      <Text as="p" variant="heading2xl">
+                        {item.value}
+                      </Text>
+                      <Text as="p" tone="subdued">
+                        {item.note}
+                      </Text>
+                    </BlockStack>
+                  </Card>
+                ))}
           </InlineGrid>
         </Layout.Section>
 
@@ -450,7 +801,14 @@ export function DashboardPage() {
                   </Badge>
                 </InlineStack>
                 <BlockStack gap="300">
-                  {(metrics?.recentInsights?.length ?? 0) > 0 ? (
+                  {syncing ? (
+                    <Card>
+                      <BlockStack gap="300">
+                        <SkeletonBodyText lines={3} />
+                        <SkeletonBodyText lines={3} />
+                      </BlockStack>
+                    </Card>
+                  ) : (metrics?.recentInsights?.length ?? 0) > 0 ? (
                     metrics?.recentInsights?.map((insight) => (
                       <div key={insight.id} className="vs-action-card">
                         <InlineStack align="space-between" blockAlign="start" gap="300">
@@ -545,6 +903,7 @@ export function DashboardPage() {
                         </Badge>
                       </BlockStack>
                       <Button
+                        disabled={syncing}
                         onClick={() =>
                           navigateEmbedded(
                             subscription?.enabledModules?.pricingProfit

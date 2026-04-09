@@ -37,6 +37,21 @@ type CompetitorRow = {
 };
 
 type CompetitorOverview = {
+  monitoringStatus?: {
+    setupStatus: string;
+    syncStatus: string;
+    crawlStatus: string;
+    snapshotStatus: string;
+    freshnessStatus: string;
+    lastSuccessAt?: string | null;
+    lastAttemptAt?: string | null;
+    checkedDomainsCount: number;
+    monitoredProductsCount: number;
+    matchedProductsCount: number;
+    detectedPriceChangesCount: number;
+    detectedPromotionChangesCount: number;
+    latestSyncReason?: string | null;
+  };
   readiness?: {
     readinessState: string;
     reason: string;
@@ -144,6 +159,14 @@ type CompetitorResponseEngine = {
   }>;
 };
 
+type DerivedCompetitorModuleState =
+  | "success"
+  | "partial"
+  | "setup_incomplete"
+  | "empty_healthy"
+  | "failure"
+  | "stale";
+
 const resourceName = { singular: "competitor product", plural: "competitor products" };
 
 function createEmptyOverview(
@@ -151,6 +174,21 @@ function createEmptyOverview(
   reason = "Add monitored domains and run the first competitor ingestion."
 ): CompetitorOverview {
   return {
+    monitoringStatus: {
+      setupStatus: "NO_DOMAINS",
+      syncStatus: "NOT_STARTED",
+      crawlStatus: "NOT_STARTED",
+      snapshotStatus: "NOT_STARTED",
+      freshnessStatus: "UNKNOWN",
+      lastSuccessAt: null,
+      lastAttemptAt: null,
+      checkedDomainsCount: 0,
+      monitoredProductsCount: 0,
+      matchedProductsCount: 0,
+      detectedPriceChangesCount: 0,
+      detectedPromotionChangesCount: 0,
+      latestSyncReason: reason,
+    },
     readiness: {
       readinessState,
       reason,
@@ -244,6 +282,23 @@ function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
         input.coverageSummary?.monitoringPosture ??
         "Needs setup",
     },
+    monitoringStatus: {
+      setupStatus: input.monitoringStatus?.setupStatus ?? "NO_DOMAINS",
+      syncStatus: input.monitoringStatus?.syncStatus ?? "NOT_STARTED",
+      crawlStatus: input.monitoringStatus?.crawlStatus ?? "NOT_STARTED",
+      snapshotStatus: input.monitoringStatus?.snapshotStatus ?? "NOT_STARTED",
+      freshnessStatus: input.monitoringStatus?.freshnessStatus ?? "UNKNOWN",
+      lastSuccessAt: input.monitoringStatus?.lastSuccessAt ?? null,
+      lastAttemptAt: input.monitoringStatus?.lastAttemptAt ?? null,
+      checkedDomainsCount: input.monitoringStatus?.checkedDomainsCount ?? 0,
+      monitoredProductsCount: input.monitoringStatus?.monitoredProductsCount ?? 0,
+      matchedProductsCount: input.monitoringStatus?.matchedProductsCount ?? 0,
+      detectedPriceChangesCount:
+        input.monitoringStatus?.detectedPriceChangesCount ?? 0,
+      detectedPromotionChangesCount:
+        input.monitoringStatus?.detectedPromotionChangesCount ?? 0,
+      latestSyncReason: input.monitoringStatus?.latestSyncReason ?? null,
+    },
   };
 }
 
@@ -266,6 +321,166 @@ function toneForHeat(value?: string | null) {
   if (normalized === "high") return "critical";
   if (normalized === "medium") return "attention";
   return "success";
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function deriveCompetitorModuleState(
+  data: CompetitorOverview
+): DerivedCompetitorModuleState {
+  const status = data.monitoringStatus;
+
+  if (!status) {
+    return "setup_incomplete";
+  }
+
+  if (
+    status.setupStatus === "NO_DOMAINS" ||
+    status.setupStatus === "NO_MONITORED_PRODUCTS"
+  ) {
+    return "setup_incomplete";
+  }
+
+  if (
+    status.syncStatus === "FAILED" ||
+    status.crawlStatus === "FAILED" ||
+    status.snapshotStatus === "FAILED"
+  ) {
+    return "failure";
+  }
+
+  if (status.freshnessStatus === "STALE") {
+    return "stale";
+  }
+
+  if (status.snapshotStatus === "NO_MATCHES") {
+    return "partial";
+  }
+
+  if (status.crawlStatus === "PARTIAL" || status.snapshotStatus === "PARTIAL") {
+    return "partial";
+  }
+
+  if (status.snapshotStatus === "NO_CHANGES") {
+    return "empty_healthy";
+  }
+
+  if (status.snapshotStatus === "READY") {
+    return "success";
+  }
+
+  return "partial";
+}
+
+function deriveCompetitorBanner(data: CompetitorOverview) {
+  const state = deriveCompetitorModuleState(data);
+  const status = data.monitoringStatus;
+
+  switch (state) {
+    case "success":
+      return {
+        state,
+        tone: "success" as const,
+        title: "Competitor monitoring refreshed successfully",
+        body: `Last updated ${formatDateTime(status?.lastSuccessAt)}. ${status?.checkedDomainsCount ?? 0} domains checked, ${status?.matchedProductsCount ?? 0} products matched, ${status?.detectedPriceChangesCount ?? 0} price changes and ${status?.detectedPromotionChangesCount ?? 0} promotion changes detected.`,
+        summary: "Usable competitor snapshots were produced in the latest refresh.",
+        primaryAction: "View changes",
+        secondaryAction: null,
+      };
+    case "partial":
+      return {
+        state,
+        tone: "warning" as const,
+        title: "Competitor refresh completed with partial coverage",
+        body:
+          status?.snapshotStatus === "NO_MATCHES"
+            ? "The refresh checked your competitor domains, but none of the monitored products could be matched to comparable competitor snapshots."
+            : "The latest refresh completed, but some tracked products still do not have usable competitor snapshots.",
+        summary:
+          status?.latestSyncReason ??
+          "Review tracked products, update monitored domains, or run another refresh after coverage changes.",
+        primaryAction:
+          status?.snapshotStatus === "NO_MATCHES"
+            ? "Review tracked products"
+            : "Re-run sync",
+        secondaryAction: "Update domains",
+      };
+    case "setup_incomplete":
+      return {
+        state,
+        tone: "info" as const,
+        title: "Complete competitor setup to start monitoring",
+        body:
+          status?.setupStatus === "NO_DOMAINS"
+            ? "Add competitor domains before VedaSuite can monitor websites, pricing, and promotions."
+            : "VedaSuite still needs monitored products before it can compare your catalog with competitor snapshots.",
+        summary:
+          status?.setupStatus === "NO_DOMAINS"
+            ? "No competitor domains are configured yet."
+            : "No monitored products are available for competitor matching yet.",
+        primaryAction: "Complete setup",
+        secondaryAction: "Update domains",
+      };
+    case "empty_healthy":
+      return {
+        state,
+        tone: "info" as const,
+        title: "Monitoring is active. No competitor changes were detected.",
+        body: `Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}. VedaSuite checked ${status?.checkedDomainsCount ?? 0} domains and matched ${status?.matchedProductsCount ?? 0} products, but no competitor price or promotion changes were detected in the latest refresh.`,
+        summary: "This is a healthy monitoring result, not an error.",
+        primaryAction: "Refresh again",
+        secondaryAction: "Update domains",
+      };
+    case "failure":
+      return {
+        state,
+        tone: "critical" as const,
+        title: "Competitor refresh failed",
+        body:
+          status?.latestSyncReason ??
+          "VedaSuite could not complete the latest competitor refresh.",
+        summary: "Retry the refresh or update monitored domains before trying again.",
+        primaryAction: "Retry refresh",
+        secondaryAction: "Update domains",
+      };
+    case "stale":
+    default:
+      return {
+        state: "stale" as const,
+        tone: "warning" as const,
+        title: "Competitor monitoring is stale",
+        body: `The latest usable competitor refresh is getting old. Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}.`,
+        summary:
+          status?.latestSyncReason ??
+          "Run a fresh refresh to restore current competitor coverage.",
+        primaryAction: "Re-run sync",
+        secondaryAction: "Update domains",
+      };
+  }
+}
+
+function monitoringCoverageLabel(data: CompetitorOverview) {
+  const state = deriveCompetitorModuleState(data);
+
+  switch (state) {
+    case "success":
+      return "Healthy coverage";
+    case "partial":
+      return "Partial coverage";
+    case "setup_incomplete":
+      return "Setup required";
+    case "empty_healthy":
+      return "Healthy with no changes";
+    case "failure":
+      return "Refresh failed";
+    case "stale":
+    default:
+      return "Stale coverage";
+  }
 }
 
 function EmptyState(props: {
@@ -387,7 +602,7 @@ export function CompetitorPage() {
             "Response suggestions are unavailable until competitor monitoring loads."
           )
         );
-        setToast("Unable to load competitor intelligence right now.");
+        setToast("Competitor monitoring could not be loaded. Please try again.");
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -414,31 +629,78 @@ export function CompetitorPage() {
       .filter(Boolean)
       .map((domain) => ({ domain }));
     try {
-      await embeddedShopRequest("/api/competitor/domains", {
-        method: "POST",
-        body: { domains },
-        timeoutMs: 30000,
-      });
-      setConnectors((existing) =>
-        existing.map((connector) => ({
-          ...connector,
-          trackedTargets: domains.length,
-          connected: domains.length > 0,
-        }))
+      const [, overviewResponse, connectorsResponse] = await Promise.all([
+        embeddedShopRequest("/api/competitor/domains", {
+          method: "POST",
+          body: { domains },
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<{ connectors: CompetitorConnector[] }>(
+          "/api/competitor/connectors",
+          { timeoutMs: 30000 }
+        ),
+      ]);
+      const nextOverview = normalizeOverview(overviewResponse);
+      setOverview(nextOverview);
+      setConnectors(connectorsResponse.connectors);
+      writeModuleCache("competitor-overview", nextOverview);
+      writeModuleCache("competitor-connectors", connectorsResponse.connectors);
+      setToast(
+        domains.length > 0
+          ? "Competitor tracking domains updated."
+          : "Competitor tracking domains cleared."
       );
-      setToast("Competitor tracking domains updated.");
       setModalOpen(false);
     } catch {
       setToast("Unable to update competitor domains.");
     }
   };
 
+  const handleBannerPrimaryAction = () => {
+    switch (banner.primaryAction) {
+      case "View changes":
+        setSelectedTab(1);
+        return;
+      case "Review tracked products":
+        setSelectedTab(0);
+        return;
+      case "Complete setup":
+        setModalOpen(true);
+        return;
+      case "Refresh again":
+      case "Retry refresh":
+      case "Re-run sync":
+        void ingestCompetitorData();
+        return;
+      default:
+        return;
+    }
+  };
+
+  const handleBannerSecondaryAction = () => {
+    if (banner.secondaryAction === "Update domains") {
+      setModalOpen(true);
+    }
+  };
+
+  const monitoringStatusRows = [
+    ["Last successful refresh", formatDateTime(overview.monitoringStatus?.lastSuccessAt)],
+    ["Last refresh attempt", formatDateTime(overview.monitoringStatus?.lastAttemptAt)],
+    ["Domains checked", String(overview.monitoringStatus?.checkedDomainsCount ?? 0)],
+    ["Products matched", String(overview.monitoringStatus?.matchedProductsCount ?? 0)],
+    ["Coverage status", monitoringCoverageLabel(overview)],
+    ["Refresh result", banner.summary],
+  ];
+
   const ingestCompetitorData = async () => {
     try {
       setIngesting(true);
       const [ingestResponse, productsResponse, overviewResponse, connectorsResponse, responseEngineResponse] =
         await Promise.all([
-          embeddedShopRequest<{ result: { ingested: number; status?: string; reason?: string | null } }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 }),
+          embeddedShopRequest<{ result: { ingested: number; status?: string; reason?: string | null; merchantMessage?: string | null } }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 }),
           embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", { timeoutMs: 30000 }),
           embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", { timeoutMs: 30000 }),
           embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", { timeoutMs: 30000 }),
@@ -458,16 +720,23 @@ export function CompetitorPage() {
         "competitor-response-engine",
         responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
       );
-      if (ingestResponse.result.status === "SUCCEEDED") {
-        setToast(`Competitor ingestion completed with ${ingestResponse.result.ingested} fresh market records.`);
-      } else {
-        setToast(
-          ingestResponse.result.reason ??
-            "Competitor ingestion completed without capturing fresh market records."
-        );
-      }
+      const nextBanner = deriveCompetitorBanner(nextOverview);
+      setToast(
+        ingestResponse.result.merchantMessage ??
+          (nextBanner.state === "success"
+            ? "Competitor monitoring refreshed successfully."
+            : nextBanner.state === "partial"
+            ? "Refresh completed, but some products could not be matched to competitor snapshots."
+            : nextBanner.state === "empty_healthy"
+            ? "Refresh completed. No competitor changes detected."
+            : nextBanner.state === "setup_incomplete"
+            ? "Competitor setup is incomplete."
+            : nextBanner.state === "stale"
+            ? "Refresh completed, but monitoring still needs a fresher result."
+            : "Competitor refresh failed. Please try again.")
+      );
     } catch {
-      setToast("Unable to ingest competitor data right now.");
+      setToast("Competitor refresh failed. Please try again.");
     } finally {
       setIngesting(false);
     }
@@ -478,6 +747,8 @@ export function CompetitorPage() {
     googleShopping: 0,
     metaAds: 0,
   };
+  const moduleState = deriveCompetitorModuleState(overview);
+  const banner = deriveCompetitorBanner(overview);
 
   return (
     <ModuleGate
@@ -489,12 +760,20 @@ export function CompetitorPage() {
       <Page
         title="Competitor Intelligence"
         subtitle={
-          rows.length === 0
-            ? "No live competitor tracking data is available yet."
-            : "Use the move feed, strategy detection, and action board to decide what to do next."
+          moduleState === "success"
+            ? "Review competitor price moves, promotion changes, and recommended responses."
+            : moduleState === "empty_healthy"
+            ? "Monitoring is active and ready to surface competitor changes when they appear."
+            : moduleState === "setup_incomplete"
+            ? "Complete setup to start monitoring competitor domains and matched products."
+            : moduleState === "failure"
+            ? "The latest competitor refresh needs attention before fresh monitoring can resume."
+            : moduleState === "stale"
+            ? "Competitor monitoring needs a fresh refresh to restore current market coverage."
+            : "Review coverage gaps and refresh competitor monitoring to improve matched snapshots."
         }
         primaryAction={{
-          content: ingesting ? "Ingesting..." : "Ingest competitor data",
+          content: ingesting ? "Refreshing..." : "Refresh competitor monitoring",
           onAction: ingestCompetitorData,
           disabled: ingesting,
         }}
@@ -511,43 +790,50 @@ export function CompetitorPage() {
 
         <Layout.Section>
             <Banner
-              title={
-                overview.readiness?.readinessState === "READY_WITH_DATA" &&
-                (overview.freshnessHours ?? 999) <= 72
-                  ? "Competitor monitoring has live data"
-                  : overview.readiness?.readinessState === "FAILED"
-                  ? "Competitor ingestion needs attention"
-                  : rows.length === 0
-                  ? "Competitor monitoring is ready to configure"
-                  : "Competitor monitoring is stale or limited"
-              }
-              tone={
-                overview.readiness?.readinessState === "READY_WITH_DATA" &&
-                (overview.freshnessHours ?? 999) <= 72
-                  ? "success"
-                  : overview.readiness?.readinessState === "FAILED"
-                  ? "critical"
-                  : "info"
-              }
+              title={banner.title}
+              tone={banner.tone}
             >
-              <p>
-                {overview.readiness?.reason ??
-                  (rows.length === 0
-                  ? "Add monitored domains, then run ingestion to build competitor price, promotion, launch, and ad-pressure coverage."
-                  : "VedaSuite is tracking competitor moves across websites, shopping surfaces, and ad signals, then translating them into merchant response guidance.")}
-              </p>
+              <BlockStack gap="200">
+                <Text as="p">{banner.body}</Text>
+                <Text as="p" tone="subdued">{banner.summary}</Text>
+                <InlineStack gap="300">
+                  {banner.primaryAction ? (
+                    <Button onClick={handleBannerPrimaryAction} disabled={ingesting}>
+                      {banner.primaryAction}
+                    </Button>
+                  ) : null}
+                  {banner.secondaryAction ? (
+                    <Button variant="secondary" onClick={handleBannerSecondaryAction}>
+                      {banner.secondaryAction}
+                    </Button>
+                  ) : null}
+                </InlineStack>
+              </BlockStack>
             </Banner>
           </Layout.Section>
 
           <Layout.Section>
             <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
               {[
-                ["Tracked products", rows.length],
+                [
+                  "Matched products",
+                  overview.monitoringStatus?.matchedProductsCount ?? rows.length,
+                ],
                 ["Active promotions", overview.promotionAlerts],
                 ["Stock alerts", overview.stockMovementAlerts],
-                ["Tracked domains", overview.trackedDomains],
-                ["Monitoring freshness", overview.freshnessHours != null ? `${overview.freshnessHours}h` : "N/A"],
-                ["Additional channel coverage", overview.adPressure ?? "Not enabled"],
+                [
+                  "Domains checked",
+                  overview.monitoringStatus?.checkedDomainsCount ?? overview.trackedDomains,
+                ],
+                [
+                  "Monitoring freshness",
+                  overview.monitoringStatus?.freshnessStatus === "FRESH"
+                    ? "Fresh"
+                    : overview.monitoringStatus?.freshnessStatus === "STALE"
+                    ? "Stale"
+                    : "Unknown",
+                ],
+                ["Coverage status", monitoringCoverageLabel(overview)],
               ].map(([label, value]) => (
                 <Card key={String(label)}>
                   <BlockStack gap="200">
@@ -561,6 +847,43 @@ export function CompetitorPage() {
 
           <Layout.Section>
             <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <Card>
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingMd">Monitoring status</Text>
+                    <Badge
+                      tone={
+                        banner.tone === "success"
+                          ? "success"
+                          : banner.tone === "critical"
+                          ? "critical"
+                          : "attention"
+                      }
+                    >
+                      {monitoringCoverageLabel(overview)}
+                    </Badge>
+                  </InlineStack>
+                  <Text as="p" tone="subdued">
+                    Use this summary to confirm whether the latest refresh succeeded, partially covered your tracked catalog, or needs setup changes.
+                  </Text>
+                  <BlockStack gap="200">
+                    {monitoringStatusRows.map(([label, value]) => (
+                      <InlineStack
+                        key={label}
+                        align="space-between"
+                        blockAlign="start"
+                      >
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {label}
+                        </Text>
+                        <Text as="p" alignment="end">
+                          {value}
+                        </Text>
+                      </InlineStack>
+                    ))}
+                  </BlockStack>
+                </BlockStack>
+              </Card>
               <Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
