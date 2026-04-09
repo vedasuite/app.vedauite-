@@ -8,6 +8,7 @@ import { SettingsPage } from "./modules/Settings/SettingsPage";
 import { PricingPage } from "./modules/SubscriptionPlans/PricingPage";
 import { PricingProfitPage } from "./modules/PricingProfit/PricingProfitPage";
 import { TrustAbusePage } from "./modules/TrustAbuse/TrustAbusePage";
+import { OnboardingPage } from "./modules/Onboarding/OnboardingPage";
 
 function warmModuleChunks() {
   return;
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/subscription" element={<PricingPage />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/fraud" element={<Navigate to="/trust-abuse" replace />} />
         <Route path="/credit-score" element={<Navigate to="/trust-abuse" replace />} />
         <Route path="/pricing" element={<Navigate to="/pricing-profit" replace />} />

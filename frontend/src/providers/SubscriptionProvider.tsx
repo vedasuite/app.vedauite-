@@ -19,9 +19,10 @@ const BILLING_CONFIRMATION_POLL_MS = 1500;
 
 export type BillingFlowState =
   | "IDLE"
-  | "BILLING_REDIRECT"
-  | "PENDING_CONFIRMATION"
-  | "SUCCESS"
+  | "REDIRECTING_TO_SHOPIFY"
+  | "RETURNED_FROM_SHOPIFY"
+  | "CONFIRMING_BACKEND_STATE"
+  | "CONFIRMED"
   | "FAILED";
 
 type SubscriptionContextValue = {
@@ -99,14 +100,14 @@ export function SubscriptionProvider({ children }: Props) {
   );
 
   const startBillingRedirect = useCallback(() => {
-    setBillingFlowState("BILLING_REDIRECT");
+    setBillingFlowState("REDIRECTING_TO_SHOPIFY");
     setBillingError(null);
     setBillingMessage(null);
   }, []);
 
   const dismissBillingMessage = useCallback(() => {
     setBillingMessage(null);
-    setBillingFlowState((current) => (current === "SUCCESS" ? "IDLE" : current));
+    setBillingFlowState((current) => (current === "CONFIRMED" ? "IDLE" : current));
   }, []);
 
   const clearBillingError = useCallback(() => {
@@ -129,10 +130,11 @@ export function SubscriptionProvider({ children }: Props) {
       try {
         if (billingResult === "confirmed") {
           setLoading(true);
-          setBillingFlowState("PENDING_CONFIRMATION");
+          setBillingFlowState("RETURNED_FROM_SHOPIFY");
           setBillingMessage(null);
           setBillingError(null);
           clearModuleCache(SUBSCRIPTION_CACHE_KEY);
+          setBillingFlowState("CONFIRMING_BACKEND_STATE");
 
           const startedAt = Date.now();
           while (Date.now() - startedAt < BILLING_CONFIRMATION_TIMEOUT_MS) {
@@ -147,7 +149,7 @@ export function SubscriptionProvider({ children }: Props) {
             if (planMatches && starterMatches) {
               if (!mounted) return;
               commitSubscription(nextSubscription, { clearCache: true });
-              setBillingFlowState("SUCCESS");
+              setBillingFlowState("CONFIRMED");
               setBillingMessage(
                 billingMessageFromUrl ?? "Plan updated successfully"
               );
@@ -169,7 +171,7 @@ export function SubscriptionProvider({ children }: Props) {
         if (!mounted) return;
 
         if (billingResult === "noop") {
-          setBillingFlowState("SUCCESS");
+          setBillingFlowState("CONFIRMED");
           setBillingMessage(
             billingMessageFromUrl ?? "No plan change was required."
           );
@@ -187,7 +189,7 @@ export function SubscriptionProvider({ children }: Props) {
         }
 
         setBillingFlowState((current) =>
-          current === "BILLING_REDIRECT" ? current : "IDLE"
+          current === "REDIRECTING_TO_SHOPIFY" ? current : "IDLE"
         );
         if (!nextSubscription) {
           setBillingMessage(null);

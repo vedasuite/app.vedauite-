@@ -9,7 +9,6 @@ import {
   InlineStack,
   Layout,
   List,
-  Modal,
   Page,
   Tabs,
   Text,
@@ -59,6 +58,31 @@ type Metrics = {
     timelineEvents: number;
     competitorDomains: number;
     competitorRows: number;
+  } | null;
+  onboarding?: {
+    stage: string;
+    dashboardEntryState: string;
+    isCompleted: boolean;
+    isDismissed: boolean;
+    canDismiss: boolean;
+    showPersistentNextStep: boolean;
+    title: string;
+    description: string;
+    nextAction: {
+      key: string;
+      label: string;
+      route: string;
+    };
+    steps: Array<{
+      key: string;
+      label: string;
+      complete: boolean;
+      active: boolean;
+      description: string;
+    }>;
+    currentPlan: string;
+    limitedDataReason: string | null;
+    recommendedModuleRoute: string;
   } | null;
 };
 
@@ -304,9 +328,6 @@ export function DashboardPage() {
     detail: string;
     reauthorizeUrl?: string | null;
   } | null>(null);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [onboardingStep, setOnboardingStep] = useState(0);
-
   const fallbackReauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
         host ? `&host=${encodeURIComponent(host)}` : ""
@@ -319,6 +340,7 @@ export function DashboardPage() {
   const trustReadiness = metrics.moduleReadiness?.trustAbuse?.readinessState ?? "SYNC_REQUIRED";
   const competitorReadiness = metrics.moduleReadiness?.competitor?.readinessState ?? "SYNC_REQUIRED";
   const pricingReadiness = metrics.moduleReadiness?.pricingProfit?.readinessState ?? "SYNC_REQUIRED";
+  const onboarding = metrics.onboarding ?? null;
 
   const pollSyncJob = async (jobId?: string | null) => {
     const startedAt = Date.now();
@@ -579,45 +601,6 @@ export function DashboardPage() {
   ];
   const reportsEnabled = !!subscription?.capabilities?.["reports.view"];
 
-  const onboardingChecklist = useMemo(
-    () => [
-      {
-        label: "Shopify sync webhooks are registered",
-        done:
-          effectiveWebhookStatus != null &&
-          effectiveWebhookStatus.totalTracked > 0 &&
-          effectiveWebhookStatus.registeredCount === effectiveWebhookStatus.totalTracked,
-        action: "Register webhooks",
-        route: null as string | null,
-        run: registerWebhooks,
-      },
-      {
-        label: "Reports and weekly intelligence are available",
-        done: reportsEnabled,
-        action: "Review plans",
-        route: "/subscription",
-      },
-      {
-        label: "Pricing and profit modules are enabled",
-        done: !!subscription?.enabledModules?.pricingProfit,
-        action: "Unlock Pro",
-        route: "/subscription",
-      },
-      {
-        label: "Submission-facing configuration checks are green",
-        done: launchAudit?.checks.every((item) => item.ok) ?? false,
-        action: "Open settings",
-        route: "/settings",
-      },
-    ],
-    [
-      launchAudit?.checks,
-      reportsEnabled,
-      subscription?.enabledModules?.pricingProfit,
-      effectiveWebhookStatus,
-    ]
-  );
-
   const quickActions = [
       {
         title: "Review fraud queue",
@@ -696,35 +679,26 @@ export function DashboardPage() {
     [metrics]
   );
 
-  const onboardingSteps = useMemo(
-    () => [
-      {
-        title: "Connect live store signals",
-        body: "Run a live sync so the suite reflects recent orders, products, and customer activity from Shopify.",
-        action: "Sync live Shopify data",
-        onAction: syncLiveStoreData,
-      },
-      {
-        title: "Register background coverage",
-        body: "Register Shopify sync webhooks so VedaSuite keeps refreshing signals after order and customer changes.",
-        action: "Register webhooks",
-        onAction: registerWebhooks,
-      },
-      {
-        title: "Configure monitoring depth",
-        body: "Open settings to tune fraud sensitivity, competitor domains, and AI operating preferences for this store.",
-        action: "Open settings",
-        onAction: () => navigateEmbedded("/settings"),
-      },
-      {
-        title: "Unlock full-suite workflows",
-        body: "Review plans if you want pricing, shopper credit, reports, or profit optimization available to the team.",
-        action: "Review plans",
-        onAction: () => navigateEmbedded("/subscription"),
-      },
-    ],
-    [navigateEmbedded]
-  );
+  const runOnboardingAction = () => {
+    if (!onboarding) {
+      navigateEmbedded("/onboarding");
+      return;
+    }
+
+    switch (onboarding.nextAction.key) {
+      case "RECONNECT_SHOPIFY":
+        if (fallbackReauthorizeUrl) {
+          redirectTopLevel(fallbackReauthorizeUrl);
+        }
+        return;
+      case "SYNC_LIVE_DATA":
+        void syncLiveStoreData();
+        return;
+      default:
+        navigateEmbedded(onboarding.nextAction.route);
+        return;
+    }
+  };
 
   return (
     <Page
@@ -780,25 +754,65 @@ export function DashboardPage() {
         </Layout.Section>
 
         <Layout.Section>
-          <Banner
-            title={
-              metrics.summaryTitle ??
-              (metrics.lastSyncStatus === "READY_WITH_DATA"
-                ? "Store sync completed"
-                : "Run first sync to populate store signals")
-            }
-            tone={metrics.dataState === "READY_WITH_DATA" ? "success" : "warning"}
-          >
-            <p>
-              {metrics.summaryDetail ??
-                (metrics.lastSyncStatus === "READY_WITH_DATA"
-                  ? `Shopify sync completed${metrics.lastSyncAt ? ` at ${new Date(metrics.lastSyncAt).toLocaleString()}` : ""}, and VedaSuite is validating persisted module outputs.`
-                  : "The dashboard is connected, but merchant intelligence remains limited until the first successful sync completes.")}
-            </p>
-            <Box paddingBlockStart="300">
-              <Button onClick={() => setOnboardingOpen(true)}>Open onboarding guide</Button>
-            </Box>
-          </Banner>
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingLg">
+                    {onboarding?.title ??
+                      metrics.summaryTitle ??
+                      "VedaSuite dashboard"}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {onboarding?.description ??
+                      metrics.summaryDetail ??
+                      "Sync Shopify store data, process trust, pricing, and competitor signals, and then move into the next best workflow."}
+                  </Text>
+                </BlockStack>
+                <Badge tone={toneForReadiness(onboarding?.dashboardEntryState ?? syncHealthState?.status ?? metrics.dataState)}>
+                  {labelForReadiness(onboarding?.dashboardEntryState ?? syncHealthState?.status ?? metrics.dataState)}
+                </Badge>
+              </InlineStack>
+              <InlineStack gap="300">
+                <Button variant="primary" onClick={runOnboardingAction}>
+                  {onboarding?.nextAction.label ?? "Continue setup"}
+                </Button>
+                <Button onClick={() => navigateEmbedded("/onboarding")}>
+                  Open guided onboarding
+                </Button>
+                <Button onClick={() => navigateEmbedded("/subscription")}>
+                  View pricing plans
+                </Button>
+              </InlineStack>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    What VedaSuite does
+                  </Text>
+                  <Text as="p">
+                    Syncs Shopify data, processes store signals, and turns them into module guidance.
+                  </Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Current plan
+                  </Text>
+                  <Text as="p">{onboarding?.currentPlan ?? subscription?.planName ?? "NONE"}</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    What to do first
+                  </Text>
+                  <Text as="p">{onboarding?.nextAction.label ?? "Run first sync"}</Text>
+                </div>
+              </InlineGrid>
+              {onboarding?.limitedDataReason ? (
+                <Banner title="Why some insights may still look limited" tone="info">
+                  <p>{onboarding.limitedDataReason}</p>
+                </Banner>
+              ) : null}
+            </BlockStack>
+          </Card>
         </Layout.Section>
 
         <Layout.Section>
@@ -924,43 +938,37 @@ export function DashboardPage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
                   <div>
-                <Text as="h2" variant="headingLg">
-                  Reviewer readiness checklist
-                </Text>
-                <Text as="p" tone="subdued">
-                  Track the factual install, webhook, sync, and configuration checks needed for Shopify review.
-                </Text>
-              </div>
+                    <Text as="h2" variant="headingLg">
+                      Setup progress
+                    </Text>
+                    <Text as="p" tone="subdued">
+                      Backend-driven onboarding steps for this store.
+                    </Text>
+                  </div>
                   <Badge tone="info">
-                    {`${onboardingChecklist.filter((item) => item.done).length}/${onboardingChecklist.length} complete`}
+                    {`${onboarding?.steps.filter((item) => item.complete).length ?? 0}/${onboarding?.steps.length ?? 0} complete`}
                   </Badge>
                 </InlineStack>
                 <BlockStack gap="300">
-                  {onboardingChecklist.map((item) => (
+                  {(onboarding?.steps ?? []).map((item) => (
                     <div key={item.label} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="center">
                         <BlockStack gap="100">
                           <Text as="h3" variant="headingMd">
                             {item.label}
                           </Text>
-                          <Badge tone={item.done ? "success" : "attention"}>
-                            {item.done ? "Complete" : "Needs attention"}
+                          <Text as="p" tone="subdued">
+                            {item.description}
+                          </Text>
+                          <Badge tone={item.complete ? "success" : "attention"}>
+                            {item.complete ? "Complete" : item.active ? "Current" : "Upcoming"}
                           </Badge>
                         </BlockStack>
                         <Button
-                          variant={item.done ? "secondary" : "primary"}
-                          onClick={() => {
-                            if (item.run) {
-                              void item.run();
-                              return;
-                            }
-
-                            if (item.route) {
-                              navigateEmbedded(item.route);
-                            }
-                          }}
+                          variant={item.complete ? "secondary" : "primary"}
+                          onClick={() => navigateEmbedded("/onboarding")}
                         >
-                          {item.done ? "Reviewed" : item.action}
+                          {item.complete ? "Review" : "Continue"}
                         </Button>
                       </InlineStack>
                     </div>
@@ -1205,8 +1213,8 @@ export function DashboardPage() {
                             Validate AI price changes before publishing.
                           </List.Item>
                         </List>
-                        <Button onClick={() => setOnboardingOpen(true)}>
-                          Revisit onboarding guide
+                        <Button onClick={() => navigateEmbedded("/onboarding")}>
+                          Open onboarding
                         </Button>
                       </BlockStack>
                     </Card>
@@ -1228,68 +1236,6 @@ export function DashboardPage() {
           </Card>
         </Layout.Section>
       </Layout>
-      <Modal
-        open={onboardingOpen}
-        onClose={() => setOnboardingOpen(false)}
-        title="VedaSuite onboarding guide"
-        primaryAction={{
-          content: onboardingSteps[onboardingStep]?.action ?? "Continue",
-          onAction: () => {
-            onboardingSteps[onboardingStep]?.onAction();
-          },
-        }}
-        secondaryActions={[
-          ...(onboardingStep > 0
-            ? [
-                {
-                  content: "Back",
-                  onAction: () => setOnboardingStep((step) => Math.max(0, step - 1)),
-                },
-              ]
-            : []),
-          ...(onboardingStep < onboardingSteps.length - 1
-            ? [
-                {
-                  content: "Next step",
-                  onAction: () =>
-                    setOnboardingStep((step) =>
-                      Math.min(onboardingSteps.length - 1, step + 1)
-                    ),
-                },
-              ]
-            : []),
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="p" variant="bodySm" tone="subdued">
-                {`Step ${onboardingStep + 1} of ${onboardingSteps.length}`}
-              </Text>
-              <Badge tone="info">Embedded setup</Badge>
-            </InlineStack>
-            <Text as="h3" variant="headingLg">
-              {onboardingSteps[onboardingStep]?.title}
-            </Text>
-            <Text as="p" tone="subdued">
-              {onboardingSteps[onboardingStep]?.body}
-            </Text>
-            <InlineGrid columns={{ xs: 1, sm: 4 }} gap="200">
-              {onboardingSteps.map((step, index) => (
-                <div key={step.title} className="vs-signal-stat">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {`Step ${index + 1}`}
-                  </Text>
-                  <Text as="p">{step.title}</Text>
-                  <Badge tone={index === onboardingStep ? "info" : "success"}>
-                    {index === onboardingStep ? "Current" : "Guide"}
-                  </Badge>
-                </div>
-              ))}
-            </InlineGrid>
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
       {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
     </Page>
   );

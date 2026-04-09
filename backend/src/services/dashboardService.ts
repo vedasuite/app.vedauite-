@@ -1,4 +1,5 @@
 import { prisma } from "../db/prismaClient";
+import { getOnboardingState } from "./onboardingService";
 import {
   deriveModuleReadiness,
   deriveSyncStatus,
@@ -6,7 +7,7 @@ import {
 } from "./storeOperationalStateService";
 
 export async function getDashboardMetrics(shopDomain: string) {
-  const [store, operational] = await Promise.all([
+  const [store, operational, onboarding] = await Promise.all([
     prisma.store.findUnique({
       where: { shop: shopDomain },
       include: {
@@ -21,6 +22,7 @@ export async function getDashboardMetrics(shopDomain: string) {
       },
     }),
     getStoreOperationalSnapshot(shopDomain).catch(() => null),
+    getOnboardingState(shopDomain).catch(() => null),
   ]);
   if (!store) {
     return null;
@@ -156,6 +158,7 @@ export async function getDashboardMetrics(shopDomain: string) {
       pricingProfit: pricingReadiness,
     },
     persistedCounts: operational?.counts ?? null,
+    onboarding,
   };
 }
 

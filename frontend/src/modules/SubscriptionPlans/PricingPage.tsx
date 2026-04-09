@@ -94,6 +94,8 @@ type PlanCatalogEntry = {
   summary: string;
   featureBullets: string[];
   moduleBullets: string[];
+  idealFor: string;
+  recommended?: boolean;
 };
 
 const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
@@ -110,6 +112,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Choose Trust & Abuse Intelligence",
       "Or choose Competitor Intelligence",
     ],
+    idealFor: "Stores that want one focused workflow first.",
   },
   GROWTH: {
     planName: "GROWTH",
@@ -126,6 +129,8 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Pricing & Profit",
       "Reports",
     ],
+    idealFor: "Stores that want broad coverage without full Pro depth.",
+    recommended: true,
   },
   PRO: {
     planName: "PRO",
@@ -143,6 +148,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Reports",
       "Advanced Pro features",
     ],
+    idealFor: "Stores that need the full operating layer and deeper optimization controls.",
   },
 };
 
@@ -193,6 +199,10 @@ export function PricingPage() {
     billingFlowState,
     startBillingRedirect,
   } = useSubscriptionPlan();
+  const billingBusy =
+    billingFlowState === "REDIRECTING_TO_SHOPIFY" ||
+    billingFlowState === "RETURNED_FROM_SHOPIFY" ||
+    billingFlowState === "CONFIRMING_BACKEND_STATE";
   const [management, setManagement] = useState<BillingManagementState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -435,6 +445,45 @@ export function PricingPage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
+              <Text as="h2" variant="headingLg">
+                Choose the VedaSuite plan that fits your store
+              </Text>
+              <Text as="p" tone="subdued">
+                Pick the plan that matches the modules your team needs today.
+                Some recommendations become stronger as VedaSuite processes more
+                Shopify product and order history.
+              </Text>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Recommended starting point
+                  </Text>
+                  <Text as="p" variant="headingMd">
+                    Growth
+                  </Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Current billing truth
+                  </Text>
+                  <Text as="p">{management.billing.planSource}</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Honest value note
+                  </Text>
+                  <Text as="p">
+                    Recommendations improve as more synced store history becomes available.
+                  </Text>
+                </div>
+              </InlineGrid>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
               <InlineStack align="space-between">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">
@@ -519,12 +568,20 @@ export function PricingPage() {
                       <Text as="h3" variant="headingMd">
                         {catalog.planName}
                       </Text>
-                      <Badge tone={plan.current ? "success" : "info"}>
-                        {plan.current ? "Current plan" : catalog.priceLabel}
-                      </Badge>
+                      <InlineStack gap="200">
+                        {catalog.recommended ? (
+                          <Badge tone="success">Recommended</Badge>
+                        ) : null}
+                        <Badge tone={plan.current ? "success" : "info"}>
+                          {plan.current ? "Current plan" : catalog.priceLabel}
+                        </Badge>
+                      </InlineStack>
                     </InlineStack>
 
                     <Text as="p">{catalog.summary}</Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Ideal for: {catalog.idealFor}
+                    </Text>
 
                     <BlockStack gap="100">
                       <Text as="h4" variant="headingSm">
@@ -576,7 +633,7 @@ export function PricingPage() {
                     <InlineStack gap="300">
                       <Button
                         variant={plan.current ? "secondary" : "primary"}
-                        disabled={busyAction === plan.planName || plan.current}
+                        disabled={billingBusy || busyAction === plan.planName || plan.current}
                         loading={busyAction === plan.planName}
                         onClick={() => handlePlanChange(plan.planName)}
                       >
@@ -587,7 +644,7 @@ export function PricingPage() {
                       management.availableActions.canChangeStarterModule &&
                       management.subscription.starterModule !== starterModule ? (
                         <Button
-                          disabled={busyAction === "STARTER"}
+                          disabled={billingBusy || busyAction === "STARTER"}
                           onClick={() => handlePlanChange("STARTER")}
                         >
                           Update Starter module
@@ -605,13 +662,74 @@ export function PricingPage() {
           <Card>
             <BlockStack gap="200">
               <Text as="h3" variant="headingMd">
-                Billing confirmation behavior
+                Plan comparison
               </Text>
-              <Text as="p" tone="subdued">
-                After Shopify approval, VedaSuite blocks the normal page render,
-                confirms the subscription from backend truth, and only then updates
-                the visible plan state.
+              <InlineGrid columns={{ xs: 1, md: 4 }} gap="200">
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Capability</Text>
+                  <Text as="p">Trust & Abuse</Text>
+                  <Text as="p">Competitor intelligence</Text>
+                  <Text as="p">Pricing recommendations</Text>
+                  <Text as="p">Profit optimization</Text>
+                  <Text as="p">Advanced automation</Text>
+                  <Text as="p">Starter module choice</Text>
+                  <Text as="p">Ideal merchant type</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Starter</Text>
+                  <Text as="p">One selected module</Text>
+                  <Text as="p">One selected module</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Required</Text>
+                  <Text as="p">Focused first use case</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Growth</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Baseline guidance</Text>
+                  <Text as="p">Limited</Text>
+                  <Text as="p">Not needed</Text>
+                  <Text as="p">Balanced coverage</Text>
+                </div>
+                <div className="vs-signal-stat">
+                  <Text as="p" variant="bodySm" tone="subdued">Pro</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Full depth</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Not needed</Text>
+                  <Text as="p">Full operating layer</Text>
+                </div>
+              </InlineGrid>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingMd">
+                Common questions
               </Text>
+              <List type="bullet">
+                <List.Item>
+                  Starter includes one selected module. Upgrade anytime if you need broader module coverage.
+                </List.Item>
+                <List.Item>
+                  Growth is the clearest default choice for stores that want trust, competitor, pricing, and report coverage together.
+                </List.Item>
+                <List.Item>
+                  Some dashboards stay limited until VedaSuite syncs and processes enough Shopify history.
+                </List.Item>
+                <List.Item>
+                  VedaSuite only marks the plan as updated after backend confirmation from Shopify, not just after redirect return.
+                </List.Item>
+              </List>
             </BlockStack>
           </Card>
         </Layout.Section>

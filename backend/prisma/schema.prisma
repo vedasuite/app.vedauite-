@@ -29,6 +29,8 @@ model Store {
   uninstalledAt DateTime?
   lastSyncAt DateTime?
   lastSyncStatus String? @map("syncStatus")
+  onboardingCompletedAt DateTime?
+  onboardingDismissedAt DateTime?
 
   trialStartedAt DateTime?
   trialEndsAt    DateTime?

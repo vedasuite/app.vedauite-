@@ -116,7 +116,8 @@ export function AppFrame({ children }: Props) {
     <Frame navigation={navigation} showMobileNavigation={false}>
       <div className="vs-app-frame">
         <div className="vs-content">
-          {billingFlowState === "PENDING_CONFIRMATION" ? (
+          {billingFlowState === "RETURNED_FROM_SHOPIFY" ||
+          billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
             <Card>
               <div
                 style={{
@@ -143,7 +144,7 @@ export function AppFrame({ children }: Props) {
                 </div>
               </div>
             </Card>
-          ) : billingFlowState === "BILLING_REDIRECT" ? (
+          ) : billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
             <Card>
               <div
                 style={{
