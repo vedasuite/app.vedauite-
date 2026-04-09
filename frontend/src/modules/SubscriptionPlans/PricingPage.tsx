@@ -197,7 +197,9 @@ export function PricingPage() {
   const {
     refresh,
     billingFlowState,
+    billingError,
     startBillingRedirect,
+    retryBillingConfirmation,
   } = useSubscriptionPlan();
   const billingBusy =
     billingFlowState === "REDIRECTING_TO_SHOPIFY" ||
@@ -381,6 +383,24 @@ export function PricingPage() {
           <Layout.Section>
             <Banner title="Billing action failed" tone="critical">
               <p>{error}</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
+        {billingFlowState === "FAILED" && billingError ? (
+          <Layout.Section>
+            <Banner title="Subscription confirmation needs attention" tone="critical">
+              <BlockStack gap="200">
+                <p>{billingError}</p>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={() => void retryBillingConfirmation()}>
+                    Retry confirmation
+                  </Button>
+                  <Button onClick={() => void loadBillingState()}>
+                    Refresh billing state
+                  </Button>
+                </InlineStack>
+              </BlockStack>
             </Banner>
           </Layout.Section>
         ) : null}

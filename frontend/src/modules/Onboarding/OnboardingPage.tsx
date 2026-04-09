@@ -313,11 +313,6 @@ export function OnboardingPage() {
     syncLiveStoreData,
   ]);
 
-  const activeStep = useMemo(
-    () => onboarding?.steps.find((step) => step.active) ?? null,
-    [onboarding]
-  );
-
   const selectedModuleDetails = useMemo(
     () =>
       onboarding?.moduleOverview.find((module) => module.key === pendingModule) ??
@@ -495,35 +490,50 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  Modules in VedaSuite
+                  Explore each VedaSuite module
                 </Text>
                 <Text as="p" tone="subdued">
-                  Each module has its own page. Onboarding only explains the workflows and helps choose where to start.
+                  Each module has its own operational page. Use these links to understand where each workflow lives while you finish setup.
                 </Text>
                 <BlockStack gap="300">
                   {onboarding.moduleOverview.map((module) => (
                     <div key={module.key} className="vs-action-card">
-                      <InlineStack align="space-between" blockAlign="start" gap="300">
-                        <InlineStack gap="300" blockAlign="start">
-                          <ModuleIcon moduleKey={module.key} />
-                          <BlockStack gap="100">
-                            <Text as="h3" variant="headingMd">
-                              {module.title}
-                            </Text>
-                            <Text as="p" tone="subdued">
-                              {module.available ? module.summary : module.lockReason}
-                            </Text>
-                            <List type="bullet">
-                              {module.benefits.map((benefit) => (
-                                <List.Item key={benefit}>{benefit}</List.Item>
-                              ))}
-                            </List>
-                          </BlockStack>
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="start" gap="300">
+                          <InlineStack gap="300" blockAlign="start">
+                            <ModuleIcon moduleKey={module.key} />
+                            <BlockStack gap="100">
+                              <Text as="h3" variant="headingMd">
+                                {module.title}
+                              </Text>
+                              <Text as="p" tone="subdued">
+                                {module.available ? module.summary : module.lockReason}
+                              </Text>
+                              <List type="bullet">
+                                {module.benefits.map((benefit) => (
+                                  <List.Item key={benefit}>{benefit}</List.Item>
+                                ))}
+                              </List>
+                            </BlockStack>
+                          </InlineStack>
+                          <Badge tone={module.available ? "success" : "attention"}>
+                            {module.available ? "Available" : "Locked"}
+                          </Badge>
                         </InlineStack>
-                        <Badge tone={module.available ? "success" : "attention"}>
-                          {module.available ? "Available" : "Locked"}
-                        </Badge>
-                      </InlineStack>
+                        <InlineStack gap="300">
+                          <Button
+                            onClick={() => navigateEmbedded(module.route)}
+                            disabled={!module.available}
+                          >
+                            Open module page
+                          </Button>
+                          {!module.available ? (
+                            <Button onClick={() => navigateEmbedded("/app/billing")}>
+                              Manage plan
+                            </Button>
+                          ) : null}
+                        </InlineStack>
+                      </BlockStack>
                     </div>
                   ))}
                 </BlockStack>

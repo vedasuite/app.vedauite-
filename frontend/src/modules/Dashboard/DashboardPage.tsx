@@ -141,7 +141,7 @@ export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { host, shop } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
-  const { refresh: refreshOnboarding } = useOnboardingState();
+  const { onboarding, refresh: refreshOnboarding } = useOnboardingState();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -342,6 +342,25 @@ export function DashboardPage() {
           <Layout.Section>
             <Banner title="Dashboard action failed" tone="critical">
               <p>{error}</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
+        {onboarding && !onboarding.canAccessDashboard ? (
+          <Layout.Section>
+            <Banner title="Finish onboarding to unlock the full dashboard" tone="info">
+              <BlockStack gap="200">
+                <p>
+                  Dashboard reporting is available now, but the guided setup is not
+                  complete yet. Finish onboarding to mark the store ready and lock
+                  in the first workflow.
+                </p>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={() => navigateEmbedded("/app/onboarding")}>
+                    Return to onboarding
+                  </Button>
+                </InlineStack>
+              </BlockStack>
             </Banner>
           </Layout.Section>
         ) : null}

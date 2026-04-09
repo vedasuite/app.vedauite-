@@ -108,7 +108,7 @@ type OnboardingResponse = {
 };
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
-  const { subscription, billingFlowState } = useSubscriptionPlan();
+  const { subscription } = useSubscriptionPlan();
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [refresh, subscription?.planName, subscription?.starterModule, billingFlowState]);
+  }, [refresh, subscription?.planName, subscription?.starterModule]);
 
   const mutate = useCallback(
     async (path: string, body?: Record<string, unknown>) => {

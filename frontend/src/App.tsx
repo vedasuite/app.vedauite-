@@ -48,20 +48,6 @@ function EntryRoute() {
   );
 }
 
-function DashboardRoute() {
-  const { onboarding, loading } = useOnboardingState();
-
-  if (loading || !onboarding) {
-    return <FullPageLoader title="Checking dashboard access..." />;
-  }
-
-  if (!onboarding.canAccessDashboard) {
-    return <Navigate to="/app/onboarding" replace />;
-  }
-
-  return <DashboardPage />;
-}
-
 function InsightRoute({
   moduleKey,
   children,
@@ -95,7 +81,7 @@ export default function App() {
         <Route path="/" element={<EntryRoute />} />
         <Route path="/app" element={<EntryRoute />} />
         <Route path="/app/onboarding" element={<OnboardingPage />} />
-        <Route path="/app/dashboard" element={<DashboardRoute />} />
+        <Route path="/app/dashboard" element={<DashboardPage />} />
         <Route
           path="/app/fraud-intelligence"
           element={

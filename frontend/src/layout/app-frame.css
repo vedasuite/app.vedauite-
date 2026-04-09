@@ -76,19 +76,6 @@
   padding-top: 18px;
 }
 
-.vs-content::before {
-  content: "";
-  display: block;
-  height: 92px;
-  margin: 0 24px 18px;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 18% 30%, rgba(255, 206, 130, 0.45), transparent 22%),
-    radial-gradient(circle at 80% 28%, rgba(184, 123, 255, 0.18), transparent 18%),
-    linear-gradient(135deg, #0d1020 0%, #1a2640 56%, #3a3048 100%);
-  box-shadow: 0 18px 30px rgba(16, 24, 40, 0.16);
-}
-
 .vs-content > * {
   position: relative;
   z-index: 1;
