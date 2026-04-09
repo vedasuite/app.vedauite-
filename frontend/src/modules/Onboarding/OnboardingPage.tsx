@@ -321,7 +321,9 @@ export function OnboardingPage() {
   );
 
   const primaryLabel =
-    onboarding?.primaryAction.key === "CHOOSE_MODULE"
+    onboarding?.canAccessDashboard
+      ? "Open dashboard"
+      : onboarding?.primaryAction.key === "CHOOSE_MODULE"
       ? "Activate selected module"
       : onboarding?.primaryAction.label ?? "Start setup";
 
@@ -359,7 +361,7 @@ export function OnboardingPage() {
   return (
     <Page
       title="Get VedaSuite ready for your store"
-      subtitle="A dedicated setup page for connection, sync, billing readiness, and first workflow activation."
+      subtitle="Complete the key setup steps so VedaSuite can start turning Shopify data into useful store guidance."
     >
       <Layout>
         {actionError ? (
@@ -384,23 +386,10 @@ export function OnboardingPage() {
           <Card>
             <BlockStack gap="400">
               <BlockStack gap="200">
-                <Badge tone="info">Setup</Badge>
-                <Text as="h1" variant="heading2xl">
-                  Get VedaSuite ready for your store
-                </Text>
                 <Text as="p" tone="subdued" variant="bodyLg">
-                  VedaSuite connects Shopify orders, customers, and products, then helps merchants detect fraud abuse, track competitor moves, and optimize pricing.
+                  Follow the setup steps below to confirm store connection, sync Shopify data, choose the first workflow, and unlock the right module access.
                 </Text>
               </BlockStack>
-              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                {onboarding.hero.benefits.map((benefit) => (
-                  <div key={benefit} className="vs-signal-stat">
-                    <Text as="p" variant="headingSm">
-                      {benefit}
-                    </Text>
-                  </div>
-                ))}
-              </InlineGrid>
               <InlineStack gap="300">
                 <Button
                   variant="primary"
@@ -417,11 +406,6 @@ export function OnboardingPage() {
                 <Button onClick={() => navigateEmbedded("/app/billing")}>
                   Go to billing
                 </Button>
-                {onboarding.canAccessDashboard ? (
-                  <Button onClick={() => navigateEmbedded("/app/dashboard")}>
-                    Skip to dashboard
-                  </Button>
-                ) : null}
               </InlineStack>
             </BlockStack>
           </Card>
@@ -438,16 +422,23 @@ export function OnboardingPage() {
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
                 <Text as="h2" variant="headingLg">
-                  Onboarding checklist
+                  Setup progress
                 </Text>
                 <Badge tone="info">
-                  {`${onboarding.progress.completedSteps}/${onboarding.progress.totalSteps} complete`}
+                  {`${onboarding.progress.percent}% complete`}
                 </Badge>
               </InlineStack>
+              <Text as="p" tone="subdued">
+                Current step:{" "}
+                {
+                  onboarding.steps.find((step) => step.active)?.label ??
+                  (onboarding.canAccessDashboard ? "Setup complete" : "Continue setup")
+                }
+              </Text>
               <ProgressBar progress={onboarding.progress.percent} size="small" />
-              <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+              <BlockStack gap="250">
                 {onboarding.steps.map((step) => (
-                  <Card key={step.key}>
+                  <div key={step.key} className="vs-action-card">
                     <BlockStack gap="200">
                       <InlineStack align="space-between" blockAlign="start">
                         <BlockStack gap="100">
@@ -464,23 +455,33 @@ export function OnboardingPage() {
                         {step.helper}
                       </Text>
                       {step.active ? (
-                        <Button
-                          variant="primary"
-                          onClick={() => void runPrimaryAction()}
-                          loading={
-                            busyAction === "SYNC_LIVE_DATA" ||
-                            busyAction === "VIEW_FIRST_INSIGHT" ||
-                            busyAction === "CONFIRM_PLAN" ||
-                            busyAction === `SELECT_${pendingModule}`
-                          }
-                        >
-                          {primaryLabel}
-                        </Button>
+                        <InlineStack gap="300">
+                          <Button
+                            variant="primary"
+                            onClick={() => void runPrimaryAction()}
+                            loading={
+                              busyAction === "SYNC_LIVE_DATA" ||
+                              busyAction === "VIEW_FIRST_INSIGHT" ||
+                              busyAction === "CONFIRM_PLAN" ||
+                              busyAction === `SELECT_${pendingModule}`
+                            }
+                          >
+                            {primaryLabel}
+                          </Button>
+                          {step.key === "DATA_SYNC" && !onboarding.dataReadiness.webhooksReady ? (
+                            <Button
+                              onClick={() => void registerWebhooks()}
+                              loading={busyAction === "REGISTER_WEBHOOKS"}
+                            >
+                              Fix webhooks
+                            </Button>
+                          ) : null}
+                        </InlineStack>
                       ) : null}
                     </BlockStack>
-                  </Card>
+                  </div>
                 ))}
-              </InlineGrid>
+              </BlockStack>
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -490,50 +491,35 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  Explore each VedaSuite module
+                  What VedaSuite helps with
                 </Text>
                 <Text as="p" tone="subdued">
-                  Each module has its own operational page. Use these links to understand where each workflow lives while you finish setup.
+                  Each module has its own page after setup. This summary is here to help you decide which workflow to start with first.
                 </Text>
-                <BlockStack gap="300">
+                <BlockStack gap="250">
                   {onboarding.moduleOverview.map((module) => (
                     <div key={module.key} className="vs-action-card">
-                      <BlockStack gap="300">
-                        <InlineStack align="space-between" blockAlign="start" gap="300">
-                          <InlineStack gap="300" blockAlign="start">
-                            <ModuleIcon moduleKey={module.key} />
-                            <BlockStack gap="100">
-                              <Text as="h3" variant="headingMd">
-                                {module.title}
-                              </Text>
-                              <Text as="p" tone="subdued">
-                                {module.available ? module.summary : module.lockReason}
-                              </Text>
-                              <List type="bullet">
-                                {module.benefits.map((benefit) => (
-                                  <List.Item key={benefit}>{benefit}</List.Item>
-                                ))}
-                              </List>
-                            </BlockStack>
-                          </InlineStack>
-                          <Badge tone={module.available ? "success" : "attention"}>
-                            {module.available ? "Available" : "Locked"}
-                          </Badge>
+                      <InlineStack align="space-between" blockAlign="start" gap="300">
+                        <InlineStack gap="300" blockAlign="start">
+                          <ModuleIcon moduleKey={module.key} />
+                          <BlockStack gap="100">
+                            <Text as="h3" variant="headingMd">
+                              {module.title}
+                            </Text>
+                            <Text as="p" tone="subdued">
+                              {module.summary}
+                            </Text>
+                            <List type="bullet">
+                              {module.benefits.map((benefit) => (
+                                <List.Item key={benefit}>{benefit}</List.Item>
+                              ))}
+                            </List>
+                          </BlockStack>
                         </InlineStack>
-                        <InlineStack gap="300">
-                          <Button
-                            onClick={() => navigateEmbedded(module.route)}
-                            disabled={!module.available}
-                          >
-                            Open module page
-                          </Button>
-                          {!module.available ? (
-                            <Button onClick={() => navigateEmbedded("/app/billing")}>
-                              Manage plan
-                            </Button>
-                          ) : null}
-                        </InlineStack>
-                      </BlockStack>
+                        <Badge tone={module.available ? "success" : "attention"}>
+                          {module.available ? "Included" : "Locked"}
+                        </Badge>
+                      </InlineStack>
                     </div>
                   ))}
                 </BlockStack>
@@ -547,7 +533,7 @@ export function OnboardingPage() {
                   Choose your starting module
                 </Text>
                 <Text as="p" tone="subdued">
-                  Pick one starting workflow. This sets the first module VedaSuite opens during setup.
+                  Pick one workflow to review first after setup finishes. This keeps the first experience focused instead of opening every module at once.
                 </Text>
                 <BlockStack gap="200">
                   {onboarding.moduleOverview.map((module) => (
@@ -569,7 +555,7 @@ export function OnboardingPage() {
                 </BlockStack>
                 {selectedModuleDetails ? (
                   <Banner title="Selected starting workflow" tone="info">
-                    <p>{selectedModuleDetails.title} will open when you review the first insight.</p>
+                    <p>{selectedModuleDetails.title} will be the first workflow VedaSuite opens after setup.</p>
                   </Banner>
                 ) : null}
               </BlockStack>
@@ -582,95 +568,20 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  How setup works
+                  Data and permissions
                 </Text>
-                <List type="number">
-                  <List.Item>Connect store data</List.Item>
-                  <List.Item>Sync orders, products, and customers</List.Item>
-                  <List.Item>Choose plan</List.Item>
-                  <List.Item>Activate modules</List.Item>
-                  <List.Item>Review first insights</List.Item>
-                </List>
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingLg">
-                    Billing summary
-                  </Text>
-                  <Badge tone={onboarding.planSummary.billingActive ? "success" : "attention"}>
-                    {onboarding.planSummary.planName}
-                  </Badge>
-                </InlineStack>
                 <Text as="p" tone="subdued">
-                  Billing is managed on a separate page. Use it to confirm the active plan and unlock additional modules.
+                  VedaSuite reads Shopify products, customers, and orders so it can prepare fraud, competitor, and pricing guidance inside the app.
                 </Text>
                 <List type="bullet">
                   <List.Item>
-                    Unlocked areas:{" "}
-                    {(onboarding.planSummary.unlockedFeatures.length > 0
-                      ? onboarding.planSummary.unlockedFeatures
-                      : ["Onboarding and billing access"]).join(", ")}
+                    Products support competitor monitoring and pricing recommendations.
                   </List.Item>
                   <List.Item>
-                    Locked areas:{" "}
-                    {(onboarding.planSummary.lockedFeatures.length > 0
-                      ? onboarding.planSummary.lockedFeatures
-                      : ["No current setup blockers"]).join(", ")}
+                    Customers and orders help detect refund abuse and risky behavior.
                   </List.Item>
+                  <List.Item>Synced store data is used to generate insights for this store inside VedaSuite.</List.Item>
                 </List>
-                <Button onClick={() => navigateEmbedded("/app/billing")}>
-                  Go to billing
-                </Button>
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg">
-                  Data requirements
-                </Text>
-                <Text as="p" tone="subdued">
-                  VedaSuite needs Shopify orders, customers, and products before it can generate fraud, competitor, and pricing insights.
-                </Text>
-                <List type="bullet">
-                  <List.Item>Orders support fraud and refund-abuse detection.</List.Item>
-                  <List.Item>Customers help connect repeated behavior and shopper risk.</List.Item>
-                  <List.Item>Products support competitor monitoring and pricing workflows.</List.Item>
-                </List>
-                <Text as="p" tone="subdued">
-                  {onboarding.dataReadiness.syncReason}
-                </Text>
-              </BlockStack>
-            </Card>
-          </InlineGrid>
-        </Layout.Section>
-
-        <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg">
-                  Permissions and access
-                </Text>
-                <Text as="p" tone="subdued">
-                  VedaSuite requests Shopify permissions so it can read products, customers, and orders and turn them into operational guidance inside the app.
-                </Text>
-                <List type="bullet">
-                  <List.Item>Products help power competitor and pricing workflows.</List.Item>
-                  <List.Item>Orders and customers help detect refund abuse and risky behavior.</List.Item>
-                  <List.Item>Data remains inside the app experience and is used to generate insights for this store.</List.Item>
-                </List>
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg">
-                  Setup health
-                </Text>
                 <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
                   <div className="vs-signal-stat">
                     <Text as="p" variant="bodySm" tone="subdued">
@@ -687,6 +598,9 @@ export function OnboardingPage() {
                     </Text>
                   </div>
                 </InlineGrid>
+                <Text as="p" tone="subdued">
+                  {onboarding.dataReadiness.syncReason}
+                </Text>
                 {onboarding.limitedDataReason ? (
                   <Banner title="Limited insights" tone="attention">
                     <p>{onboarding.limitedDataReason}</p>
@@ -702,8 +616,77 @@ export function OnboardingPage() {
                 ) : null}
               </BlockStack>
             </Card>
+
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingLg">
+                    Billing summary
+                  </Text>
+                  <Badge tone={onboarding.planSummary.billingActive ? "success" : "attention"}>
+                    {onboarding.planSummary.planName}
+                  </Badge>
+                </InlineStack>
+                <Text as="p" tone="subdued">
+                  Billing stays on its own page. Use this summary to confirm what is already unlocked before you continue setup.
+                </Text>
+                <List type="bullet">
+                  <List.Item>
+                    Unlocked:{" "}
+                    {(onboarding.planSummary.unlockedFeatures.length > 0
+                      ? onboarding.planSummary.unlockedFeatures
+                      : ["Onboarding and billing access"]).join(", ")}
+                  </List.Item>
+                  <List.Item>
+                    Locked:{" "}
+                    {(onboarding.planSummary.lockedFeatures.length > 0
+                      ? onboarding.planSummary.lockedFeatures
+                      : ["No current blockers"]).join(", ")}
+                  </List.Item>
+                </List>
+                <Button onClick={() => navigateEmbedded("/app/billing")}>
+                  Go to billing
+                </Button>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg">
+                  How setup works
+                </Text>
+                <List type="number">
+                  <List.Item>Connect Shopify and confirm sync health.</List.Item>
+                  <List.Item>Sync products, customers, and orders.</List.Item>
+                  <List.Item>Choose the first module to review.</List.Item>
+                  <List.Item>Confirm the current plan and open the dashboard.</List.Item>
+                </List>
+              </BlockStack>
+            </Card>
           </InlineGrid>
         </Layout.Section>
+
+        {onboarding.canAccessDashboard ? (
+          <Layout.Section>
+            <Banner title="Setup complete" tone="success">
+              <BlockStack gap="200">
+                <p>
+                  VedaSuite is ready for normal use. Open the dashboard to review the latest store signals and continue with your selected starting workflow.
+                </p>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={() => navigateEmbedded("/app/dashboard")}>
+                    Open dashboard
+                  </Button>
+                  {onboarding.selectedModuleRoute ? (
+                    <Button onClick={() => navigateEmbedded(onboarding.selectedModuleRoute!)}>
+                      Open {onboarding.selectedModuleTitle}
+                    </Button>
+                  ) : null}
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : null}
       </Layout>
       {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
     </Page>
