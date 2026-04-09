@@ -24,6 +24,14 @@ import { shopifyGraphQL } from "./services/shopifyAdminService";
 
 const embeddedAppRoutes = [
   "/",
+  "/app",
+  "/app/onboarding",
+  "/app/dashboard",
+  "/app/fraud-intelligence",
+  "/app/competitor-intelligence",
+  "/app/ai-pricing-engine",
+  "/app/billing",
+  "/app/settings",
   "/dashboard",
   "/onboarding",
   "/modules/fraud",
@@ -32,7 +40,6 @@ const embeddedAppRoutes = [
   "/trust-abuse",
   "/competitor",
   "/pricing-profit",
-  "/reports",
   "/settings",
   "/subscription",
   "/fraud",

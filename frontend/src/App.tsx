@@ -4,7 +4,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppFrame } from "./layout/AppFrame";
 import { DashboardPage } from "./modules/Dashboard/DashboardPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
-import { ReportsPage } from "./modules/Reports/ReportsPage";
 import { SettingsPage } from "./modules/Settings/SettingsPage";
 import { PricingPage } from "./modules/SubscriptionPlans/PricingPage";
 import { PricingProfitPage } from "./modules/PricingProfit/PricingProfitPage";
@@ -43,7 +42,7 @@ function EntryRoute() {
 
   return (
     <Navigate
-      to={onboarding.canAccessDashboard ? "/dashboard" : "/onboarding"}
+      to={onboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding"}
       replace
     />
   );
@@ -57,7 +56,7 @@ function DashboardRoute() {
   }
 
   if (!onboarding.canAccessDashboard) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/app/onboarding" replace />;
   }
 
   return <DashboardPage />;
@@ -94,10 +93,11 @@ export default function App() {
     <AppFrame>
       <Routes>
         <Route path="/" element={<EntryRoute />} />
-        <Route path="/dashboard" element={<DashboardRoute />} />
-        <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/app" element={<EntryRoute />} />
+        <Route path="/app/onboarding" element={<OnboardingPage />} />
+        <Route path="/app/dashboard" element={<DashboardRoute />} />
         <Route
-          path="/modules/fraud"
+          path="/app/fraud-intelligence"
           element={
             <InsightRoute moduleKey="trustAbuse">
               <TrustAbusePage />
@@ -105,7 +105,7 @@ export default function App() {
           }
         />
         <Route
-          path="/modules/competitor"
+          path="/app/competitor-intelligence"
           element={
             <InsightRoute moduleKey="competitor">
               <CompetitorPage />
@@ -113,23 +113,30 @@ export default function App() {
           }
         />
         <Route
-          path="/modules/pricing"
+          path="/app/ai-pricing-engine"
           element={
             <InsightRoute moduleKey="pricingProfit">
               <PricingProfitPage />
             </InsightRoute>
           }
         />
-        <Route path="/trust-abuse" element={<Navigate to="/modules/fraud" replace />} />
-        <Route path="/competitor" element={<Navigate to="/modules/competitor" replace />} />
-        <Route path="/pricing-profit" element={<Navigate to="/modules/pricing" replace />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/subscription" element={<PricingPage />} />
-        <Route path="/fraud" element={<Navigate to="/modules/fraud" replace />} />
-        <Route path="/credit-score" element={<Navigate to="/modules/fraud" replace />} />
-        <Route path="/pricing" element={<Navigate to="/modules/pricing" replace />} />
-        <Route path="/profit" element={<Navigate to="/modules/pricing" replace />} />
+        <Route path="/app/billing" element={<PricingPage />} />
+        <Route path="/app/settings" element={<SettingsPage />} />
+
+        <Route path="/onboarding" element={<Navigate to="/app/onboarding" replace />} />
+        <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="/modules/fraud" element={<Navigate to="/app/fraud-intelligence" replace />} />
+        <Route path="/modules/competitor" element={<Navigate to="/app/competitor-intelligence" replace />} />
+        <Route path="/modules/pricing" element={<Navigate to="/app/ai-pricing-engine" replace />} />
+        <Route path="/trust-abuse" element={<Navigate to="/app/fraud-intelligence" replace />} />
+        <Route path="/competitor" element={<Navigate to="/app/competitor-intelligence" replace />} />
+        <Route path="/pricing-profit" element={<Navigate to="/app/ai-pricing-engine" replace />} />
+        <Route path="/subscription" element={<Navigate to="/app/billing" replace />} />
+        <Route path="/settings" element={<Navigate to="/app/settings" replace />} />
+        <Route path="/fraud" element={<Navigate to="/app/fraud-intelligence" replace />} />
+        <Route path="/credit-score" element={<Navigate to="/app/fraud-intelligence" replace />} />
+        <Route path="/pricing" element={<Navigate to="/app/ai-pricing-engine" replace />} />
+        <Route path="/profit" element={<Navigate to="/app/ai-pricing-engine" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppFrame>

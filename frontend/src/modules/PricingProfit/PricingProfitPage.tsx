@@ -283,8 +283,8 @@ export function PricingProfitPage() {
   if (!allowed) {
     return (
       <Page
-        title="Pricing & Profit Engine"
-        subtitle="One decision engine for pricing, profit protection, simulations, and daily margin actions."
+        title="AI Pricing Engine"
+        subtitle="Optimize pricing for margin and demand with recommendation logic, guardrails, and explainable decision support."
       >
         <Layout>
           <Layout.Section>
@@ -309,7 +309,7 @@ export function PricingProfitPage() {
                 </List>
                 <Button
                   variant="primary"
-                  onClick={() => navigateEmbedded("/subscription")}
+                  onClick={() => navigateEmbedded("/app/billing")}
                 >
                   Manage subscription plans
                 </Button>
@@ -323,11 +323,11 @@ export function PricingProfitPage() {
 
   return (
     <Page
-      title={showingProfitFocus ? "AI Profit Optimization Engine" : "Pricing & Profit Engine"}
+      title="AI Pricing Engine"
       subtitle={
         showingProfitFocus
           ? "Optimize pricing, discounting, and bundle strategy with explainable profit decision support."
-          : "Combines pricing recommendations, profit protection, market response, and daily action guidance."
+          : "Optimize pricing for margin and demand with recommendation logic, guardrails, and profit impact previews."
       }
     >
       <Layout>

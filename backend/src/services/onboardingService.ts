@@ -58,11 +58,11 @@ function normalizeOnboardingModule(
 function moduleRoute(moduleKey: OnboardingModuleKey) {
   switch (moduleKey) {
     case "trustAbuse":
-      return "/modules/fraud";
+      return "/app/fraud-intelligence";
     case "competitor":
-      return "/modules/competitor";
+      return "/app/competitor-intelligence";
     case "pricingProfit":
-      return "/modules/pricing";
+      return "/app/ai-pricing-engine";
   }
 }
 
@@ -313,37 +313,37 @@ export async function getOnboardingState(shopDomain: string) {
       ? {
           key: "RECONNECT_SHOPIFY" as const,
           label: "Reconnect Shopify",
-          route: "/onboarding",
+          route: "/app/onboarding",
         }
       : stage === "DATA_SYNC"
       ? {
           key: "SYNC_LIVE_DATA" as const,
           label:
             syncState.status === "SYNC_IN_PROGRESS" ? "Analyzing store" : "Sync Data",
-          route: "/onboarding",
+          route: "/app/onboarding",
         }
       : stage === "MODULE_SELECTION"
       ? {
           key: "CHOOSE_MODULE" as const,
           label: "Choose Module",
-          route: "/onboarding",
+          route: "/app/onboarding",
         }
       : stage === "FIRST_INSIGHT_VIEW"
       ? {
           key: "VIEW_FIRST_INSIGHT" as const,
-          label: "View First Insight",
-          route: selectedModule ? moduleRoute(selectedModule) : "/onboarding",
+          label: "Open First Module",
+          route: selectedModule ? moduleRoute(selectedModule) : "/app/onboarding",
         }
       : stage === "PLAN_CONFIRMATION"
       ? {
           key: "CONFIRM_PLAN" as const,
           label: "Confirm Plan",
-          route: "/subscription",
+          route: "/app/billing",
         }
       : {
           key: "OPEN_DASHBOARD" as const,
           label: "Open Dashboard",
-          route: "/dashboard",
+          route: "/app/dashboard",
         };
 
   return {
@@ -482,7 +482,7 @@ export async function getOnboardingState(shopDomain: string) {
         subscription.enabledModules.competitor ? null : "Competitor tracking",
         subscription.enabledModules.pricingProfit ? null : "Pricing optimization",
       ].filter((value): value is string => !!value),
-      manageRoute: "/subscription",
+      manageRoute: "/app/billing",
       canConfirmPlan: stage === "PLAN_CONFIRMATION" || canAccessDashboard,
     },
     privacySummary: {

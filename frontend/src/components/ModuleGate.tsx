@@ -78,7 +78,7 @@ export function ModuleGate({
               ) : null}
               <Button
                 variant="primary"
-                onClick={() => navigateEmbedded("/subscription")}
+                onClick={() => navigateEmbedded("/app/billing")}
               >
                 Manage subscription plans
               </Button>

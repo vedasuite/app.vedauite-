@@ -160,10 +160,10 @@ export async function getDashboardMetrics(shopDomain: string) {
       createdAt: event.createdAt.toISOString(),
       route:
         event.category === "competitor"
-          ? "/modules/competitor"
+          ? "/app/competitor-intelligence"
           : event.category === "pricing" || event.category === "profit"
-          ? "/modules/pricing"
-          : "/modules/fraud",
+          ? "/app/ai-pricing-engine"
+          : "/app/fraud-intelligence",
     })),
     moduleReadiness: {
       trustAbuse: trustReadiness,

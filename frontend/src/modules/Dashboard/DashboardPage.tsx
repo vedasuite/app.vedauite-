@@ -153,7 +153,7 @@ export function DashboardPage() {
   const fallbackReauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
         host ? `&host=${encodeURIComponent(host)}` : ""
-      }&returnTo=${encodeURIComponent("/dashboard")}`
+      }&returnTo=${encodeURIComponent("/app/dashboard")}`
     : null;
 
   const loadDashboard = useCallback(async () => {
@@ -248,7 +248,7 @@ export function DashboardPage() {
         method: "POST",
         body: {
           host,
-          returnTo: "/dashboard",
+          returnTo: "/app/dashboard",
         },
         timeoutMs: 20000,
       });
@@ -272,7 +272,7 @@ export function DashboardPage() {
         method: "POST",
         body: {
           host,
-          returnTo: "/dashboard",
+          returnTo: "/app/dashboard",
         },
         timeoutMs: 90000,
       });
@@ -329,8 +329,8 @@ export function DashboardPage() {
 
   return (
     <Page
-      title="Dashboard"
-      subtitle="Key metrics, recent insights, and direct access to the main VedaSuite modules."
+      title="Your store intelligence overview"
+      subtitle="Key monitoring metrics, readiness status, recent alerts, and direct access to each VedaSuite intelligence workflow."
       primaryAction={{
         content: "Sync Data",
         onAction: () => void syncLiveStoreData(),
@@ -478,7 +478,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Trust & Abuse
+                          Fraud Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
                           Review risky orders, refund abuse, and trust signals.
@@ -487,7 +487,7 @@ export function DashboardPage() {
                           {labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
                         </Badge>
                       </BlockStack>
-                      <Button onClick={() => navigateEmbedded("/modules/fraud")}>
+                      <Button onClick={() => navigateEmbedded("/app/fraud-intelligence")}>
                         Open
                       </Button>
                     </InlineStack>
@@ -506,7 +506,7 @@ export function DashboardPage() {
                           {labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
                         </Badge>
                       </BlockStack>
-                      <Button onClick={() => navigateEmbedded("/modules/competitor")}>
+                      <Button onClick={() => navigateEmbedded("/app/competitor-intelligence")}>
                         Open
                       </Button>
                     </InlineStack>
@@ -516,7 +516,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Pricing & Profit
+                          AI Pricing Engine
                         </Text>
                         <Text as="p" tone="subdued">
                           Review pricing opportunities and profit optimization records.
@@ -529,8 +529,8 @@ export function DashboardPage() {
                         onClick={() =>
                           navigateEmbedded(
                             subscription?.enabledModules?.pricingProfit
-                              ? "/modules/pricing"
-                              : "/subscription"
+                              ? "/app/ai-pricing-engine"
+                              : "/app/billing"
                           )
                         }
                       >

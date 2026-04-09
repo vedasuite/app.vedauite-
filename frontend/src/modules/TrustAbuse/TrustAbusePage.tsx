@@ -136,7 +136,7 @@ export function TrustAbusePage() {
 
   if (!allowed) {
     return (
-      <Page title="Trust & Abuse Intelligence" subtitle="Unified trust scoring, fraud review, return abuse, and shopper policy controls.">
+      <Page title="Detect refund abuse and customer risk" subtitle="Fraud Intelligence keeps refund abuse, risky customers, and order-risk review in one operational workspace.">
         <Layout>
           <Layout.Section>
             <Banner title="Upgrade required: Starter, Growth, or Pro" tone="info">
@@ -153,7 +153,7 @@ export function TrustAbusePage() {
                   <List.Item>Fraud review queue, policy engine, and support copilots</List.Item>
                   <List.Item>Evidence pack exports and refund outcome simulation</List.Item>
                 </List>
-                <Button variant="primary" onClick={() => navigateEmbedded("/subscription")}>Manage subscription plans</Button>
+                <Button variant="primary" onClick={() => navigateEmbedded("/app/billing")}>Manage subscription plans</Button>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -163,7 +163,7 @@ export function TrustAbusePage() {
   }
 
   return (
-    <Page title="Trust & Abuse Intelligence" subtitle="Unifies fraud, shopper trust, return abuse, policy, and support decisioning.">
+    <Page title="Fraud Intelligence" subtitle="Detect refund abuse and customer risk with review queues, shopper signals, and order-level risk explanations.">
       <Layout>
         {loading ? <Layout.Section><Banner title="Refreshing trust and abuse signals" tone="info"><p>VedaSuite is refreshing trust, abuse, and review queue signals in the background.</p></Banner></Layout.Section> : null}
         {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (

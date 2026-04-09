@@ -49,7 +49,7 @@ function buildSubscriptionReturnUrl(params: {
   starterModule?: string | null;
   message?: string | null;
 }) {
-  const redirectUrl = new URL("/subscription", env.shopifyAppUrl);
+  const redirectUrl = new URL("/app/billing", env.shopifyAppUrl);
   redirectUrl.searchParams.set("shop", params.shop);
   redirectUrl.searchParams.set("billingResult", params.billingResult);
   if (params.host) {
@@ -116,7 +116,7 @@ billingApiRouter.post("/change-plan", async (req, res) => {
       requestedPlan: plan,
       starterModule: parseStarterModule(body.starterModule),
       host: body.host ?? null,
-      returnPath: body.returnPath ?? "/subscription",
+      returnPath: body.returnPath ?? "/app/billing",
     });
     return res.json({ result });
   } catch (error) {
@@ -204,7 +204,7 @@ billingRouter.post(
         requestedPlan: plan,
         starterModule: parseStarterModule(body.starterModule),
         host: body.host ?? null,
-        returnPath: body.returnPath ?? "/subscription",
+        returnPath: body.returnPath ?? "/app/billing",
       });
 
       if (result.outcome !== "REDIRECT_REQUIRED") {
@@ -250,7 +250,7 @@ billingRouter.get("/start", async (req, res) => {
       requestedPlan: normalizedPlan,
       starterModule: parseStarterModule(starterModule),
       host: host ?? null,
-      returnPath: returnPath ?? "/subscription",
+      returnPath: returnPath ?? "/app/billing",
     });
 
     if (result.outcome === "REDIRECT_REQUIRED") {

@@ -268,7 +268,7 @@ export function PricingPage() {
               plan: planName,
               starterModule: planName === "STARTER" ? starterModule : null,
               host,
-              returnPath: "/subscription",
+              returnPath: "/app/billing",
             },
             timeoutMs: 45000,
           }
@@ -351,7 +351,7 @@ export function PricingPage() {
 
   if (loading) {
     return (
-      <Page title="Pricing and billing" subtitle="Loading the current Shopify subscription state.">
+      <Page title="Manage your plan and feature access" subtitle="Loading the current Shopify subscription state.">
         <Card>
           <InlineStack align="center">
             <Spinner accessibilityLabel="Loading billing state" size="large" />
@@ -363,7 +363,7 @@ export function PricingPage() {
 
   if (!management || !currentSummary) {
     return (
-      <Page title="Pricing and billing" subtitle="Unable to load the current billing state.">
+      <Page title="Manage your plan and feature access" subtitle="Unable to load the current billing state.">
         <Banner title="Billing state unavailable" tone="critical">
           <p>{error ?? "The backend did not return a billing management response."}</p>
         </Banner>
@@ -373,8 +373,8 @@ export function PricingPage() {
 
   return (
     <Page
-      title="Pricing and billing"
-      subtitle="Choose a plan, confirm Shopify approval, and manage the subscription without relying on redirect-only state."
+      title="Manage your plan and feature access"
+      subtitle="Choose a plan, compare module coverage, and manage Shopify billing without relying on redirect-only state."
     >
       <Layout>
         {error ? (

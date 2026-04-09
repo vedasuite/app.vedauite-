@@ -232,11 +232,11 @@ function buildPlanCards(current: CurrentSubscription): BillingPlanCard[] {
 
 function buildReturnPath(returnPath?: string | null) {
   if (!returnPath || typeof returnPath !== "string") {
-    return "/subscription";
+    return "/app/billing";
   }
 
   if (!returnPath.startsWith("/") || returnPath.startsWith("//")) {
-    return "/subscription";
+    return "/app/billing";
   }
 
   return returnPath;

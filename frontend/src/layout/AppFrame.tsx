@@ -3,7 +3,6 @@ import { ReactNode, useCallback, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VedaLogo } from "../brand/VedaLogo";
 import { useEmbeddedNavigation } from "../hooks/useEmbeddedNavigation";
-import { useOnboardingState } from "../hooks/useOnboardingState";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
 import "./app-frame.css";
 
@@ -32,7 +31,6 @@ export function AppFrame({ children }: Props) {
     dismissBillingMessage,
     clearBillingError,
   } = useSubscriptionPlan();
-  const { onboarding } = useOnboardingState();
   const [toast, setToast] = useState<string | null>(null);
 
   const activePlan = subscription?.planName ?? "NONE";
@@ -61,47 +59,26 @@ export function AppFrame({ children }: Props) {
   );
 
   const navigationItems = useMemo(
-    () =>
-      onboarding?.canAccessDashboard
-        ? [
-            createNavItem("/dashboard", "Dashboard"),
-            createNavItem("/modules/fraud", "Trust & Abuse", {
-              badge: moduleStatus.trustAbuse ? undefined : "Upgrade",
-            }),
-            createNavItem("/modules/competitor", "Competitor Intelligence", {
-              badge: moduleStatus.competitor ? undefined : "Upgrade",
-            }),
-            createNavItem("/modules/pricing", "Pricing & Profit", {
-              badge: moduleStatus.pricingProfit ? undefined : "Upgrade",
-            }),
-            createNavItem("/reports", "Reports", {
-              badge: moduleStatus.reports ? undefined : "Upgrade",
-            }),
-            createNavItem("/subscription", "Billing"),
-            createNavItem("/settings", "Settings"),
-          ]
-        : [
-            createNavItem("/onboarding", "Onboarding"),
-            ...(onboarding?.selectedModuleRoute
-              ? [
-                  createNavItem(
-                    onboarding.selectedModuleRoute,
-                    onboarding.selectedModuleTitle ?? "Selected module"
-                  ),
-                ]
-              : []),
-            createNavItem("/subscription", "Billing"),
-            createNavItem("/settings", "Settings"),
-          ],
+    () => [
+      createNavItem("/app/onboarding", "Onboarding"),
+      createNavItem("/app/dashboard", "Dashboard"),
+      createNavItem("/app/fraud-intelligence", "Fraud Intelligence", {
+        badge: moduleStatus.trustAbuse ? undefined : "Upgrade",
+      }),
+      createNavItem("/app/competitor-intelligence", "Competitor Intelligence", {
+        badge: moduleStatus.competitor ? undefined : "Upgrade",
+      }),
+      createNavItem("/app/ai-pricing-engine", "AI Pricing Engine", {
+        badge: moduleStatus.pricingProfit ? undefined : "Upgrade",
+      }),
+      createNavItem("/app/billing", "Billing"),
+      createNavItem("/app/settings", "Settings"),
+    ],
     [
       createNavItem,
       moduleStatus.competitor,
       moduleStatus.pricingProfit,
-      moduleStatus.reports,
       moduleStatus.trustAbuse,
-      onboarding?.canAccessDashboard,
-      onboarding?.selectedModuleRoute,
-      onboarding?.selectedModuleTitle,
     ]
   );
 

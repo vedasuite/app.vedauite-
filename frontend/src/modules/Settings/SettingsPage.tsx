@@ -194,8 +194,8 @@ export function SettingsPage() {
 
   return (
     <Page
-      title="Settings"
-      subtitle="Tune detection sensitivity, tracking coverage, and AI operating preferences."
+      title="Configure sync, alerts, and app preferences"
+      subtitle="Manage store settings, sync preferences, module configuration, and operational controls."
     >
       <Layout>
         <Layout.Section>
@@ -445,7 +445,7 @@ export function SettingsPage() {
                         : "These controls can be prepared now and go fully live when Pro access is active."}
                     </Text>
                     <InlineStack>
-                      <Button onClick={() => navigateEmbedded("/subscription")}>
+                      <Button onClick={() => navigateEmbedded("/app/billing")}>
                         Review plan access
                       </Button>
                     </InlineStack>
