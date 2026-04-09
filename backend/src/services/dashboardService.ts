@@ -152,6 +152,19 @@ export async function getDashboardMetrics(shopDomain: string) {
         ? "Shopify sync is running"
         : "Run first sync to populate store signals",
     summaryDetail: syncState.reason,
+    recentInsights: store.timelineEvents.slice(0, 5).map((event) => ({
+      id: event.id,
+      title: event.title,
+      detail: event.detail,
+      severity: event.severity,
+      createdAt: event.createdAt.toISOString(),
+      route:
+        event.category === "competitor"
+          ? "/modules/competitor"
+          : event.category === "pricing" || event.category === "profit"
+          ? "/modules/pricing"
+          : "/modules/fraud",
+    })),
     moduleReadiness: {
       trustAbuse: trustReadiness,
       competitor: competitorReadiness,

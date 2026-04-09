@@ -1,25 +1,23 @@
 import {
-  Banner,
   Badge,
+  Banner,
   BlockStack,
   Button,
-  Box,
   Card,
   InlineGrid,
   InlineStack,
   Layout,
-  List,
   Page,
-  Tabs,
+  Spinner,
   Text,
   Toast,
 } from "@shopify/polaris";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
-import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { useOnboardingState } from "../../hooks/useOnboardingState";
 
 type Metrics = {
   fraudAlertsToday: number;
@@ -29,9 +27,6 @@ type Metrics = {
   promotionAlerts: number;
   aiPricingSuggestions: number;
   profitOptimizationOpportunities: number;
-  lastSyncStatus?: string;
-  lastSyncAt?: string | null;
-  timelineEventsGenerated?: number;
   dataState?: string;
   summaryTitle?: string;
   summaryDetail?: string;
@@ -49,244 +44,48 @@ type Metrics = {
       reason: string;
     } | null;
   };
-  persistedCounts?: {
-    products: number;
-    orders: number;
-    customers: number;
-    pricingRows: number;
-    profitRows: number;
-    timelineEvents: number;
-    competitorDomains: number;
-    competitorRows: number;
-  } | null;
-  onboarding?: {
-    stage: string;
-    dashboardEntryState: string;
-    isCompleted: boolean;
-    isDismissed: boolean;
-    canDismiss: boolean;
-    showPersistentNextStep: boolean;
-    title: string;
-    description: string;
-    nextAction: {
-      key: string;
-      label: string;
-      route: string;
-    };
-    progress?: {
-      completedSteps: number;
-      totalSteps: number;
-      percent: number;
-    };
-    steps: Array<{
-      key: string;
-      label: string;
-      complete: boolean;
-      active: boolean;
-      locked?: boolean;
-      description: string;
-      helper?: string;
-    }>;
-    hero?: {
-      headline: string;
-      subtext: string;
-      benefits: string[];
-    };
-    stateSummary?: {
-      tone: "success" | "info" | "attention" | "critical";
-      title: string;
-      description: string;
-      badge: string;
-    };
-    planSummary?: {
-      planName: string;
-      billingActive: boolean;
-      unlockedFeatures: string[];
-      lockedFeatures: string[];
-      manageRoute: string;
-    };
-    currentPlan: string;
-    limitedDataReason: string | null;
-    recommendedModuleRoute: string;
-  } | null;
-};
-
-type WebhookStatus = {
-  registeredCount: number;
-  totalTracked: number;
-};
-
-type LaunchAudit = {
-  checks: Array<{
-    key: string;
-    ok: boolean;
-    detail: string;
-  }>;
-  reviewerReminders?: string[];
-};
-
-type DecisionCenter = {
-  summary: {
-    activeModules: number;
-    priorityLevel: string;
-    automationReadiness: string;
-  };
-  decisions: Array<{
+  recentInsights?: Array<{
     id: string;
     title: string;
-    module: string;
+    detail: string;
     severity: string;
-    rationale: string;
+    createdAt: string;
     route: string;
-    confidence: number;
-    recommendedAction: string;
-    explanationPoints: string[];
-    automationPosture: string;
   }>;
-};
-
-type SyncJobPayload = {
-  id?: string;
-  jobId?: string;
-  status: string;
-  errorMessage?: string | null;
-  reusedExisting?: boolean;
-  finishedAt?: string | null;
-  summaryJson?: string | null;
-};
-
-type SyncJobResponse = {
-  result: SyncJobPayload | null;
-};
-
-type ConnectionHealth = {
-  shop: string | null;
-  code: string;
-  healthy: boolean;
-  installationFound: boolean;
-  hasOfflineToken: boolean;
-  webhooksRegistered: boolean;
-  webhookCoverageReady: boolean;
-  lastSyncStatus: string | null;
-  lastSyncAt: string | null;
-  lastConnectionStatus: string | null;
-  lastConnectionError: string | null;
-  reauthRequired: boolean;
-  message: string;
-  reauthorizeUrl?: string;
 };
 
 type Diagnostics = {
-  generatedAt: string;
-  shop: string;
-  installation: {
-    found: boolean;
-    offlineTokenPresent: boolean;
-    refreshTokenPresent: boolean;
-    accessTokenExpiresAt: string | null;
-    refreshTokenExpiresAt: string | null;
-    uninstalledAt: string | null;
-  };
-  connection: ConnectionHealth;
-  reviewerSummary: {
-    installExists: boolean;
-    tokenPresent: boolean;
-    tokenRefreshHealthy: boolean;
-    webhookCoverageReady: boolean;
-    reconnectRequired: boolean;
-    uninstallState: boolean;
-    billingStatus: string | null;
+  connection: {
+    healthy: boolean;
+    code: string;
+    message: string;
+    reauthRequired: boolean;
+    reauthorizeUrl?: string;
   };
   webhooks: {
     registeredAt: string | null;
     lastStatus: string | null;
-    liveStatus: WebhookStatus | null;
+    liveStatus: {
+      registeredCount: number;
+      totalTracked: number;
+    } | null;
   };
   sync: {
-    lastSyncAt: string | null;
-    lastSyncStatus: string | null;
-    latestJob: SyncJobPayload | null;
     syncHealth?: {
       status: string;
       reason: string;
     } | null;
-    operationalCounts?: Metrics["persistedCounts"];
   };
-  billing: {
-    planName: string;
-    status: string;
-    billingStatus: string | null;
-    active: boolean;
-    starterModule: string | null;
-    endsAt: string | null;
-    trialEndsAt: string | null;
-  } | null;
 };
 
-function getApiErrorMessage(error: unknown, fallback: string) {
-  const candidate = error as {
-    message?: string;
-    response?: {
-      data?: {
-        error?: string | { message?: string; reauthorizeUrl?: string };
-        message?: string;
-      };
-    };
-  };
-
-  const responseError = candidate.response?.data?.error;
-  if (typeof responseError === "string" && responseError.trim()) {
-    return responseError;
-  }
-
-  if (
-    responseError &&
-    typeof responseError === "object" &&
-    typeof responseError.message === "string" &&
-    responseError.message.trim()
-  ) {
-    return responseError.message;
-  }
-
-  const responseMessage = candidate.response?.data?.message;
-  if (typeof responseMessage === "string" && responseMessage.trim()) {
-    return responseMessage;
-  }
-
-  if (typeof candidate.message === "string" && candidate.message.trim()) {
-    return candidate.message;
-  }
-
-  return fallback;
-}
-
-function getApiReauthorizeUrl(error: unknown) {
-  const candidate = error as {
-    reauthorizeUrl?: string | null;
-    response?: {
-      data?: {
-        error?: {
-          reauthorizeUrl?: string;
-        };
-      };
-    };
-  };
-
-  return (
-    candidate.reauthorizeUrl ??
-    candidate.response?.data?.error?.reauthorizeUrl ??
-    null
-  );
-}
-
-function redirectTopLevel(url: string) {
-  if (window.top && window.top !== window) {
-    window.top.location.href = url;
-    return;
-  }
-
-  window.location.href = url;
-}
+type SyncJobResponse = {
+  result: {
+    id?: string;
+    jobId?: string;
+    status: string;
+    errorMessage?: string | null;
+  } | null;
+};
 
 function toneForReadiness(value?: string | null) {
   switch (value) {
@@ -308,546 +107,315 @@ function labelForReadiness(value?: string | null) {
     case "READY_WITH_DATA":
       return "Ready with data";
     case "SYNC_IN_PROGRESS":
-      return "Syncing";
+      return "Analyzing store";
     case "SYNC_COMPLETED_PROCESSING_PENDING":
-      return "Processing";
+      return "Limited insights";
     case "EMPTY_STORE_DATA":
       return "No store data";
     case "FAILED":
-      return "Failed";
+      return "Needs attention";
     case "NOT_CONNECTED":
-      return "Reconnect";
+      return "Reconnect Shopify";
     default:
-      return "Setup required";
+      return "Sync required";
   }
 }
 
-const EMPTY_METRICS: Metrics = {
-  fraudAlertsToday: 0,
-  highRiskOrders: 0,
-  serialReturners: 0,
-  competitorPriceChanges: 0,
-  promotionAlerts: 0,
-  aiPricingSuggestions: 0,
-  profitOptimizationOpportunities: 0,
-};
+function redirectTopLevel(url: string) {
+  if (window.top && window.top !== window) {
+    window.top.location.href = url;
+    return;
+  }
+  window.location.href = url;
+}
+
+function formatRelativeTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}
 
 export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const { shop, host } = useAppBridge();
+  const { host, shop } = useAppBridge();
   const { subscription } = useSubscriptionPlan();
-  const cachedMetrics = readModuleCache<Metrics>("dashboard-metrics");
-  const [metrics, setMetrics] = useState<Metrics>(cachedMetrics ?? EMPTY_METRICS);
-  const [loading, setLoading] = useState(!cachedMetrics);
-  const [selectedTab, setSelectedTab] = useState(0);
+  const { refresh: refreshOnboarding } = useOnboardingState();
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
-  const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
-  const [launchAudit, setLaunchAudit] = useState<LaunchAudit | null>(null);
-  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
-  const [decisionCenter, setDecisionCenter] = useState<DecisionCenter | null>(null);
-  const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<{
-    title: string;
-    detail: string;
-    reauthorizeUrl?: string | null;
-  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   const fallbackReauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
         host ? `&host=${encodeURIComponent(host)}` : ""
-      }&returnTo=${encodeURIComponent(window.location.pathname)}`
+      }&returnTo=${encodeURIComponent("/dashboard")}`
     : null;
 
-  const effectiveConnectionHealth = diagnostics?.connection ?? connectionHealth;
-  const effectiveWebhookStatus = diagnostics?.webhooks.liveStatus ?? webhookStatus;
-  const syncHealthState = diagnostics?.sync.syncHealth ?? null;
-  const trustReadiness = metrics.moduleReadiness?.trustAbuse?.readinessState ?? "SYNC_REQUIRED";
-  const competitorReadiness = metrics.moduleReadiness?.competitor?.readinessState ?? "SYNC_REQUIRED";
-  const pricingReadiness = metrics.moduleReadiness?.pricingProfit?.readinessState ?? "SYNC_REQUIRED";
-  const onboarding = metrics.onboarding ?? null;
+  const loadDashboard = useCallback(async () => {
+    const [metricsResponse, diagnosticsResponse] = await Promise.all([
+      embeddedShopRequest<Metrics>("/api/dashboard/metrics", { timeoutMs: 30000 }),
+      embeddedShopRequest<Diagnostics>("/api/shopify/diagnostics", {
+        timeoutMs: 20000,
+      }),
+    ]);
 
-  const pollSyncJob = async (jobId?: string | null) => {
-    const startedAt = Date.now();
+    setMetrics(metricsResponse);
+    setDiagnostics(diagnosticsResponse);
+    setError(null);
+  }, []);
 
-    while (Date.now() - startedAt < 180000) {
-      const response = await embeddedShopRequest<SyncJobResponse>(
-        "/api/shopify/sync-jobs/latest",
-        {
-          timeoutMs: 15000,
-        }
-      );
-
-      const latestJob = response.result;
-      if (!latestJob) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        continue;
-      }
-
-      const latestJobId = latestJob.id ?? latestJob.jobId;
-      if (jobId && latestJobId && latestJobId !== jobId) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        continue;
-      }
-
-      if (
-        latestJob.status === "READY_WITH_DATA" ||
-        latestJob.status === "SUCCEEDED_NO_DATA" ||
-        latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
-      ) {
-        loadMetrics();
-        void loadDiagnostics();
-        setToast(
-          latestJob.status === "READY_WITH_DATA"
-            ? "Shopify sync completed and VedaSuite now has live processed store data."
-            : latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
-            ? "Shopify sync completed. Processing is still catching up in the background."
-            : "Shopify sync completed, but the store currently has no synced merchant data to process."
-        );
-        return;
-      }
-
-      if (latestJob.status === "FAILED") {
-        throw new Error(latestJob.errorMessage ?? "Shopify sync job failed.");
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-
-    throw new Error(
-      "Sync is still running in the background. Check back in a moment."
-    );
-  };
-
-  const loadMetrics = () => {
+  useEffect(() => {
+    let mounted = true;
     setLoading(true);
-    embeddedShopRequest<Metrics>("/api/dashboard/metrics", {
-      timeoutMs: 30000,
-    })
-      .then((res) => {
-        setMetrics(res);
-        writeModuleCache("dashboard-metrics", res);
+    loadDashboard()
+      .catch((nextError) => {
+        if (!mounted) return;
+        setError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Unable to load the dashboard."
+        );
       })
-      .catch((error) => {
-        setActionError({
-          title: "Dashboard data needs attention",
-          detail: getApiErrorMessage(
-            error,
-            "VedaSuite could not load persisted dashboard metrics."
-          ),
-        });
-      })
-      .finally(() => setLoading(false));
-  };
+      .finally(() => {
+        if (!mounted) return;
+        setLoading(false);
+      });
 
-  const loadDiagnostics = () => {
-    const query = host
-      ? `?host=${encodeURIComponent(host)}&returnTo=${encodeURIComponent(
-          window.location.pathname
-        )}`
-      : "";
+    return () => {
+      mounted = false;
+    };
+  }, [loadDashboard]);
 
-    return embeddedShopRequest<Diagnostics>(`/api/shopify/diagnostics${query}`, {
-      timeoutMs: 20000,
-    })
-      .then((res) => {
-        setDiagnostics(res);
-        setConnectionHealth(res.connection);
-        setWebhookStatus(res.webhooks.liveStatus);
+  const pollSyncJob = useCallback(
+    async (jobId?: string | null) => {
+      const startedAt = Date.now();
 
-        if (!res.connection.healthy) {
-          setActionError({
-            title: res.connection.reauthRequired
-              ? "Shopify connection needs reauthorization"
-              : res.connection.code === "WEBHOOKS_MISSING"
-              ? "Shopify webhook setup needs attention"
-              : "Live sync needs attention",
-            detail: res.connection.message,
-            reauthorizeUrl: res.connection.reauthRequired
-              ? res.connection.reauthorizeUrl ?? fallbackReauthorizeUrl
-              : null,
-          });
+      while (Date.now() - startedAt < 180000) {
+        const response = await embeddedShopRequest<SyncJobResponse>(
+          "/api/shopify/sync-jobs/latest",
+          { timeoutMs: 15000 }
+        );
+        const latestJob = response.result;
+        if (!latestJob) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+
+        const latestJobId = latestJob.id ?? latestJob.jobId;
+        if (jobId && latestJobId && latestJobId !== jobId) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+
+        if (
+          latestJob.status === "READY_WITH_DATA" ||
+          latestJob.status === "SUCCEEDED_NO_DATA" ||
+          latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
+        ) {
+          await Promise.all([loadDashboard(), refreshOnboarding()]);
+          setToast(
+            latestJob.status === "READY_WITH_DATA"
+              ? "Store analysis refreshed successfully."
+              : latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
+              ? "Store synced. Some insights are still being processed."
+              : "Store synced, but Shopify returned limited historical data."
+          );
           return;
         }
 
-        setActionError(null);
-      })
-      .catch(() => undefined);
-  };
-
-  useEffect(() => {
-    loadMetrics();
-    void loadDiagnostics();
-    embeddedShopRequest<LaunchAudit>("/launch/sanity", {
-      timeoutMs: 30000,
-    })
-      .then((res) => setLaunchAudit(res))
-      .catch(() => setLaunchAudit(null));
-    embeddedShopRequest<DecisionCenter>("/api/dashboard/decision-center", {
-      timeoutMs: 30000,
-    })
-      .then((res) => setDecisionCenter(res))
-      .catch(() => setDecisionCenter(null));
-  }, [host]);
-
-  useEffect(() => {
-    if (!shop) {
-      return;
-    }
-
-    embeddedShopRequest<SyncJobResponse>("/api/shopify/sync-jobs/latest", {
-      timeoutMs: 15000,
-    })
-      .then((response) => {
-        const latestJob = response.result;
-        if (
-          latestJob &&
-          (latestJob.status === "PENDING" || latestJob.status === "RUNNING")
-        ) {
-          setSyncing(true);
-          return pollSyncJob(latestJob.id ?? latestJob.jobId ?? null)
-            .catch((error) => {
-              const message = getApiErrorMessage(
-                error,
-                "Sync is still running in the background."
-              );
-              setActionError({
-                title: "Live sync needs attention",
-                detail: message,
-              });
-              setToast(message);
-            })
-            .finally(() => setSyncing(false));
+        if (latestJob.status === "FAILED") {
+          throw new Error(latestJob.errorMessage ?? "Sync failed.");
         }
 
-        return undefined;
-      })
-      .catch(() => undefined);
-  }, [shop]);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
 
-  const syncLiveStoreData = async () => {
+      throw new Error("Sync is still running. Check back in a moment.");
+    },
+    [loadDashboard, refreshOnboarding]
+  );
+
+  const syncLiveStoreData = useCallback(async () => {
+    setSyncing(true);
+    setError(null);
     try {
-      setSyncing(true);
-      setActionError(null);
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
         method: "POST",
         body: {
           host,
-          returnTo: window.location.pathname,
+          returnTo: "/dashboard",
         },
         timeoutMs: 20000,
       });
-      void loadDiagnostics();
       await pollSyncJob(response.result?.jobId ?? response.result?.id ?? null);
-    } catch (error) {
-      const message = getApiErrorMessage(error, "Unable to sync Shopify data right now.");
-      const reauthorizeUrl =
-        getApiReauthorizeUrl(error) ??
-        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|embedded session|reconnect shopify/i.test(
-          message
-        )
-          ? fallbackReauthorizeUrl
-          : null);
-      if (reauthorizeUrl) {
-        setActionError({
-          title: "Shopify connection needs reauthorization",
-          detail:
-            "Your stored Shopify app connection looks stale. Reconnect VedaSuite, then retry sync and webhook setup.",
-          reauthorizeUrl,
-        });
-        setToast("Shopify connection needs reauthorization.");
-        return;
-      }
-
-      setActionError({
-        title: "Live sync needs attention",
-        detail: message,
-      });
-      setToast(message);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to sync Shopify data right now."
+      );
     } finally {
       setSyncing(false);
     }
-  };
+  }, [host, pollSyncJob]);
 
-  const registerWebhooks = async () => {
+  const registerWebhooks = useCallback(async () => {
+    setRegisteringWebhooks(true);
+    setError(null);
     try {
-      setRegisteringWebhooks(true);
-      setActionError(null);
-      const response = await embeddedShopRequest<{
-        result: { created: string[]; totalTracked: number };
-      }>("/api/shopify/register-webhooks", {
+      await embeddedShopRequest("/api/shopify/register-webhooks", {
         method: "POST",
         body: {
           host,
-          returnTo: window.location.pathname,
+          returnTo: "/dashboard",
         },
         timeoutMs: 90000,
       });
-      setToast(
-        response.result.created.length > 0
-          ? `Registered ${response.result.created.length} Shopify sync webhooks.`
-          : "Shopify sync webhooks are already registered."
+      await loadDashboard();
+      setToast("Shopify webhooks verified successfully.");
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to register webhooks."
       );
-      void loadDiagnostics();
-    } catch (error) {
-      const message = getApiErrorMessage(error, "Unable to register Shopify sync webhooks.");
-      const reauthorizeUrl =
-        getApiReauthorizeUrl(error) ??
-        (/reauthorize|access token|unauthorized|invalid api key|invalid access token|wrong password|unrecognized login|embedded session|reconnect shopify/i.test(
-          message
-        )
-          ? fallbackReauthorizeUrl
-          : null);
-      if (reauthorizeUrl) {
-        setActionError({
-          title: "Reconnect Shopify before registering webhooks",
-          detail:
-            "Webhook registration needs a fresh Shopify app authorization. Reconnect VedaSuite and retry once Shopify brings you back into the app.",
-          reauthorizeUrl,
-        });
-        setToast("Reconnect Shopify before registering webhooks.");
-        return;
-      }
-
-      setActionError({
-        title: "Webhook registration needs attention",
-        detail: message,
-      });
-      setToast(message);
     } finally {
       setRegisteringWebhooks(false);
     }
-  };
+  }, [host, loadDashboard]);
 
-  const tabs = [
-    { id: "overview", content: "Overview" },
-    { id: "signals", content: "Signals" },
-    { id: "actions", content: "Action plan" },
-  ];
-  const reportsEnabled = !!subscription?.capabilities?.["reports.view"];
-
-  const quickActions = [
-      {
-        title: "Review fraud queue",
-        description: "Inspect risky orders, chargeback exposure, and return abuse flags.",
-        route: "/trust-abuse?focus=high-risk",
-        cta: "Open trust & abuse",
-        tone: "critical" as const,
-        readiness: trustReadiness,
-      },
-      {
-        title: "Watch the market",
-        description:
-          "Review monitored competitor website signals and current market-response suggestions.",
-        route: "/competitor?focus=promotions",
-        cta: "Open competitor intelligence",
-        tone: "info" as const,
-        readiness: competitorReadiness,
-      },
-      {
-        title: "Review pricing baseline",
-        description:
-          "Validate the latest pricing baseline or recommendation before taking merchant action.",
-        route: "/pricing-profit?focus=simulation",
-        cta: "Open pricing & profit",
-        tone: "success" as const,
-        locked: !subscription?.enabledModules?.pricingProfit,
-        readiness: pricingReadiness,
-      },
-    ];
-
-  const kpis = useMemo(
+  const metricsCards = useMemo(
     () => [
       {
-        title: "Fraud alerts today",
-        value: metrics.fraudAlertsToday,
-        tone: "critical" as const,
-        note: "High-priority review queue",
+        title: "Fraud alerts",
+        value: metrics?.fraudAlertsToday ?? 0,
+        note: "Refund abuse and risky orders",
       },
       {
-        title: "High-risk orders",
-        value: metrics.highRiskOrders,
-        tone: "critical" as const,
-        note: "Orders above 70 risk score",
+        title: "Competitor changes",
+        value: metrics?.competitorPriceChanges ?? 0,
+        note: "Latest monitored price moves",
       },
       {
-        title: "Serial returners",
-        value: metrics.serialReturners,
-        tone: "warning" as const,
-        note: "Refund-heavy customer profiles",
+        title: "Pricing opportunities",
+        value: metrics?.aiPricingSuggestions ?? 0,
+        note: "Pricing records ready to review",
       },
       {
-        title: "Competitor price changes",
-        value: metrics.competitorPriceChanges,
-        tone: "info" as const,
-        note: "Tracked in the last 24 hours",
-      },
-      {
-        title: "Promotion alerts",
-        value: metrics.promotionAlerts,
-        tone: "success" as const,
-        note: "New offer or campaign movement",
-      },
-      {
-        title: "Pricing records",
-        value: metrics.aiPricingSuggestions,
-        tone: "success" as const,
-        note: "Baseline or live recommendation rows",
-      },
-      {
-        title: "Profit records",
-        value: metrics.profitOptimizationOpportunities,
-        tone: "attention" as const,
-        note: "Available profit-engine rows",
+        title: "Profit opportunities",
+        value: metrics?.profitOptimizationOpportunities ?? 0,
+        note: "Optimization records available",
       },
     ],
     [metrics]
   );
 
-  const runOnboardingAction = () => {
-    if (!onboarding) {
-      navigateEmbedded("/onboarding");
-      return;
-    }
-
-    switch (onboarding.nextAction.key) {
-      case "RECONNECT_SHOPIFY":
-        if (fallbackReauthorizeUrl) {
-          redirectTopLevel(fallbackReauthorizeUrl);
-        }
-        return;
-      case "SYNC_LIVE_DATA":
-        void syncLiveStoreData();
-        return;
-      default:
-        navigateEmbedded(onboarding.nextAction.route);
-        return;
-    }
-  };
+  if (loading) {
+    return (
+      <Page title="Dashboard" subtitle="Loading store metrics and insights.">
+        <Card>
+          <InlineStack align="center">
+            <Spinner accessibilityLabel="Loading dashboard" size="large" />
+          </InlineStack>
+        </Card>
+      </Page>
+    );
+  }
 
   return (
     <Page
-      title="VedaSuite AI Dashboard"
-      subtitle="A single control center for trust, competition, pricing, reporting, and profit intelligence."
+      title="Dashboard"
+      subtitle="Key metrics, recent insights, and direct access to the main VedaSuite modules."
       primaryAction={{
-        content: syncing ? "Syncing..." : "Sync live Shopify data",
-        onAction: syncLiveStoreData,
-        disabled: syncing,
+        content: "Sync Data",
+        onAction: () => void syncLiveStoreData(),
+        loading: syncing,
       }}
-      secondaryActions={[
-        {
-          content: registeringWebhooks
-            ? "Registering webhooks..."
-            : "Register sync webhooks",
-          onAction: registerWebhooks,
-          disabled: registeringWebhooks,
-        },
-      ]}
     >
       <Layout>
-        <Layout.Section>
-          {loading ? (
-            <Banner title="Refreshing store intelligence" tone="info">
-              <p>Dashboard metrics are loading in the background.</p>
+        {error ? (
+          <Layout.Section>
+            <Banner title="Dashboard action failed" tone="critical">
+              <p>{error}</p>
             </Banner>
-          ) : null}
-        </Layout.Section>
+          </Layout.Section>
+        ) : null}
 
-        <Layout.Section>
-          {actionError ? (
-            <Banner
-              title={actionError.title}
-              tone={actionError.reauthorizeUrl ? "warning" : "critical"}
-            >
-              <BlockStack gap="300">
-                <Text as="p">{actionError.detail}</Text>
+        {!diagnostics?.connection.healthy ? (
+          <Layout.Section>
+            <Banner title="Shopify connection needs attention" tone="critical">
+              <BlockStack gap="200">
+                <p>{diagnostics?.connection.message}</p>
                 <InlineStack gap="300">
-                  {actionError.reauthorizeUrl ? (
-                    <Button onClick={() => redirectTopLevel(actionError.reauthorizeUrl ?? "")}>
-                      Reconnect Shopify
-                    </Button>
-                  ) : (
-                    <Button onClick={syncLiveStoreData}>Retry live sync</Button>
-                  )}
-                  <Button variant="secondary" onClick={registerWebhooks}>
-                    Retry webhook setup
+                  <Button
+                    variant="primary"
+                    onClick={() =>
+                      redirectTopLevel(
+                        diagnostics?.connection.reauthorizeUrl ??
+                          fallbackReauthorizeUrl ??
+                          "/auth"
+                      )
+                    }
+                  >
+                    Reconnect Shopify
+                  </Button>
+                  <Button onClick={() => void registerWebhooks()} loading={registeringWebhooks}>
+                    Verify webhooks
                   </Button>
                 </InlineStack>
               </BlockStack>
             </Banner>
-          ) : null}
-        </Layout.Section>
+          </Layout.Section>
+        ) : null}
+
+        {metrics?.dataState && metrics.dataState !== "READY_WITH_DATA" ? (
+          <Layout.Section>
+            <Banner
+              title={metrics.summaryTitle ?? "Dashboard insights are still settling"}
+              tone={toneForReadiness(metrics.dataState)}
+            >
+              <BlockStack gap="200">
+                <p>{metrics.summaryDetail ?? "VedaSuite is still preparing this store."}</p>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={() => void syncLiveStoreData()} loading={syncing}>
+                    Sync Data
+                  </Button>
+                  {!diagnostics?.webhooks.liveStatus ||
+                  diagnostics.webhooks.liveStatus.registeredCount <
+                    diagnostics.webhooks.liveStatus.totalTracked ? (
+                    <Button onClick={() => void registerWebhooks()} loading={registeringWebhooks}>
+                      Fix webhooks
+                    </Button>
+                  ) : null}
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : null}
 
         <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h2" variant="headingLg">
-                    {onboarding?.hero?.headline ??
-                      onboarding?.title ??
-                      metrics.summaryTitle ??
-                      "VedaSuite dashboard"}
+          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="300">
+            {metricsCards.map((item) => (
+              <Card key={item.title}>
+                <BlockStack gap="150">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {item.title}
+                  </Text>
+                  <Text as="p" variant="heading2xl">
+                    {item.value}
                   </Text>
                   <Text as="p" tone="subdued">
-                    {onboarding?.hero?.subtext ??
-                      onboarding?.description ??
-                      metrics.summaryDetail ??
-                      "Sync Shopify store data, process trust, pricing, and competitor signals, and then move into the next best workflow."}
+                    {item.note}
                   </Text>
                 </BlockStack>
-                <Badge
-                  tone={
-                    onboarding?.stateSummary?.tone ??
-                    toneForReadiness(
-                      onboarding?.dashboardEntryState ??
-                        syncHealthState?.status ??
-                        metrics.dataState
-                    )
-                  }
-                >
-                  {onboarding?.stateSummary?.badge ??
-                    labelForReadiness(
-                      onboarding?.dashboardEntryState ??
-                        syncHealthState?.status ??
-                        metrics.dataState
-                    )}
-                </Badge>
-              </InlineStack>
-              <InlineStack gap="300">
-                <Button variant="primary" onClick={runOnboardingAction}>
-                  Start Analysis
-                </Button>
-                <Button onClick={() => navigateEmbedded("/onboarding#sample-insights")}>
-                  View Demo Insights
-                </Button>
-                <Button onClick={() => navigateEmbedded("/subscription")}>
-                  View Pricing
-                </Button>
-              </InlineStack>
-              <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                {(onboarding?.hero?.benefits ?? [
-                  "Detect refund & fraud abuse",
-                  "Track competitor pricing & ads",
-                  "Optimize pricing for profit",
-                ]).map((benefit) => (
-                  <div key={benefit} className="vs-signal-stat">
-                    <Text as="p" variant="headingSm">
-                      {benefit}
-                    </Text>
-                  </div>
-                ))}
-              </InlineGrid>
-              {onboarding?.stateSummary ? (
-                <Banner
-                  title={onboarding.stateSummary.title}
-                  tone={onboarding.stateSummary.tone}
-                >
-                  <p>{onboarding.stateSummary.description}</p>
-                </Banner>
-              ) : null}
-            </BlockStack>
-          </Card>
+              </Card>
+            ))}
+          </InlineGrid>
         </Layout.Section>
 
         <Layout.Section>
@@ -855,431 +423,125 @@ export function DashboardPage() {
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
-                  <div>
-                    <Text as="h2" variant="headingLg">
-                      Suite posture
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      {subscription?.planName ?? "NONE"} plan coverage is resolved from
-                      the current backend billing state for this Shopify store.
-                    </Text>
-                  </div>
-                  <InlineStack gap="200">
-                    <Badge tone={toneForReadiness(syncHealthState?.status ?? metrics.dataState)}>
-                      {labelForReadiness(syncHealthState?.status ?? metrics.dataState)}
-                    </Badge>
-                    {effectiveConnectionHealth && !effectiveConnectionHealth.healthy ? (
-                      <Badge tone="attention">{effectiveConnectionHealth.code}</Badge>
-                    ) : null}
-                  </InlineStack>
-                </InlineStack>
-                <div className="vs-analytics-strip" aria-hidden="true">
-                  {[52, 68, 61, 82, 74, 88, 79].map((width, index) => (
-                    <span
-                      key={`analytics-${index}`}
-                      style={{ width: `${width}%` }}
-                    />
-                  ))}
-                </div>
-                <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
-                  <div className="vs-signal-stat">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                        Timeline events
-                    </Text>
-                    <Text as="p" variant="headingLg">
-                      {metrics.timelineEventsGenerated ?? 0}
-                    </Text>
-                  </div>
-                  <div className="vs-signal-stat">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Active modules
-                    </Text>
-                    <Text as="p" variant="headingLg">
-                      {
-                        [
-                          subscription?.enabledModules?.trustAbuse,
-                          subscription?.enabledModules?.competitor,
-                          subscription?.enabledModules?.pricingProfit,
-                        ].filter(Boolean).length
-                      }
-                    </Text>
-                  </div>
-                  <div className="vs-signal-stat">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Webhook coverage
-                    </Text>
-                    <Text as="p" variant="headingLg">
-                      {effectiveWebhookStatus
-                        ? `${effectiveWebhookStatus.registeredCount}/${effectiveWebhookStatus.totalTracked}`
-                        : "-"}
-                    </Text>
-                  </div>
-                </InlineGrid>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg">
-                  Quick actions
-                </Text>
-                <Text as="p" tone="subdued">
-                  Move directly into the next high-leverage workflow.
-                </Text>
-                <BlockStack gap="300">
-                  {quickActions.map((action) => (
-                    <div key={action.title} className="vs-action-card">
-                      <InlineStack align="space-between" blockAlign="start" gap="300">
-                        <BlockStack gap="100">
-                          <InlineStack gap="200" blockAlign="center">
-                            <Text as="h3" variant="headingMd">
-                              {action.title}
-                            </Text>
-                            <Badge tone={action.locked ? "attention" : toneForReadiness(action.readiness)}>
-                              {action.locked
-                                ? "Upgrade required"
-                                : labelForReadiness(action.readiness)}
-                            </Badge>
-                          </InlineStack>
-                          <Text as="p" tone="subdued">
-                            {action.description}
-                          </Text>
-                          {!action.locked ? (
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              {action.readiness === trustReadiness
-                                ? metrics.moduleReadiness?.trustAbuse?.reason
-                                : action.readiness === competitorReadiness
-                                ? metrics.moduleReadiness?.competitor?.reason
-                                : metrics.moduleReadiness?.pricingProfit?.reason}
-                            </Text>
-                          ) : null}
-                        </BlockStack>
-                        <Button
-                          variant={action.locked ? "secondary" : "primary"}
-                          onClick={() =>
-                            navigateEmbedded(
-                              action.locked ? "/subscription" : action.route
-                            )
-                          }
-                        >
-                          {action.locked ? "View plans" : action.cta}
-                        </Button>
-                      </InlineStack>
-                    </div>
-                  ))}
-                </BlockStack>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <div>
-                    <Text as="h2" variant="headingLg">
-                    Setup progress
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Follow the next required setup step for this store.
-                    </Text>
-                  </div>
-                  <Badge tone="info">
-                    {`${onboarding?.progress?.completedSteps ?? onboarding?.steps.filter((item) => item.complete).length ?? 0}/${onboarding?.progress?.totalSteps ?? onboarding?.steps.length ?? 0} complete`}
+                  <Text as="h2" variant="headingLg">
+                    Recent insights
+                  </Text>
+                  <Badge tone={toneForReadiness(metrics?.dataState)}>
+                    {labelForReadiness(metrics?.dataState)}
                   </Badge>
                 </InlineStack>
                 <BlockStack gap="300">
-                  {(onboarding?.steps ?? []).map((item) => (
-                    <div key={item.label} className="vs-action-card">
-                      <InlineStack align="space-between" blockAlign="center">
-                        <BlockStack gap="100">
-                          <Text as="h3" variant="headingMd">
-                            {item.label}
-                          </Text>
-                          <Text as="p" tone="subdued">
-                            {item.description}
-                          </Text>
-                          {item.helper ? (
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              {item.helper}
-                            </Text>
-                          ) : null}
-                          <Badge tone={item.complete ? "success" : item.locked ? "info" : "attention"}>
-                            {item.complete
-                              ? "Complete"
-                              : item.locked
-                              ? "Locked"
-                              : item.active
-                              ? "Current"
-                              : "Next"}
-                          </Badge>
-                        </BlockStack>
-                        <Button
-                          variant={item.complete ? "secondary" : "primary"}
-                          onClick={() => navigateEmbedded("/onboarding")}
-                        >
-                          {item.complete ? "Review" : "Continue setup"}
-                        </Button>
-                      </InlineStack>
-                    </div>
-                  ))}
-                </BlockStack>
-                {launchAudit?.reviewerReminders?.length ? (
-                  <Banner title="Reviewer notes" tone="info">
-                    <List type="bullet">
-                      {launchAudit.reviewerReminders.map((item) => (
-                        <List.Item key={item}>{item}</List.Item>
-                      ))}
-                    </List>
-                  </Banner>
-                ) : null}
-              </BlockStack>
-            </Card>
-            {decisionCenter ? (
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <div>
-                      <Text as="h2" variant="headingLg">
-                        Unified decision center
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        One operating layer connecting fraud, trust, market pressure, pricing, and profit.
-                      </Text>
-                    </div>
-                    <Badge
-                      tone={
-                        decisionCenter.summary.priorityLevel === "High"
-                          ? "critical"
-                          : "info"
-                      }
-                    >
-                      {`${decisionCenter.summary.priorityLevel} priority`}
-                    </Badge>
-                  </InlineStack>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {decisionCenter.summary.automationReadiness}
-                  </Text>
-                  <BlockStack gap="300">
-                    {decisionCenter.decisions.map((decision) => (
-                      <div key={decision.id} className="vs-action-card">
+                  {(metrics?.recentInsights?.length ?? 0) > 0 ? (
+                    metrics?.recentInsights?.map((insight) => (
+                      <div key={insight.id} className="vs-action-card">
                         <InlineStack align="space-between" blockAlign="start" gap="300">
                           <BlockStack gap="100">
                             <InlineStack gap="200" blockAlign="center">
                               <Text as="h3" variant="headingMd">
-                                {decision.title}
+                                {insight.title}
                               </Text>
-                              <Badge tone={decision.severity === "High" ? "critical" : "attention"}>
-                                {decision.module}
+                              <Badge tone={insight.severity === "critical" ? "critical" : "info"}>
+                                {insight.severity}
                               </Badge>
                             </InlineStack>
                             <Text as="p" tone="subdued">
-                              {decision.rationale}
-                            </Text>
-                            <Text as="p" variant="bodySm">
-                              {decision.recommendedAction}
+                              {insight.detail}
                             </Text>
                             <Text as="p" variant="bodySm" tone="subdued">
-                              {`${decision.confidence}% confidence | ${decision.automationPosture}`}
+                              {formatRelativeTimestamp(insight.createdAt)}
                             </Text>
-                            <BlockStack gap="100">
-                              {decision.explanationPoints.map((point) => (
-                                <Text
-                                  key={`${decision.id}-${point}`}
-                                  as="p"
-                                  variant="bodySm"
-                                  tone="subdued"
-                                >
-                                  {point}
-                                </Text>
-                              ))}
-                            </BlockStack>
                           </BlockStack>
-                          <Button onClick={() => navigateEmbedded(decision.route)}>
+                          <Button onClick={() => navigateEmbedded(insight.route)}>
                             Open
                           </Button>
                         </InlineStack>
                       </div>
-                    ))}
-                  </BlockStack>
+                    ))
+                  ) : (
+                    <Banner title="Analyzing store" tone="info">
+                      <p>
+                        VedaSuite is still preparing real insights for this dashboard. Use the module shortcuts below while sync and processing continue.
+                      </p>
+                    </Banner>
+                  )}
                 </BlockStack>
-              </Card>
-            ) : null}
-          </InlineGrid>
-        </Layout.Section>
+              </BlockStack>
+            </Card>
 
-        <Layout.Section>
-          <Card>
-            <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
-              <Box paddingBlockStart="400">
-                {selectedTab === 0 ? (
-                  <BlockStack gap="400">
-                    <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
-                      {kpis.map((kpi, index) => (
-                        <Card key={kpi.title}>
-                          <BlockStack gap="300">
-                            <div className="vs-kpi-card">
-                              <BlockStack gap="300">
-                                <div className="vs-kpi-meta">
-                                  <Text as="h3" variant="headingMd">
-                                    {kpi.title}
-                                  </Text>
-                                  <Badge tone={kpi.tone}>{kpi.note}</Badge>
-                                </div>
-                                <div className="vs-kpi-value">{kpi.value}</div>
-                                <div className="vs-mini-chart" aria-hidden="true">
-                                  {[18, 30, 24, 38, 28].map((height, barIndex) => (
-                                    <span
-                                      key={`${index}-${barIndex}`}
-                                      style={{ height: `${height + index * 2}px` }}
-                                    />
-                                  ))}
-                                </div>
-                              </BlockStack>
-                            </div>
-                          </BlockStack>
-                        </Card>
-                      ))}
-                    </InlineGrid>
-                    <Card>
-                      <BlockStack gap="300">
-                        <InlineStack align="space-between" blockAlign="center">
-                          <Text as="h3" variant="headingMd">
-                            Module drilldowns
-                          </Text>
-                          <Badge tone={toneForReadiness(syncHealthState?.status ?? metrics.dataState)}>
-                            {labelForReadiness(syncHealthState?.status ?? metrics.dataState)}
-                          </Badge>
-                        </InlineStack>
-                        <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                          <Button
-                            onClick={() => navigateEmbedded("/trust-abuse?focus=high-risk")}
-                          >
-                            Open trust & abuse
-                          </Button>
-                          <Button
-                            onClick={() =>
-                              navigateEmbedded("/competitor?focus=promotions")
-                            }
-                          >
-                            Review market alerts
-                          </Button>
-                          <Button
-                            onClick={() =>
-                              navigateEmbedded(
-                                subscription?.enabledModules?.pricingProfit
-                                  ? "/pricing-profit?focus=simulation"
-                                  : "/subscription"
-                              )
-                            }
-                          >
-                            {subscription?.enabledModules?.pricingProfit
-                              ? "Open pricing & profit"
-                              : "Unlock pricing & profit"}
-                          </Button>
-                        </InlineGrid>
-                      </BlockStack>
-                    </Card>
-                  </BlockStack>
-                ) : selectedTab === 1 ? (
-                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
-                    <Card>
-                      <BlockStack gap="300">
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg">
+                  Quick access
+                </Text>
+                <BlockStack gap="300">
+                  <div className="vs-action-card">
+                    <InlineStack align="space-between" blockAlign="start" gap="300">
+                      <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Current synced signals
-                        </Text>
-                        <List type="bullet">
-                          <List.Item>
-                            {metrics.highRiskOrders} orders currently exceed the
-                            high-risk threshold.
-                          </List.Item>
-                          <List.Item>
-                            {metrics.serialReturners} customer profiles currently show elevated
-                            refund behavior based on synced order history.
-                          </List.Item>
-                          <List.Item>
-                            {metrics.competitorPriceChanges} competitor monitoring
-                            records were captured in the last 24 hours.
-                          </List.Item>
-                        </List>
-                      </BlockStack>
-                    </Card>
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text as="h3" variant="headingMd">
-                          Recommended next steps
-                        </Text>
-                        <List type="bullet">
-                          <List.Item>Review medium and high-risk orders first.</List.Item>
-                          <List.Item>
-                              Check whether live competitor website monitoring shows enough pressure to justify a pricing response.
-                          </List.Item>
-                          <List.Item>
-                              Sync store data again before relying on report exports or pricing baselines.
-                          </List.Item>
-                        </List>
-                        <InlineStack gap="300">
-                          <Button
-                            onClick={() =>
-                              navigateEmbedded(
-                                reportsEnabled
-                                  ? "/reports?focus=summary"
-                                  : "/subscription"
-                              )
-                            }
-                          >
-                            {reportsEnabled ? "Open weekly report" : "Unlock reports"}
-                          </Button>
-                          <Button
-                            onClick={() =>
-                              navigateEmbedded(
-                                subscription?.enabledModules?.pricingProfit
-                                  ? "/pricing-profit?focus=profit"
-                                  : "/subscription"
-                              )
-                            }
-                          >
-                            {subscription?.enabledModules?.pricingProfit
-                              ? "Review pricing & profit"
-                              : "Unlock pricing & profit"}
-                          </Button>
-                        </InlineStack>
-                      </BlockStack>
-                    </Card>
-                  </InlineGrid>
-                ) : (
-                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text as="h3" variant="headingMd">
-                          Suggested next actions
-                        </Text>
-                        <List type="number">
-                          <List.Item>Open Trust & Abuse and review flagged orders.</List.Item>
-                          <List.Item>
-                            Compare competitor promotions against your margin floor.
-                          </List.Item>
-                          <List.Item>
-                            Validate AI price changes before publishing.
-                          </List.Item>
-                        </List>
-                        <Button onClick={() => navigateEmbedded("/onboarding")}>
-                          Open onboarding
-                        </Button>
-                      </BlockStack>
-                    </Card>
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text as="h3" variant="headingMd">
-                          Current suite posture
+                          Trust & Abuse
                         </Text>
                         <Text as="p" tone="subdued">
-                          {metrics.summaryDetail ??
-                            "This panel reflects the latest persisted sync and processing status for the store."}
+                          Review risky orders, refund abuse, and trust signals.
                         </Text>
+                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}>
+                          {labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
+                        </Badge>
                       </BlockStack>
-                    </Card>
-                  </InlineGrid>
-                )}
-              </Box>
-            </Tabs>
-          </Card>
+                      <Button onClick={() => navigateEmbedded("/modules/fraud")}>
+                        Open
+                      </Button>
+                    </InlineStack>
+                  </div>
+
+                  <div className="vs-action-card">
+                    <InlineStack align="space-between" blockAlign="start" gap="300">
+                      <BlockStack gap="100">
+                        <Text as="h3" variant="headingMd">
+                          Competitor Intelligence
+                        </Text>
+                        <Text as="p" tone="subdued">
+                          Review competitor pricing, promotions, and market moves.
+                        </Text>
+                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}>
+                          {labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
+                        </Badge>
+                      </BlockStack>
+                      <Button onClick={() => navigateEmbedded("/modules/competitor")}>
+                        Open
+                      </Button>
+                    </InlineStack>
+                  </div>
+
+                  <div className="vs-action-card">
+                    <InlineStack align="space-between" blockAlign="start" gap="300">
+                      <BlockStack gap="100">
+                        <Text as="h3" variant="headingMd">
+                          Pricing & Profit
+                        </Text>
+                        <Text as="p" tone="subdued">
+                          Review pricing opportunities and profit optimization records.
+                        </Text>
+                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}>
+                          {labelForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}
+                        </Badge>
+                      </BlockStack>
+                      <Button
+                        onClick={() =>
+                          navigateEmbedded(
+                            subscription?.enabledModules?.pricingProfit
+                              ? "/modules/pricing"
+                              : "/subscription"
+                          )
+                        }
+                      >
+                        {subscription?.enabledModules?.pricingProfit ? "Open" : "Upgrade to unlock"}
+                      </Button>
+                    </InlineStack>
+                  </div>
+                </BlockStack>
+              </BlockStack>
+            </Card>
+          </InlineGrid>
         </Layout.Section>
       </Layout>
       {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}

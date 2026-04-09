@@ -14,94 +14,12 @@ import {
   Text,
   Toast,
 } from "@shopify/polaris";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import { useOnboardingState } from "../../hooks/useOnboardingState";
+import type { OnboardingModuleKey } from "../../providers/OnboardingProvider";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useAppBridge } from "../../shopifyAppBridge";
-
-type OnboardingState = {
-  stage: string;
-  dashboardEntryState: string;
-  isCompleted: boolean;
-  isDismissed: boolean;
-  canDismiss: boolean;
-  showPersistentNextStep: boolean;
-  title: string;
-  description: string;
-  nextAction: {
-    key: string;
-    label: string;
-    route: string;
-  };
-  progress: {
-    completedSteps: number;
-    totalSteps: number;
-    percent: number;
-  };
-  steps: Array<{
-    key: string;
-    label: string;
-    complete: boolean;
-    active: boolean;
-    locked: boolean;
-    description: string;
-    helper: string;
-    ctaLabel: string;
-  }>;
-  hero: {
-    headline: string;
-    subtext: string;
-    benefits: string[];
-  };
-  stateSummary: {
-    tone: "success" | "info" | "attention" | "critical";
-    title: string;
-    description: string;
-    badge: string;
-  };
-  moduleAvailability: Array<{
-    key: "trustAbuse" | "competitor" | "pricingProfit";
-    title: string;
-    summary: string;
-    route: string;
-    available: boolean;
-    lockReason: string | null;
-  }>;
-  sampleInsights: Array<{
-    key: string;
-    module: string;
-    badge: string;
-    title: string;
-    detail: string;
-  }>;
-  planSummary: {
-    planName: string;
-    billingActive: boolean;
-    starterModule: string | null;
-    unlockedFeatures: string[];
-    lockedFeatures: string[];
-    manageRoute: string;
-  };
-  privacySummary: {
-    title: string;
-    description: string;
-    bullets: string[];
-  };
-  connectionHealthy: boolean;
-  webhooksReady: boolean;
-  syncStatus: string;
-  syncReason: string;
-  hasAnyRawData: boolean;
-  hasAnyProcessedData: boolean;
-  currentPlan: string;
-  billingActive: boolean;
-  limitedDataReason: string | null;
-  recommendedModuleRoute: string;
-};
-
-type OnboardingResponse = {
-  onboarding: OnboardingState;
-};
 
 type SyncJobResponse = {
   result: {
@@ -127,50 +45,32 @@ function scrollToSection(id: string) {
   });
 }
 
-function toneForStep(step: OnboardingState["steps"][number]) {
-  if (step.complete) {
-    return "success";
-  }
-  if (step.locked) {
-    return "info";
-  }
-  return step.active ? "attention" : "info";
-}
-
-function labelForStep(step: OnboardingState["steps"][number]) {
-  if (step.complete) {
-    return "Complete";
-  }
-  if (step.locked) {
-    return "Locked";
-  }
-  return step.active ? "Current" : "Next";
-}
-
-function ModuleIcon({ moduleKey }: { moduleKey: string }) {
+function ModuleIcon({ moduleKey }: { moduleKey: OnboardingModuleKey }) {
   const path =
     moduleKey === "trustAbuse"
-      ? "M18 5l7 4v6c0 5-3.4 9.4-8 10.8C12.4 24.4 9 20 9 15V9l9-4zm0 5l-4 1.8V15c0 2.8 1.7 5.4 4 6.6 2.3-1.2 4-3.8 4-6.6v-3.2L18 10zm0 2.2 1.7 3.1 3.3.5-2.4 2.3.6 3.3-3-1.6-3 1.6.6-3.3-2.4-2.3 3.3-.5L18 12.2z"
+      ? "M18 5l7 4v6c0 5-3.4 9.4-8 10.8C12.4 24.4 9 20 9 15V9l9-4zm0 5l-4 1.8V15c0 2.8 1.7 5.4 4 6.6 2.3-1.2 4-3.8 4-6.6v-3.2L18 10z"
       : moduleKey === "competitor"
-      ? "M6 7h12l2 5v8H4v-8l2-5zm2 2-1.2 3H19.2L18 9H8zm-1 5v4h10v-4H7zm12 0v4h2v-4h-2z"
+      ? "M6 7h12l2 5v8H4v-8l2-5zm2 2-1.2 3H19.2L18 9H8zm-1 5v4h10v-4H7z"
       : "M6 6h16v4H6V6zm2 6h12v8H8v-8zm3 2v4h2v-4h-2zm4-3h2v7h-2v-7z";
+
+  const background =
+    moduleKey === "trustAbuse"
+      ? "#fde68a"
+      : moduleKey === "competitor"
+      ? "#bfdbfe"
+      : "#bbf7d0";
 
   return (
     <span
       aria-hidden="true"
       style={{
         display: "inline-flex",
-        width: 40,
-        height: 40,
+        width: 42,
+        height: 42,
         borderRadius: 12,
         alignItems: "center",
         justifyContent: "center",
-        background:
-          moduleKey === "trustAbuse"
-            ? "#fde68a"
-            : moduleKey === "competitor"
-            ? "#bfdbfe"
-            : "#bbf7d0",
+        background,
       }}
     >
       <svg viewBox="0 0 28 28" width="22" height="22" fill="#111827">
@@ -180,51 +80,47 @@ function ModuleIcon({ moduleKey }: { moduleKey: string }) {
   );
 }
 
+function stepTone(step: {
+  complete: boolean;
+  locked: boolean;
+  active: boolean;
+}) {
+  if (step.complete) return "success";
+  if (step.locked) return "info";
+  return step.active ? "attention" : "info";
+}
+
+function stepLabel(step: {
+  complete: boolean;
+  locked: boolean;
+  active: boolean;
+}) {
+  if (step.complete) return "Complete";
+  if (step.locked) return "Locked";
+  return step.active ? "Current" : "Next";
+}
+
 export function OnboardingPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { host, shop } = useAppBridge();
-  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    onboarding,
+    loading,
+    error,
+    refresh,
+    selectModule,
+    markInsightViewed,
+    confirmPlan,
+  } = useOnboardingState();
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const reauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
         host ? `&host=${encodeURIComponent(host)}` : ""
       }&returnTo=${encodeURIComponent("/onboarding")}`
     : null;
-
-  const loadOnboarding = useCallback(async () => {
-    const response = await embeddedShopRequest<OnboardingResponse>(
-      "/api/dashboard/onboarding",
-      { timeoutMs: 30000 }
-    );
-    setOnboarding(response.onboarding);
-    return response.onboarding;
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    loadOnboarding()
-      .catch((nextError) => {
-        if (!mounted) return;
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Unable to load the onboarding state."
-        );
-      })
-      .finally(() => {
-        if (!mounted) return;
-        setLoading(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [loadOnboarding]);
 
   const pollSync = useCallback(
     async (jobId?: string | null) => {
@@ -252,19 +148,19 @@ export function OnboardingPage() {
           latestJob.status === "SUCCEEDED_NO_DATA" ||
           latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
         ) {
-          await loadOnboarding();
+          await refresh();
           setToast(
             latestJob.status === "READY_WITH_DATA"
-              ? "Analysis started successfully. VedaSuite is ready with live store signals."
+              ? "Store synced successfully. Continue to choose your first workflow."
               : latestJob.status === "SUCCEEDED_PROCESSING_PENDING"
-              ? "Data sync completed. VedaSuite is still finalizing the first insights."
-              : "Sync completed, but Shopify returned limited store history. Some insights will stay limited for now."
+              ? "Store synced. VedaSuite is still preparing the first insights."
+              : "Store synced, but Shopify returned limited historical data."
           );
           return;
         }
 
         if (latestJob.status === "FAILED") {
-          throw new Error(latestJob.errorMessage ?? "Shopify sync job failed.");
+          throw new Error(latestJob.errorMessage ?? "Shopify sync failed.");
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -272,12 +168,12 @@ export function OnboardingPage() {
 
       throw new Error("Sync is still running. Check back in a moment.");
     },
-    [loadOnboarding]
+    [refresh]
   );
 
   const syncLiveStoreData = useCallback(async () => {
     setBusyAction("SYNC_LIVE_DATA");
-    setError(null);
+    setActionError(null);
 
     try {
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
@@ -290,7 +186,7 @@ export function OnboardingPage() {
       });
       await pollSync(response.result?.jobId ?? response.result?.id ?? null);
     } catch (nextError) {
-      setError(
+      setActionError(
         nextError instanceof Error
           ? nextError.message
           : "Unable to sync Shopify data right now."
@@ -300,103 +196,142 @@ export function OnboardingPage() {
     }
   }, [host, pollSync]);
 
-  const handleStartAnalysis = useCallback(async () => {
+  const registerWebhooks = useCallback(async () => {
+    setBusyAction("REGISTER_WEBHOOKS");
+    setActionError(null);
+
+    try {
+      await embeddedShopRequest("/api/shopify/register-webhooks", {
+        method: "POST",
+        body: {
+          host,
+          returnTo: "/onboarding",
+        },
+        timeoutMs: 90000,
+      });
+      await refresh();
+      setToast("Required Shopify webhooks are now registered.");
+    } catch (nextError) {
+      setActionError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to register required Shopify webhooks."
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }, [host, refresh]);
+
+  const handleSelectModule = useCallback(
+    async (moduleKey: OnboardingModuleKey) => {
+      setBusyAction(`SELECT_${moduleKey}`);
+      setActionError(null);
+      try {
+        await selectModule(moduleKey);
+        setToast("Starting module selected.");
+      } catch (nextError) {
+        setActionError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Unable to select the starting module."
+        );
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [selectModule]
+  );
+
+  const openFirstInsight = useCallback(
+    async (moduleKey?: OnboardingModuleKey | null, route?: string | null) => {
+      if (!route) {
+        return;
+      }
+
+      setBusyAction("VIEW_FIRST_INSIGHT");
+      setActionError(null);
+      try {
+        await markInsightViewed(moduleKey ?? undefined);
+        navigateEmbedded(route);
+      } catch (nextError) {
+        setActionError(
+          nextError instanceof Error
+            ? nextError.message
+            : "Unable to open the first insight."
+        );
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [markInsightViewed, navigateEmbedded]
+  );
+
+  const handleConfirmPlan = useCallback(async () => {
+    setBusyAction("CONFIRM_PLAN");
+    setActionError(null);
+    try {
+      const nextOnboarding = await confirmPlan();
+      setToast("Onboarding complete. Redirecting to the dashboard.");
+      navigateEmbedded(nextOnboarding.canAccessDashboard ? "/dashboard" : "/onboarding");
+    } catch (nextError) {
+      setActionError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to confirm the current plan."
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }, [confirmPlan, navigateEmbedded]);
+
+  const handlePrimaryAction = useCallback(async () => {
     if (!onboarding) return;
 
-    if (!onboarding.connectionHealthy && reauthorizeUrl) {
-      redirectTopLevel(reauthorizeUrl);
-      return;
-    }
-
-    if (
-      onboarding.syncStatus === "SYNC_REQUIRED" ||
-      onboarding.syncStatus === "NOT_CONNECTED" ||
-      onboarding.syncStatus === "FAILED"
-    ) {
-      await syncLiveStoreData();
-      return;
-    }
-
-    if (
-      onboarding.syncStatus === "SYNC_IN_PROGRESS" ||
-      onboarding.syncStatus === "SYNC_COMPLETED_PROCESSING_PENDING"
-    ) {
-      scrollToSection("onboarding-progress");
-      return;
-    }
-
-    navigateEmbedded(onboarding.recommendedModuleRoute);
-  }, [navigateEmbedded, onboarding, reauthorizeUrl, syncLiveStoreData]);
-
-  const markComplete = useCallback(async () => {
-    setBusyAction("COMPLETE");
-    setError(null);
-    try {
-      const response = await embeddedShopRequest<OnboardingResponse>(
-        "/api/dashboard/onboarding/complete",
-        {
-          method: "POST",
-          timeoutMs: 20000,
+    switch (onboarding.primaryAction.key) {
+      case "RECONNECT_SHOPIFY":
+        if (reauthorizeUrl) {
+          redirectTopLevel(reauthorizeUrl);
         }
-      );
-      setOnboarding(response.onboarding);
-      setToast("Onboarding completed.");
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Unable to update onboarding state."
-      );
-    } finally {
-      setBusyAction(null);
+        return;
+      case "SYNC_LIVE_DATA":
+        await syncLiveStoreData();
+        return;
+      case "CHOOSE_MODULE":
+        scrollToSection("module-selection");
+        return;
+      case "VIEW_FIRST_INSIGHT":
+        await openFirstInsight(
+          onboarding.selectedModule,
+          onboarding.selectedModuleRoute
+        );
+        return;
+      case "CONFIRM_PLAN":
+        await handleConfirmPlan();
+        return;
+      default:
+        navigateEmbedded("/dashboard");
+        return;
     }
-  }, []);
+  }, [
+    handleConfirmPlan,
+    navigateEmbedded,
+    onboarding,
+    openFirstInsight,
+    reauthorizeUrl,
+    syncLiveStoreData,
+  ]);
 
-  const dismiss = useCallback(async () => {
-    setBusyAction("DISMISS");
-    setError(null);
-    try {
-      const response = await embeddedShopRequest<OnboardingResponse>(
-        "/api/dashboard/onboarding/dismiss",
-        {
-          method: "POST",
-          timeoutMs: 20000,
-        }
-      );
-      setOnboarding(response.onboarding);
-      setToast("Onboarding guide dismissed for now.");
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Unable to update onboarding state."
-      );
-    } finally {
-      setBusyAction(null);
-    }
-  }, []);
-
-  const recommendedModule = useMemo(() => {
-    if (!onboarding) {
-      return null;
-    }
-
-    return (
-      onboarding.moduleAvailability.find(
-        (module) => module.route === onboarding.recommendedModuleRoute
-      ) ?? onboarding.moduleAvailability[0] ?? null
-    );
-  }, [onboarding]);
+  const activeStep = useMemo(
+    () => onboarding?.steps.find((step) => step.active) ?? null,
+    [onboarding]
+  );
 
   if (loading) {
     return (
-      <Page
-        title="Getting started"
-        subtitle="Loading the current VedaSuite onboarding state for this store."
-      >
+      <Page title="Onboarding" subtitle="Loading the store onboarding state.">
         <Card>
           <InlineStack align="center">
-            <Spinner accessibilityLabel="Loading onboarding state" size="large" />
+            <Spinner accessibilityLabel="Loading onboarding" size="large" />
           </InlineStack>
         </Card>
       </Page>
@@ -405,27 +340,41 @@ export function OnboardingPage() {
 
   if (!onboarding) {
     return (
-      <Page title="Getting started" subtitle="Unable to load onboarding state.">
+      <Page title="Onboarding" subtitle="Unable to load onboarding state.">
         <Banner title="Onboarding unavailable" tone="critical">
-          <p>{error ?? "The backend did not return onboarding guidance."}</p>
+          <p>{error ?? "The onboarding state could not be loaded."}</p>
         </Banner>
       </Page>
     );
   }
 
+  const heroSecondaryAction =
+    onboarding.primaryAction.key === "CONFIRM_PLAN"
+      ? {
+          label: "Manage Plan",
+          onClick: () => navigateEmbedded("/subscription"),
+        }
+      : onboarding.primaryAction.key === "VIEW_FIRST_INSIGHT" &&
+        onboarding.selectedModuleRoute
+      ? {
+          label: "Manage Plan",
+          onClick: () => navigateEmbedded("/subscription"),
+        }
+      : null;
+
   return (
     <Page
-      title="Guided onboarding"
-      subtitle="Understand what VedaSuite does, sync live store data, review the first insights, and confirm the right plan."
+      title="Onboarding"
+      subtitle="A guided setup flow for connection, module selection, first insight review, and plan confirmation."
     >
       <Layout>
-        {error ? (
+        {actionError ? (
           <Layout.Section>
             <Banner title="Onboarding action failed" tone="critical">
               <BlockStack gap="200">
-                <p>{error}</p>
+                <p>{actionError}</p>
                 <InlineStack gap="300">
-                  <Button onClick={() => void loadOnboarding()}>Retry</Button>
+                  <Button onClick={() => void refresh()}>Refresh state</Button>
                   {reauthorizeUrl ? (
                     <Button
                       variant="primary"
@@ -444,7 +393,7 @@ export function OnboardingPage() {
           <Card>
             <BlockStack gap="500">
               <BlockStack gap="300">
-                <Badge tone="info">Shopify onboarding</Badge>
+                <Badge tone="info">Guided onboarding</Badge>
                 <Text as="h1" variant="heading2xl">
                   {onboarding.hero.headline}
                 </Text>
@@ -463,21 +412,25 @@ export function OnboardingPage() {
                 ))}
               </InlineGrid>
 
-              <InlineStack gap="300" wrap>
+              <InlineStack gap="300">
                 <Button
                   variant="primary"
-                  onClick={() => void handleStartAnalysis()}
-                  loading={busyAction === "SYNC_LIVE_DATA"}
-                  disabled={onboarding.syncStatus === "SYNC_IN_PROGRESS"}
+                  onClick={() => void handlePrimaryAction()}
+                  loading={
+                    busyAction === "SYNC_LIVE_DATA" ||
+                    busyAction === "VIEW_FIRST_INSIGHT" ||
+                    busyAction === "CONFIRM_PLAN"
+                  }
                 >
-                  Start Analysis
+                  {onboarding.primaryAction.key === "CHOOSE_MODULE"
+                    ? "Choose a module"
+                    : onboarding.primaryAction.label}
                 </Button>
-                <Button onClick={() => scrollToSection("sample-insights")}>
-                  View Demo Insights
-                </Button>
-                <Button onClick={() => navigateEmbedded("/subscription")}>
-                  View Pricing
-                </Button>
+                {heroSecondaryAction ? (
+                  <Button onClick={heroSecondaryAction.onClick}>
+                    {heroSecondaryAction.label}
+                  </Button>
+                ) : null}
               </InlineStack>
             </BlockStack>
           </Card>
@@ -485,107 +438,22 @@ export function OnboardingPage() {
 
         <Layout.Section>
           <Banner title={onboarding.stateSummary.title} tone={onboarding.stateSummary.tone}>
-            <BlockStack gap="200">
-              <Text as="p">{onboarding.stateSummary.description}</Text>
-              <InlineStack gap="300">
-                <Badge tone={onboarding.stateSummary.tone}>
-                  {onboarding.stateSummary.badge}
-                </Badge>
-                <Badge tone={onboarding.connectionHealthy ? "success" : "critical"}>
-                  {onboarding.connectionHealthy ? "Connection healthy" : "Reconnect Shopify"}
-                </Badge>
-                <Badge tone={onboarding.webhooksReady ? "success" : "attention"}>
-                  {onboarding.webhooksReady ? "Webhooks ready" : "Webhook setup pending"}
-                </Badge>
-                <Badge tone="info">{`Plan: ${onboarding.currentPlan}`}</Badge>
-              </InlineStack>
-            </BlockStack>
+            <p>{onboarding.stateSummary.description}</p>
           </Banner>
-        </Layout.Section>
-
-        <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-            {onboarding.moduleAvailability.map((module) => (
-              <Card key={module.key}>
-                <BlockStack gap="300">
-                  <InlineStack gap="300" blockAlign="center">
-                    <ModuleIcon moduleKey={module.key} />
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingMd">
-                        {module.title}
-                      </Text>
-                      <Badge tone={module.available ? "success" : "attention"}>
-                        {module.available ? "Included in your plan" : "Plan locked"}
-                      </Badge>
-                    </BlockStack>
-                  </InlineStack>
-
-                  <List type="bullet">
-                    {module.key === "trustAbuse" ? (
-                      <>
-                        <List.Item>Detect refund abuse</List.Item>
-                        <List.Item>Flag risky customers</List.Item>
-                        <List.Item>Reduce chargebacks</List.Item>
-                      </>
-                    ) : module.key === "competitor" ? (
-                      <>
-                        <List.Item>Track competitor pricing</List.Item>
-                        <List.Item>Monitor promotions</List.Item>
-                        <List.Item>Detect ad activity</List.Item>
-                      </>
-                    ) : (
-                      <>
-                        <List.Item>Suggest optimal pricing</List.Item>
-                        <List.Item>Balance margin vs demand</List.Item>
-                        <List.Item>Improve conversion</List.Item>
-                      </>
-                    )}
-                  </List>
-
-                  <Text as="p" tone="subdued">
-                    {module.available ? module.summary : module.lockReason}
-                  </Text>
-
-                  <InlineStack gap="300">
-                    <Button onClick={() => scrollToSection(`insight-${module.key}`)}>
-                      View Sample Insight
-                    </Button>
-                    <Button
-                      disabled={!module.available}
-                      onClick={() =>
-                        navigateEmbedded(module.available ? module.route : "/subscription")
-                      }
-                    >
-                      {module.available ? "Open module" : "Manage plan"}
-                    </Button>
-                  </InlineStack>
-                </BlockStack>
-              </Card>
-            ))}
-          </InlineGrid>
         </Layout.Section>
 
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h2" variant="headingLg">
-                    Guided onboarding flow
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    VedaSuite progresses through one step at a time based on live backend state.
-                  </Text>
-                </BlockStack>
+                <Text as="h2" variant="headingLg">
+                  Onboarding progress
+                </Text>
                 <Badge tone="info">
                   {`${onboarding.progress.completedSteps}/${onboarding.progress.totalSteps} complete`}
                 </Badge>
               </InlineStack>
-
-              <div id="onboarding-progress">
-                <ProgressBar progress={onboarding.progress.percent} size="small" />
-              </div>
-
+              <ProgressBar progress={onboarding.progress.percent} size="small" />
               <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
                 {onboarding.steps.map((step) => (
                   <Card key={step.key}>
@@ -599,11 +467,26 @@ export function OnboardingPage() {
                             {step.description}
                           </Text>
                         </BlockStack>
-                        <Badge tone={toneForStep(step)}>{labelForStep(step)}</Badge>
+                        <Badge tone={stepTone(step)}>{stepLabel(step)}</Badge>
                       </InlineStack>
                       <Text as="p" variant="bodySm" tone="subdued">
                         {step.helper}
                       </Text>
+                      {step.active ? (
+                        <Button
+                          variant="primary"
+                          onClick={() => void handlePrimaryAction()}
+                          loading={
+                            busyAction === "SYNC_LIVE_DATA" ||
+                            busyAction === "VIEW_FIRST_INSIGHT" ||
+                            busyAction === "CONFIRM_PLAN"
+                          }
+                        >
+                          {onboarding.primaryAction.key === "CHOOSE_MODULE"
+                            ? "Choose a module"
+                            : step.ctaLabel}
+                        </Button>
+                      ) : null}
                     </BlockStack>
                   </Card>
                 ))}
@@ -613,45 +496,68 @@ export function OnboardingPage() {
         </Layout.Section>
 
         <Layout.Section>
+          <div id="module-selection" />
+          <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+            {onboarding.moduleOverview.map((module) => (
+              <Card key={module.key}>
+                <BlockStack gap="300">
+                  <InlineStack gap="300" blockAlign="center">
+                    <ModuleIcon moduleKey={module.key} />
+                    <BlockStack gap="100">
+                      <Text as="h2" variant="headingMd">
+                        {module.title}
+                      </Text>
+                      <Badge tone={module.available ? "success" : "attention"}>
+                        {module.available ? "Available" : "Locked"}
+                      </Badge>
+                    </BlockStack>
+                  </InlineStack>
+                  <List type="bullet">
+                    {module.benefits.map((benefit) => (
+                      <List.Item key={benefit}>{benefit}</List.Item>
+                    ))}
+                  </List>
+                  <Text as="p" tone="subdued">
+                    {module.available ? module.summary : module.lockReason}
+                  </Text>
+                  <Button
+                    variant={onboarding.selectedModule === module.key ? "primary" : "secondary"}
+                    loading={busyAction === `SELECT_${module.key}`}
+                    onClick={() =>
+                      module.available
+                        ? void handleSelectModule(module.key)
+                        : navigateEmbedded("/subscription")
+                    }
+                  >
+                    {module.available
+                      ? onboarding.selectedModule === module.key
+                        ? "Selected starting module"
+                        : `Start with ${module.title}`
+                      : "Manage plan"}
+                  </Button>
+                </BlockStack>
+              </Card>
+            ))}
+          </InlineGrid>
+        </Layout.Section>
+
+        <Layout.Section>
           <Card>
             <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h2" variant="headingLg">
-                    Sample Insights Preview
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    These examples show the kinds of insights VedaSuite surfaces once sync and processing are complete.
-                  </Text>
-                </BlockStack>
-                {onboarding.limitedDataReason ? (
-                  <Badge tone="warning">Limited Data</Badge>
-                ) : null}
-              </InlineStack>
-
-              <div id="sample-insights" />
-
+              <Text as="h2" variant="headingLg">
+                Sample insights
+              </Text>
+              <Text as="p" tone="subdued">
+                Onboarding shows sample insights only. Real insights appear in the modules and dashboard after sync and processing.
+              </Text>
               <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
                 {onboarding.sampleInsights.map((insight) => (
                   <Card key={insight.key}>
                     <BlockStack gap="200">
-                      <InlineStack align="space-between" blockAlign="center">
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {insight.module}
-                        </Text>
-                        <Badge tone={insight.badge === "Sample" ? "info" : "success"}>
-                          {insight.badge}
-                        </Badge>
-                      </InlineStack>
-                      <div
-                        id={`insight-${
-                          insight.module === "Fraud Intelligence"
-                            ? "trustAbuse"
-                            : insight.module === "Competitor Intelligence"
-                            ? "competitor"
-                            : "pricingProfit"
-                        }`}
-                      />
+                      <Badge tone="info">Sample Insight</Badge>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {insight.module}
+                      </Text>
                       <Text as="h3" variant="headingMd">
                         {insight.title}
                       </Text>
@@ -671,57 +577,42 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
-                  <BlockStack gap="100">
-                    <Text as="h2" variant="headingLg">
-                      Current plan
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Plan state comes from backend-confirmed Shopify billing data.
-                    </Text>
-                  </BlockStack>
+                  <Text as="h2" variant="headingLg">
+                    Current plan
+                  </Text>
                   <Badge tone={onboarding.planSummary.billingActive ? "success" : "attention"}>
                     {onboarding.planSummary.planName}
                   </Badge>
                 </InlineStack>
-
                 {onboarding.planSummary.starterModule ? (
                   <Text as="p" tone="subdued">
                     Starter module: {onboarding.planSummary.starterModule}
                   </Text>
                 ) : null}
-
                 <BlockStack gap="100">
                   <Text as="h3" variant="headingSm">
                     Features unlocked
                   </Text>
                   <List type="bullet">
-                    {onboarding.planSummary.unlockedFeatures.length > 0 ? (
-                      onboarding.planSummary.unlockedFeatures.map((feature) => (
-                        <List.Item key={feature}>{feature}</List.Item>
-                      ))
-                    ) : (
-                      <List.Item>
-                        Guided onboarding and plan management remain available while you evaluate the app.
-                      </List.Item>
-                    )}
+                    {(onboarding.planSummary.unlockedFeatures.length > 0
+                      ? onboarding.planSummary.unlockedFeatures
+                      : ["Billing management and onboarding access"]).map((feature) => (
+                      <List.Item key={feature}>{feature}</List.Item>
+                    ))}
                   </List>
                 </BlockStack>
-
                 <BlockStack gap="100">
                   <Text as="h3" variant="headingSm">
                     Features locked
                   </Text>
                   <List type="bullet">
-                    {onboarding.planSummary.lockedFeatures.length > 0 ? (
-                      onboarding.planSummary.lockedFeatures.map((feature) => (
-                        <List.Item key={feature}>{feature}</List.Item>
-                      ))
-                    ) : (
-                      <List.Item>No core modules are locked on this plan.</List.Item>
-                    )}
+                    {(onboarding.planSummary.lockedFeatures.length > 0
+                      ? onboarding.planSummary.lockedFeatures
+                      : ["No core onboarding blockers on this plan"]).map((feature) => (
+                      <List.Item key={feature}>{feature}</List.Item>
+                    ))}
                   </List>
                 </BlockStack>
-
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
@@ -729,14 +620,12 @@ export function OnboardingPage() {
                   >
                     Manage Plan
                   </Button>
-                  {recommendedModule ? (
+                  {activeStep?.key === "PLAN_CONFIRMATION" ? (
                     <Button
-                      onClick={() => navigateEmbedded(recommendedModule.route)}
-                      disabled={!recommendedModule.available}
+                      onClick={() => void handleConfirmPlan()}
+                      loading={busyAction === "CONFIRM_PLAN"}
                     >
-                      {recommendedModule.available
-                        ? `Open ${recommendedModule.title}`
-                        : "Open locked module"}
+                      Confirm current plan
                     </Button>
                   ) : null}
                 </InlineStack>
@@ -746,16 +635,40 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  {onboarding.privacySummary.title}
+                  Data readiness
                 </Text>
+                <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Sync status
+                    </Text>
+                    <Text as="p">{onboarding.dataReadiness.stateLabel}</Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Webhooks
+                    </Text>
+                    <Text as="p">
+                      {onboarding.dataReadiness.webhooksReady ? "Registered" : "Action needed"}
+                    </Text>
+                  </div>
+                </InlineGrid>
                 <Text as="p" tone="subdued">
-                  {onboarding.privacySummary.description}
+                  {onboarding.dataReadiness.syncReason}
                 </Text>
-                <List type="bullet">
-                  {onboarding.privacySummary.bullets.map((bullet) => (
-                    <List.Item key={bullet}>{bullet}</List.Item>
-                  ))}
-                </List>
+                {onboarding.limitedDataReason ? (
+                  <Banner title="Limited insights" tone="attention">
+                    <p>{onboarding.limitedDataReason}</p>
+                  </Banner>
+                ) : null}
+                {!onboarding.dataReadiness.webhooksReady ? (
+                  <Button
+                    onClick={() => void registerWebhooks()}
+                    loading={busyAction === "REGISTER_WEBHOOKS"}
+                  >
+                    Fix webhooks
+                  </Button>
+                ) : null}
               </BlockStack>
             </Card>
           </InlineGrid>
@@ -763,34 +676,19 @@ export function OnboardingPage() {
 
         <Layout.Section>
           <Card>
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text as="h2" variant="headingMd">
-                  Finish onboarding
-                </Text>
-                <Text as="p" tone="subdued">
-                  Complete onboarding once you have synced the store, reviewed the first workflow, and confirmed the current plan.
-                </Text>
-              </BlockStack>
-              <InlineStack gap="300">
-                <Button
-                  variant="primary"
-                  onClick={() => void markComplete()}
-                  loading={busyAction === "COMPLETE"}
-                  disabled={!onboarding.hasAnyRawData}
-                >
-                  Complete onboarding
-                </Button>
-                {onboarding.canDismiss ? (
-                  <Button
-                    onClick={() => void dismiss()}
-                    loading={busyAction === "DISMISS"}
-                  >
-                    Hide for now
-                  </Button>
-                ) : null}
-              </InlineStack>
-            </InlineStack>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingLg">
+                {onboarding.privacySummary.title}
+              </Text>
+              <Text as="p" tone="subdued">
+                {onboarding.privacySummary.description}
+              </Text>
+              <List type="bullet">
+                {onboarding.privacySummary.bullets.map((bullet) => (
+                  <List.Item key={bullet}>{bullet}</List.Item>
+                ))}
+              </List>
+            </BlockStack>
           </Card>
         </Layout.Section>
       </Layout>

@@ -31,6 +31,9 @@ model Store {
   lastSyncStatus String? @map("syncStatus")
   onboardingCompletedAt DateTime?
   onboardingDismissedAt DateTime?
+  onboardingSelectedModule String?
+  onboardingFirstInsightViewedAt DateTime?
+  onboardingPlanConfirmedAt DateTime?
 
   trialStartedAt DateTime?
   trialEndsAt    DateTime?
