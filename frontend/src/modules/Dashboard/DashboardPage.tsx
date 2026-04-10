@@ -102,16 +102,41 @@ type DashboardRefreshResult = {
   startedAt: string;
   finishedAt: string;
   refreshStatus: "success" | "partial" | "failure";
-  dashboardDataChanged: boolean;
+  visibleDataChanged: boolean;
   changedSections: string[];
   unchangedSections: string[];
   lastRefreshedAt: string | null;
   moduleRefreshResults: {
-    fraud: "updated" | "unchanged" | "partial" | "failed";
-    competitor: "updated" | "unchanged" | "partial" | "failed";
-    pricing: "updated" | "unchanged" | "partial" | "failed";
+    fraud: "updated" | "unchanged" | "failed";
+    competitor: "updated" | "unchanged" | "failed";
+    pricing: "updated" | "unchanged" | "failed";
   };
+  previousSnapshot: DashboardVisibleSnapshot | null;
+  nextSnapshot: DashboardVisibleSnapshot;
   summary: string;
+};
+
+type DashboardVisibleSnapshot = {
+  kpiCards: {
+    fraudAlertsToday: number;
+    competitorPriceChanges: number;
+    aiPricingSuggestions: number;
+    profitOptimizationOpportunities: number;
+  };
+  recentInsightKeys: string[];
+  quickAccessReadiness: {
+    trustAbuse: string | null;
+    competitor: string | null;
+    pricingProfit: string | null;
+  };
+  syncHealth: {
+    dataState: string | null;
+    summaryTitle: string | null;
+    summaryDetail: string | null;
+    syncHealthStatus: string | null;
+    syncHealthReason: string | null;
+  };
+  lastRefreshedAt: string | null;
 };
 
 function toneForReadiness(value?: string | null) {
@@ -168,72 +193,110 @@ function equalJson(value: unknown, nextValue: unknown) {
   return JSON.stringify(value) === JSON.stringify(nextValue);
 }
 
+function buildDashboardSnapshot(
+  payload: DashboardPayload | null
+): DashboardVisibleSnapshot | null {
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    kpiCards: {
+      fraudAlertsToday: payload.metrics.fraudAlertsToday,
+      competitorPriceChanges: payload.metrics.competitorPriceChanges,
+      aiPricingSuggestions: payload.metrics.aiPricingSuggestions,
+      profitOptimizationOpportunities:
+        payload.metrics.profitOptimizationOpportunities,
+    },
+    recentInsightKeys:
+      payload.metrics.recentInsights?.map((item) => `${item.id}:${item.createdAt}`) ?? [],
+    quickAccessReadiness: {
+      trustAbuse: payload.metrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
+      competitor: payload.metrics.moduleReadiness?.competitor?.readinessState ?? null,
+      pricingProfit:
+        payload.metrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
+    },
+    syncHealth: {
+      dataState: payload.metrics.dataState ?? null,
+      summaryTitle: payload.metrics.summaryTitle ?? null,
+      summaryDetail: payload.metrics.summaryDetail ?? null,
+      syncHealthStatus: payload.diagnostics.sync.syncHealth?.status ?? null,
+      syncHealthReason: payload.diagnostics.sync.syncHealth?.reason ?? null,
+    },
+    lastRefreshedAt: payload.metrics.lastRefreshedAt ?? null,
+  };
+}
+
+function parseTimestamp(value?: string | null) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+function hasSnapshotChanged(
+  previous: DashboardVisibleSnapshot | null,
+  next: DashboardVisibleSnapshot | null
+) {
+  if (!previous || !next) {
+    return true;
+  }
+
+  return !equalJson(previous, next);
+}
+
+async function wait(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function deriveRefreshResult(args: {
   previous: DashboardPayload | null;
   next: DashboardPayload;
   job: SyncJobResponse["result"];
 }): DashboardRefreshResult {
+  const previousSnapshot = buildDashboardSnapshot(args.previous);
+  const nextSnapshot = buildDashboardSnapshot(args.next)!;
   const previousMetrics = args.previous?.metrics ?? null;
-  const previousDiagnostics = args.previous?.diagnostics ?? null;
   const nextMetrics = args.next.metrics;
-  const nextDiagnostics = args.next.diagnostics;
+
+  const kpiChanged =
+    !previousSnapshot ||
+    !equalJson(previousSnapshot.kpiCards, nextSnapshot.kpiCards);
+  const recentInsightsChanged =
+    !previousSnapshot ||
+    !equalJson(previousSnapshot.recentInsightKeys, nextSnapshot.recentInsightKeys);
+  const quickAccessChanged =
+    !previousSnapshot ||
+    !equalJson(
+      previousSnapshot.quickAccessReadiness,
+      nextSnapshot.quickAccessReadiness
+    );
+  const syncHealthChanged =
+    !previousSnapshot ||
+    !equalJson(previousSnapshot.syncHealth, nextSnapshot.syncHealth);
+  const freshnessChanged =
+    !previousSnapshot ||
+    previousSnapshot.lastRefreshedAt !== nextSnapshot.lastRefreshedAt;
 
   const sections = [
     {
       label: "KPI cards",
-      changed:
-        !previousMetrics ||
-        !equalJson(
-          {
-            fraudAlertsToday: previousMetrics.fraudAlertsToday,
-            competitorPriceChanges: previousMetrics.competitorPriceChanges,
-            aiPricingSuggestions: previousMetrics.aiPricingSuggestions,
-            profitOptimizationOpportunities:
-              previousMetrics.profitOptimizationOpportunities,
-          },
-          {
-            fraudAlertsToday: nextMetrics.fraudAlertsToday,
-            competitorPriceChanges: nextMetrics.competitorPriceChanges,
-            aiPricingSuggestions: nextMetrics.aiPricingSuggestions,
-            profitOptimizationOpportunities:
-              nextMetrics.profitOptimizationOpportunities,
-          }
-        ),
+      changed: kpiChanged,
     },
     {
       label: "Recent insights",
-      changed:
-        !previousMetrics ||
-        !equalJson(
-          previousMetrics.recentInsights?.map((item) => item.id) ?? [],
-          nextMetrics.recentInsights?.map((item) => item.id) ?? []
-        ),
+      changed: recentInsightsChanged,
     },
     {
       label: "Quick access readiness",
-      changed:
-        !previousMetrics ||
-        !equalJson(previousMetrics.moduleReadiness, nextMetrics.moduleReadiness),
+      changed: quickAccessChanged,
     },
     {
       label: "Sync health",
-      changed:
-        !previousMetrics ||
-        !previousDiagnostics ||
-        !equalJson(
-          {
-            dataState: previousMetrics.dataState,
-            summaryTitle: previousMetrics.summaryTitle,
-            summaryDetail: previousMetrics.summaryDetail,
-            syncHealth: previousDiagnostics.sync.syncHealth,
-          },
-          {
-            dataState: nextMetrics.dataState,
-            summaryTitle: nextMetrics.summaryTitle,
-            summaryDetail: nextMetrics.summaryDetail,
-            syncHealth: nextDiagnostics.sync.syncHealth,
-          }
-        ),
+      changed: syncHealthChanged,
+    },
+    {
+      label: "Last refreshed",
+      changed: freshnessChanged,
     },
   ];
 
@@ -249,13 +312,13 @@ function deriveRefreshResult(args: {
         fraudAlertsToday: previousMetrics.fraudAlertsToday,
         highRiskOrders: previousMetrics.highRiskOrders,
         serialReturners: previousMetrics.serialReturners,
-        readiness: previousMetrics.moduleReadiness?.trustAbuse,
+        readiness: previousMetrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
       },
       {
         fraudAlertsToday: nextMetrics.fraudAlertsToday,
         highRiskOrders: nextMetrics.highRiskOrders,
         serialReturners: nextMetrics.serialReturners,
-        readiness: nextMetrics.moduleReadiness?.trustAbuse,
+        readiness: nextMetrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
       }
     );
   const competitorChanged =
@@ -264,12 +327,12 @@ function deriveRefreshResult(args: {
       {
         competitorPriceChanges: previousMetrics.competitorPriceChanges,
         promotionAlerts: previousMetrics.promotionAlerts,
-        readiness: previousMetrics.moduleReadiness?.competitor,
+        readiness: previousMetrics.moduleReadiness?.competitor?.readinessState ?? null,
       },
       {
         competitorPriceChanges: nextMetrics.competitorPriceChanges,
         promotionAlerts: nextMetrics.promotionAlerts,
-        readiness: nextMetrics.moduleReadiness?.competitor,
+        readiness: nextMetrics.moduleReadiness?.competitor?.readinessState ?? null,
       }
     );
   const pricingChanged =
@@ -279,13 +342,15 @@ function deriveRefreshResult(args: {
         aiPricingSuggestions: previousMetrics.aiPricingSuggestions,
         profitOptimizationOpportunities:
           previousMetrics.profitOptimizationOpportunities,
-        readiness: previousMetrics.moduleReadiness?.pricingProfit,
+        readiness:
+          previousMetrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
       },
       {
         aiPricingSuggestions: nextMetrics.aiPricingSuggestions,
         profitOptimizationOpportunities:
           nextMetrics.profitOptimizationOpportunities,
-        readiness: nextMetrics.moduleReadiness?.pricingProfit,
+        readiness:
+          nextMetrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
       }
     );
 
@@ -297,53 +362,52 @@ function deriveRefreshResult(args: {
       ? "partial"
       : "success";
 
-  const dashboardDataChanged = changedSections.length > 0;
+  const visibleDataChanged =
+    kpiChanged || recentInsightsChanged || quickAccessChanged || syncHealthChanged;
+  const changedBusinessSections = changedSections.filter(
+    (section) => section !== "Last refreshed"
+  );
+  const unchangedModuleNames = [
+    !fraudChanged ? "Fraud" : null,
+    !competitorChanged ? "Competitor" : null,
+    !pricingChanged ? "Pricing" : null,
+  ].filter((value): value is string => !!value);
   const summary =
     refreshStatus === "failure"
       ? "Refresh failed. Retry the sync to update dashboard signals."
       : refreshStatus === "partial"
-      ? dashboardDataChanged
-        ? `Refresh completed with limited changes. Updated ${changedSections.join(", ")}.`
-        : "Refresh completed with limited updates. Some module outputs are still catching up."
-      : dashboardDataChanged
-      ? `Last refresh updated ${changedSections.join(", ")}.`
-      : "Store data refreshed successfully. No new alerts or metric changes were detected.";
+      ? visibleDataChanged
+        ? `Refresh completed with partial updates. Updated ${changedBusinessSections.join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} data unchanged.` : ""}`
+        : "Refresh completed with partial updates. No visible metric changes were detected."
+      : visibleDataChanged
+      ? `Refresh updated ${changedBusinessSections.join(", ")}.`
+      : "Refresh completed. No visible metric changes were detected.";
 
   return {
     startedAt: args.job?.startedAt ?? new Date().toISOString(),
     finishedAt: args.job?.finishedAt ?? new Date().toISOString(),
     refreshStatus,
-    dashboardDataChanged,
+    visibleDataChanged,
     changedSections,
     unchangedSections,
-    lastRefreshedAt:
-      nextMetrics.lastRefreshedAt ?? args.job?.finishedAt ?? new Date().toISOString(),
+    lastRefreshedAt: nextSnapshot.lastRefreshedAt ?? args.job?.finishedAt ?? new Date().toISOString(),
     moduleRefreshResults: {
-      fraud:
-        refreshStatus === "failure"
-          ? "failed"
-          : refreshStatus === "partial" && fraudChanged
-          ? "partial"
-          : fraudChanged
-          ? "updated"
-          : "unchanged",
+      fraud: refreshStatus === "failure" ? "failed" : fraudChanged ? "updated" : "unchanged",
       competitor:
         refreshStatus === "failure"
           ? "failed"
-          : refreshStatus === "partial" && competitorChanged
-          ? "partial"
           : competitorChanged
           ? "updated"
           : "unchanged",
       pricing:
         refreshStatus === "failure"
           ? "failed"
-          : refreshStatus === "partial" && pricingChanged
-          ? "partial"
           : pricingChanged
           ? "updated"
           : "unchanged",
     },
+    previousSnapshot,
+    nextSnapshot,
     summary,
   };
 }
@@ -389,6 +453,46 @@ export function DashboardPage() {
     setDiagnostics(payload.diagnostics);
     setError(null);
   }, []);
+
+  const loadVerifiedDashboardPayload = useCallback(
+    async (
+      previous: DashboardPayload | null,
+      job: SyncJobResponse["result"]
+    ): Promise<DashboardPayload> => {
+      const previousSnapshot = buildDashboardSnapshot(previous);
+      const previousRefreshTime = parseTimestamp(
+        previous?.metrics.lastRefreshedAt ?? null
+      );
+      const jobFinishedAt = parseTimestamp(job?.finishedAt ?? null);
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const nextPayload = await loadDashboard();
+        const nextSnapshot = buildDashboardSnapshot(nextPayload);
+        const nextRefreshTime = parseTimestamp(
+          nextPayload.metrics.lastRefreshedAt ?? null
+        );
+
+        const hasFreshTimestamp =
+          (jobFinishedAt != null &&
+            nextRefreshTime != null &&
+            nextRefreshTime >= jobFinishedAt) ||
+          (previousRefreshTime != null &&
+            nextRefreshTime != null &&
+            nextRefreshTime > previousRefreshTime);
+
+        const snapshotChanged = hasSnapshotChanged(previousSnapshot, nextSnapshot);
+
+        if (hasFreshTimestamp || snapshotChanged || attempt === 7) {
+          return nextPayload;
+        }
+
+        await wait(1500);
+      }
+
+      return loadDashboard();
+    },
+    [loadDashboard]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -449,7 +553,10 @@ export function DashboardPage() {
                   diagnostics,
                 }
               : null;
-          const nextPayload = await loadDashboard();
+          const nextPayload = await loadVerifiedDashboardPayload(
+            previousPayload,
+            latestJob
+          );
           applyDashboardPayload(nextPayload);
           await refreshOnboarding();
           const nextRefreshResult = deriveRefreshResult({
@@ -471,7 +578,13 @@ export function DashboardPage() {
 
       throw new Error("Sync is still running. Check back in a moment.");
     },
-    [applyDashboardPayload, diagnostics, loadDashboard, metrics, refreshOnboarding]
+    [
+      applyDashboardPayload,
+      diagnostics,
+      loadVerifiedDashboardPayload,
+      metrics,
+      refreshOnboarding,
+    ]
   );
 
   const syncLiveStoreData = useCallback(async () => {

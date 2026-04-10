@@ -686,15 +686,6 @@ export function CompetitorPage() {
     }
   };
 
-  const monitoringStatusRows = [
-    ["Last successful refresh", formatDateTime(overview.monitoringStatus?.lastSuccessAt)],
-    ["Last refresh attempt", formatDateTime(overview.monitoringStatus?.lastAttemptAt)],
-    ["Domains checked", String(overview.monitoringStatus?.checkedDomainsCount ?? 0)],
-    ["Products matched", String(overview.monitoringStatus?.matchedProductsCount ?? 0)],
-    ["Coverage status", monitoringCoverageLabel(overview)],
-    ["Refresh result", banner.summary],
-  ];
-
   const ingestCompetitorData = async () => {
     try {
       setIngesting(true);
@@ -749,6 +740,14 @@ export function CompetitorPage() {
   };
   const moduleState = deriveCompetitorModuleState(overview);
   const banner = deriveCompetitorBanner(overview);
+  const monitoringStatusRows = [
+    ["Last successful refresh", formatDateTime(overview.monitoringStatus?.lastSuccessAt)],
+    ["Last refresh attempt", formatDateTime(overview.monitoringStatus?.lastAttemptAt)],
+    ["Domains checked", String(overview.monitoringStatus?.checkedDomainsCount ?? 0)],
+    ["Products matched", String(overview.monitoringStatus?.matchedProductsCount ?? 0)],
+    ["Coverage status", monitoringCoverageLabel(overview)],
+    ["Refresh result", banner.summary],
+  ];
 
   return (
     <ModuleGate
