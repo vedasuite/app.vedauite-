@@ -5,6 +5,11 @@ import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
+import {
+  createUnifiedModuleState,
+  isStaleTimestamp,
+  toIsoString,
+} from "./unifiedModuleStateService";
 
 type CompetitorSetupStatus =
   | "READY"
@@ -426,7 +431,7 @@ export async function getCompetitorOverview(shopDomain: string) {
       ? "SUCCEEDED"
       : "NOT_STARTED";
   const freshnessStatus: CompetitorFreshnessStatus =
-    freshnessHours == null ? "UNKNOWN" : freshnessHours > 72 ? "STALE" : "FRESH";
+    freshnessHours == null ? "UNKNOWN" : freshnessHours > 24 ? "STALE" : "FRESH";
   const snapshotStatus: CompetitorSnapshotStatus =
     syncStatusLabel === "FAILED"
       ? "FAILED"
@@ -507,7 +512,163 @@ export async function getCompetitorOverview(shopDomain: string) {
         : "Add competitor domains and start monitoring."),
   };
 
+  const competitorDependencyState = operational.counts.competitorRows > 0 ? "ready" : "missing";
+  const pricingDependencyState = operational.counts.pricingRows > 0 ? "ready" : "missing";
+  const fraudDependencyState = operational.counts.timelineEvents > 0 ? "ready" : "missing";
+  const moduleState =
+    setupStatus === "NO_DOMAINS"
+      ? createUnifiedModuleState({
+          setupStatus: "incomplete",
+          syncStatus: syncStatusLabel === "FAILED" ? "failed" : "idle",
+          dataStatus: "empty",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor setup is incomplete",
+          description:
+            "Add competitor domains before VedaSuite can monitor competitor prices, promotions, and changes.",
+          nextAction: "Add competitor domains",
+        })
+      : syncStatusLabel === "RUNNING"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "running",
+          dataStatus: "processing",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: matchedProductsCount > 0 ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor monitoring is refreshing",
+          description:
+            "VedaSuite is checking competitor domains and updating matched products.",
+          nextAction: "Wait for refresh to finish",
+        })
+      : syncStatusLabel === "FAILED"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "failed",
+          dataStatus: "failed",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: matchedProductsCount > 0 ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor refresh failed",
+          description:
+            latestCompetitorJob?.errorMessage ??
+            "VedaSuite could not refresh competitor data for the latest attempt.",
+          nextAction: "Retry refresh",
+        })
+      : isStaleTimestamp(lastSuccessAt)
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "stale",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          dataChanged:
+            detectedPriceChangesCount > 0 || detectedPromotionChangesCount > 0,
+          coverage: matchedProductsCount > 0 ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor data is out of date",
+          description:
+            "The last successful competitor refresh is older than 24 hours. Run a new refresh to see current changes.",
+          nextAction: "Refresh competitor data",
+        })
+      : matchedProductsCount === 0
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "empty",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Monitoring is active, but no competitor matches were found",
+          description:
+            "VedaSuite checked your configured domains, but it did not find matching competitor products yet.",
+          nextAction:
+            "Try adding more competitor domains or review whether your products overlap.",
+        })
+      : crawlStatus === "PARTIAL" || snapshotStatus === "PARTIAL"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "partial",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          dataChanged:
+            detectedPriceChangesCount > 0 || detectedPromotionChangesCount > 0,
+          coverage: "partial",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor data is available with partial coverage",
+          description:
+            "Some competitor products matched, but coverage is still incomplete across the tracked catalog.",
+          nextAction: "Review tracked products or update competitor domains",
+        })
+      : detectedPriceChangesCount === 0 && detectedPromotionChangesCount === 0
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "empty",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: "full",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Monitoring is active. No competitor changes were found.",
+          description:
+            "The latest refresh completed successfully, but no competitor price or promotion changes were detected.",
+          nextAction: "Refresh again later or update tracked domains",
+        })
+      : createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "ready",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          dataChanged: true,
+          coverage: "full",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: "Competitor data is ready",
+          description:
+            "VedaSuite found usable competitor matches and detected live market changes for review.",
+          nextAction: "View competitor changes",
+        });
+
   return {
+    moduleState,
     monitoringStatus: {
       setupStatus,
       syncStatus: syncStatusLabel,

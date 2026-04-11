@@ -37,6 +37,23 @@ type CompetitorRow = {
 };
 
 type CompetitorOverview = {
+  moduleState?: {
+    setupStatus: string;
+    syncStatus: string;
+    dataStatus: string;
+    lastSuccessfulSyncAt?: string | null;
+    lastAttemptAt?: string | null;
+    dataChanged?: boolean;
+    coverage: string;
+    dependencies: {
+      competitor: string;
+      pricing: string;
+      fraud: string;
+    };
+    title: string;
+    description: string;
+    nextAction?: string | null;
+  };
   monitoringStatus?: {
     setupStatus: string;
     syncStatus: string;
@@ -174,6 +191,23 @@ function createEmptyOverview(
   reason = "Add monitored domains and run the first competitor ingestion."
 ): CompetitorOverview {
   return {
+    moduleState: {
+      setupStatus: "incomplete",
+      syncStatus: "idle",
+      dataStatus: "empty",
+      lastSuccessfulSyncAt: null,
+      lastAttemptAt: null,
+      dataChanged: false,
+      coverage: "none",
+      dependencies: {
+        competitor: "missing",
+        pricing: "missing",
+        fraud: "missing",
+      },
+      title: "Competitor setup is incomplete",
+      description: reason,
+      nextAction: "Add competitor domains",
+    },
     monitoringStatus: {
       setupStatus: "NO_DOMAINS",
       syncStatus: "NOT_STARTED",
@@ -299,6 +333,26 @@ function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
         input.monitoringStatus?.detectedPromotionChangesCount ?? 0,
       latestSyncReason: input.monitoringStatus?.latestSyncReason ?? null,
     },
+    moduleState: {
+      setupStatus: input.moduleState?.setupStatus ?? "incomplete",
+      syncStatus: input.moduleState?.syncStatus ?? "idle",
+      dataStatus: input.moduleState?.dataStatus ?? "empty",
+      lastSuccessfulSyncAt: input.moduleState?.lastSuccessfulSyncAt ?? null,
+      lastAttemptAt: input.moduleState?.lastAttemptAt ?? null,
+      dataChanged: input.moduleState?.dataChanged ?? false,
+      coverage: input.moduleState?.coverage ?? "none",
+      dependencies: {
+        competitor: input.moduleState?.dependencies?.competitor ?? "missing",
+        pricing: input.moduleState?.dependencies?.pricing ?? "missing",
+        fraud: input.moduleState?.dependencies?.fraud ?? "missing",
+      },
+      title: input.moduleState?.title ?? input.readiness?.reason ?? "Competitor data is updating",
+      description:
+        input.moduleState?.description ??
+        input.readiness?.reason ??
+        "VedaSuite is preparing competitor data.",
+      nextAction: input.moduleState?.nextAction ?? null,
+    },
   };
 }
 
@@ -332,62 +386,42 @@ function formatDateTime(value?: string | null) {
 function deriveCompetitorModuleState(
   data: CompetitorOverview
 ): DerivedCompetitorModuleState {
-  const status = data.monitoringStatus;
+  const state = data.moduleState;
 
-  if (!status) {
+  if (!state || state.setupStatus === "incomplete") {
     return "setup_incomplete";
   }
-
-  if (
-    status.setupStatus === "NO_DOMAINS" ||
-    status.setupStatus === "NO_MONITORED_PRODUCTS"
-  ) {
-    return "setup_incomplete";
-  }
-
-  if (
-    status.syncStatus === "FAILED" ||
-    status.crawlStatus === "FAILED" ||
-    status.snapshotStatus === "FAILED"
-  ) {
+  if (state.dataStatus === "failed") {
     return "failure";
   }
-
-  if (status.freshnessStatus === "STALE") {
+  if (state.dataStatus === "stale") {
     return "stale";
   }
-
-  if (status.snapshotStatus === "NO_MATCHES") {
+  if (state.dataStatus === "partial") {
     return "partial";
   }
-
-  if (status.crawlStatus === "PARTIAL" || status.snapshotStatus === "PARTIAL") {
-    return "partial";
-  }
-
-  if (status.snapshotStatus === "NO_CHANGES") {
+  if (state.dataStatus === "empty") {
     return "empty_healthy";
   }
-
-  if (status.snapshotStatus === "READY") {
+  if (state.dataStatus === "ready") {
     return "success";
   }
-
-  return "partial";
+  return state.syncStatus === "running" ? "partial" : "empty_healthy";
 }
 
 function deriveCompetitorBanner(data: CompetitorOverview) {
   const state = deriveCompetitorModuleState(data);
   const status = data.monitoringStatus;
+  const moduleState = data.moduleState;
 
   switch (state) {
     case "success":
       return {
         state,
         tone: "success" as const,
-        title: "Competitor monitoring refreshed successfully",
-        body: `Last updated ${formatDateTime(status?.lastSuccessAt)}. ${status?.checkedDomainsCount ?? 0} domains checked, ${status?.matchedProductsCount ?? 0} products matched, ${status?.detectedPriceChangesCount ?? 0} price changes and ${status?.detectedPromotionChangesCount ?? 0} promotion changes detected.`,
-        summary: "Usable competitor snapshots were produced in the latest refresh.",
+        title: moduleState?.title ?? "Competitor monitoring refreshed successfully",
+        body: `${moduleState?.description ?? "Competitor data is ready."} Last updated ${formatDateTime(moduleState?.lastSuccessfulSyncAt ?? status?.lastSuccessAt)}. ${status?.checkedDomainsCount ?? 0} domains checked, ${status?.matchedProductsCount ?? 0} products matched, ${status?.detectedPriceChangesCount ?? 0} price changes and ${status?.detectedPromotionChangesCount ?? 0} promotion changes detected.`,
+        summary: moduleState?.nextAction ?? "View competitor changes.",
         primaryAction: "View changes",
         secondaryAction: null,
       };
@@ -395,33 +429,19 @@ function deriveCompetitorBanner(data: CompetitorOverview) {
       return {
         state,
         tone: "warning" as const,
-        title: "Competitor refresh completed with partial coverage",
-        body:
-          status?.snapshotStatus === "NO_MATCHES"
-            ? "The refresh checked your competitor domains, but none of the monitored products could be matched to comparable competitor snapshots."
-            : "The latest refresh completed, but some tracked products still do not have usable competitor snapshots.",
-        summary:
-          status?.latestSyncReason ??
-          "Review tracked products, update monitored domains, or run another refresh after coverage changes.",
-        primaryAction:
-          status?.snapshotStatus === "NO_MATCHES"
-            ? "Review tracked products"
-            : "Re-run sync",
+        title: moduleState?.title ?? "Competitor data is available with partial coverage",
+        body: moduleState?.description ?? "Some competitor data is available, but coverage is still incomplete.",
+        summary: moduleState?.nextAction ?? "Review tracked products or update domains.",
+        primaryAction: "Review tracked products",
         secondaryAction: "Update domains",
       };
     case "setup_incomplete":
       return {
         state,
         tone: "info" as const,
-        title: "Complete competitor setup to start monitoring",
-        body:
-          status?.setupStatus === "NO_DOMAINS"
-            ? "Add competitor domains before VedaSuite can monitor websites, pricing, and promotions."
-            : "VedaSuite still needs monitored products before it can compare your catalog with competitor snapshots.",
-        summary:
-          status?.setupStatus === "NO_DOMAINS"
-            ? "No competitor domains are configured yet."
-            : "No monitored products are available for competitor matching yet.",
+        title: moduleState?.title ?? "Complete competitor setup to start monitoring",
+        body: moduleState?.description ?? "Competitor setup is incomplete.",
+        summary: moduleState?.nextAction ?? "Add competitor domains to continue.",
         primaryAction: "Complete setup",
         secondaryAction: "Update domains",
       };
@@ -429,9 +449,11 @@ function deriveCompetitorBanner(data: CompetitorOverview) {
       return {
         state,
         tone: "info" as const,
-        title: "Monitoring is active. No competitor changes were detected.",
-        body: `Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}. VedaSuite checked ${status?.checkedDomainsCount ?? 0} domains and matched ${status?.matchedProductsCount ?? 0} products, but no competitor price or promotion changes were detected in the latest refresh.`,
-        summary: "This is a healthy monitoring result, not an error.",
+        title:
+          moduleState?.title ??
+          "Monitoring is active. No competitor changes were found.",
+        body: `${moduleState?.description ?? "The latest refresh completed successfully."} Last successful refresh: ${formatDateTime(moduleState?.lastSuccessfulSyncAt ?? status?.lastSuccessAt)}.`,
+        summary: moduleState?.nextAction ?? "Refresh again later or update tracked domains.",
         primaryAction: "Refresh again",
         secondaryAction: "Update domains",
       };
@@ -439,11 +461,9 @@ function deriveCompetitorBanner(data: CompetitorOverview) {
       return {
         state,
         tone: "critical" as const,
-        title: "Competitor refresh failed",
-        body:
-          status?.latestSyncReason ??
-          "VedaSuite could not complete the latest competitor refresh.",
-        summary: "Retry the refresh or update monitored domains before trying again.",
+        title: moduleState?.title ?? "Competitor refresh failed",
+        body: moduleState?.description ?? "VedaSuite could not complete the latest competitor refresh.",
+        summary: moduleState?.nextAction ?? "Retry the refresh.",
         primaryAction: "Retry refresh",
         secondaryAction: "Update domains",
       };
@@ -452,11 +472,9 @@ function deriveCompetitorBanner(data: CompetitorOverview) {
       return {
         state: "stale" as const,
         tone: "warning" as const,
-        title: "Competitor monitoring is stale",
-        body: `The latest usable competitor refresh is getting old. Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}.`,
-        summary:
-          status?.latestSyncReason ??
-          "Run a fresh refresh to restore current competitor coverage.",
+        title: moduleState?.title ?? "Competitor data is out of date",
+        body: moduleState?.description ?? `The latest usable competitor refresh is getting old. Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}.`,
+        summary: moduleState?.nextAction ?? "Refresh competitor data.",
         primaryAction: "Re-run sync",
         secondaryAction: "Update domains",
       };

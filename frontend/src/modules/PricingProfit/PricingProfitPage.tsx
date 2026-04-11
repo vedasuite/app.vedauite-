@@ -19,6 +19,23 @@ import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
 type PricingProfitOverview = {
+  moduleState?: {
+    setupStatus: string;
+    syncStatus: string;
+    dataStatus: string;
+    lastSuccessfulSyncAt?: string | null;
+    lastAttemptAt?: string | null;
+    dataChanged?: boolean;
+    coverage: string;
+    dependencies: {
+      competitor: string;
+      pricing: string;
+      fraud: string;
+    };
+    title: string;
+    description: string;
+    nextAction?: string | null;
+  };
   subscription: {
     capabilities: Record<string, boolean>;
     featureAccess: {
@@ -133,6 +150,23 @@ function createEmptyOverview(
   reason = "Run the first live sync to populate pricing and profit outputs."
 ): PricingProfitOverview {
   return {
+    moduleState: {
+      setupStatus: "incomplete",
+      syncStatus: "idle",
+      dataStatus: "empty",
+      lastSuccessfulSyncAt: null,
+      lastAttemptAt: null,
+      dataChanged: false,
+      coverage: "none",
+      dependencies: {
+        competitor: "missing",
+        pricing: "missing",
+        fraud: "missing",
+      },
+      title: "Pricing setup is incomplete",
+      description: reason,
+      nextAction: "Run live sync",
+    },
     subscription: {
       capabilities: {},
       featureAccess: {
@@ -193,6 +227,22 @@ function toneForPriority(value?: string) {
   if (normalized.includes("high")) return "critical";
   if (normalized.includes("medium")) return "attention";
   return "info";
+}
+
+function toneForModuleState(value?: string) {
+  switch (value) {
+    case "ready":
+      return "success";
+    case "partial":
+      return "warning";
+    case "failed":
+      return "critical";
+    case "processing":
+    case "empty":
+    case "stale":
+    default:
+      return "info";
+  }
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -348,22 +398,15 @@ export function PricingProfitPage() {
             </Banner>
           </Layout.Section>
         ) : null}
-        {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (
+        {syncIssue || overview.moduleState?.dataStatus !== "ready" ? (
           <Layout.Section>
             <Banner
-              title={
-                overview.readiness?.readinessState === "FAILED"
-                  ? "Pricing & profit processing needs attention"
-                  : overview.readiness?.readinessState === "EMPTY_STORE_DATA"
-                  ? "No store data available for pricing & profit yet"
-                  : overview.readiness?.readinessState === "SYNC_COMPLETED_PROCESSING_PENDING"
-                  ? "Pricing & profit processing is catching up"
-                  : "Pricing & profit data is still syncing"
-              }
-              tone={overview.readiness?.readinessState === "FAILED" ? "critical" : "warning"}
+              title={overview.moduleState?.title ?? "Pricing data is updating"}
+              tone={toneForModuleState(overview.moduleState?.dataStatus)}
             >
               <p>
-                {overview.readiness?.reason ??
+                {overview.moduleState?.description ??
+                  overview.readiness?.reason ??
                   "VedaSuite will populate pricing and profit outputs after live sync and processing complete."}
               </p>
             </Banner>
@@ -421,11 +464,18 @@ export function PricingProfitPage() {
               <p>{overview.summary.automationReadiness}</p>
             </Banner>
           ) : (
-            <Banner title="Growth plan: pricing intelligence is active" tone="warning">
+            <Banner
+              title={
+                overview.moduleState?.dataStatus === "partial"
+                  ? "Pricing insights are available with partial coverage"
+                  : "Growth plan: pricing intelligence is active"
+              }
+              tone={overview.moduleState?.dataStatus === "partial" ? "info" : "warning"}
+            >
               <p>
-                Growth includes pricing recommendations and basic scenario
-                guidance. Upgrade to Pro to unlock the full profit engine,
-                advanced pricing modes, and proactive margin protection.
+                {overview.moduleState?.dataStatus === "partial"
+                  ? "Pricing insights are available. Competitor data is still being processed."
+                  : "Growth includes pricing recommendations and basic scenario guidance. Upgrade to Pro to unlock the full profit engine, advanced pricing modes, and proactive margin protection."}
               </p>
             </Banner>
           )}

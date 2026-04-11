@@ -8,6 +8,11 @@ import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
+import {
+  createUnifiedModuleState,
+  isStaleTimestamp,
+  toIsoString,
+} from "./unifiedModuleStateService";
 
 async function safelyResolve<T>(work: Promise<T>, fallback: T) {
   try {
@@ -81,6 +86,14 @@ export async function getPricingProfitOverview(shopDomain: string) {
       7000
     ),
   ]);
+  const competitorDependencyStatus =
+    operational.counts.competitorRows > 0 ? "ready" : "missing";
+  const pricingDependencyStatus =
+    operational.counts.pricingRows + operational.counts.profitRows > 0
+      ? "ready"
+      : "missing";
+  const fraudDependencyStatus =
+    operational.counts.timelineEvents > 0 ? "ready" : "missing";
 
   const canUseFullProfitEngine = subscription.featureAccess.fullProfitEngine;
   const canUseAdvancedModes = subscription.capabilities["pricing.advancedModes"];
@@ -435,16 +448,161 @@ export async function getPricingProfitOverview(shopDomain: string) {
     },
   ];
 
+  const lastSuccessfulSyncAt = toIsoString(
+    operational.latestProcessingAt ?? operational.store.lastSyncAt
+  );
+  const lastAttemptAt = toIsoString(
+    operational.latestSyncJob?.finishedAt ?? operational.latestSyncJob?.startedAt
+  );
+  const hasPricingData =
+    recommendationCount > 0 || profitOpportunityCount > 0 || operational.counts.pricingRows > 0;
+  const moduleState =
+    syncState.status === "SYNC_IN_PROGRESS"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "running",
+          dataStatus: "processing",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          coverage: hasPricingData ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing data is still being processed",
+          description:
+            "VedaSuite is updating pricing recommendations and profitability data in the background.",
+          nextAction: "Wait for processing to finish",
+        })
+      : syncState.status === "FAILED" || readiness.readinessState === "FAILED"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "failed",
+          dataStatus: "failed",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          coverage: hasPricingData ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing data needs attention",
+          description:
+            readiness.reason ??
+            "VedaSuite could not complete the latest pricing refresh.",
+          nextAction: "Retry sync",
+        })
+      : isStaleTimestamp(operational.latestProcessingAt ?? operational.store.lastSyncAt)
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "stale",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          dataChanged: hasPricingData,
+          coverage: hasPricingData ? "partial" : "none",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing data is out of date",
+          description:
+            "The latest pricing refresh is older than 24 hours. Run a new sync to review current recommendations.",
+          nextAction: "Refresh pricing data",
+        })
+      : !hasPricingData && syncState.status === "EMPTY_STORE_DATA"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "empty",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          coverage: "none",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing is ready, but no opportunities were found yet",
+          description:
+            "VedaSuite is working normally, but the latest refresh did not surface pricing opportunities from the current store data.",
+          nextAction: "Sync again after more store activity",
+        })
+      : hasPricingData && competitorDependencyStatus === "missing"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "partial",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          dataChanged: true,
+          coverage: "partial",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing insights are available. Competitor data is still being processed.",
+          description:
+            "You can review pricing recommendations now while VedaSuite continues preparing competitor-based comparisons.",
+          nextAction: "Review pricing insights",
+        })
+      : hasPricingData
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "ready",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          dataChanged: true,
+          coverage: "full",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing insights are ready",
+          description:
+            "VedaSuite has prepared pricing recommendations and profit guidance based on the latest store data.",
+          nextAction: "Review pricing opportunities",
+        })
+      : createUnifiedModuleState({
+          setupStatus: "incomplete",
+          syncStatus: "idle",
+          dataStatus: "empty",
+          lastSuccessfulSyncAt,
+          lastAttemptAt,
+          coverage: "none",
+          dependencies: {
+            competitor: competitorDependencyStatus,
+            pricing: pricingDependencyStatus,
+            fraud: fraudDependencyStatus,
+          },
+          title: "Pricing setup is incomplete",
+          description:
+            "VedaSuite needs synced product, order, and pricing data before it can generate pricing guidance.",
+          nextAction: "Run live sync",
+        });
+
   return {
     subscription,
+    moduleState,
     readiness,
     summary: {
       recommendationCount,
       profitOpportunityCount,
-      responseMode: competitorResponse.summary.responseMode,
+      responseMode:
+        competitorDependencyStatus === "missing"
+          ? "Pricing-only"
+          : competitorResponse.summary.responseMode,
       automationReadiness:
-        topRecommendation?.automationPosture ??
-        "Merchant review guidance updates as live pricing, order, and competitor signals sync.",
+        moduleState.dataStatus === "partial"
+          ? "Pricing recommendations are ready. Competitor comparisons are still being prepared."
+          : topRecommendation?.automationPosture ??
+            "Merchant review guidance updates as live pricing and store data sync.",
       fullProfitEngine: canUseFullProfitEngine,
       advancedModesEnabled: canUseAdvancedModes,
       scenarioSimulatorEnabled: canUseScenarioSimulator,

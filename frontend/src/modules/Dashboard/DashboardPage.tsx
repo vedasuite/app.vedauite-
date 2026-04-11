@@ -33,6 +33,23 @@ type Metrics = {
   summaryTitle?: string;
   summaryDetail?: string;
   lastRefreshedAt?: string | null;
+  moduleStates?: {
+    fraud?: {
+      dataStatus: string;
+      title: string;
+      description: string;
+    } | null;
+    competitor?: {
+      dataStatus: string;
+      title: string;
+      description: string;
+    } | null;
+    pricing?: {
+      dataStatus: string;
+      title: string;
+      description: string;
+    } | null;
+  };
   moduleReadiness?: {
     trustAbuse?: {
       readinessState: string;
@@ -173,6 +190,41 @@ function labelForReadiness(value?: string | null) {
   }
 }
 
+function toneForDataStatus(value?: string | null) {
+  switch (value) {
+    case "ready":
+      return "success";
+    case "partial":
+    case "stale":
+      return "attention";
+    case "failed":
+      return "critical";
+    case "processing":
+    case "empty":
+    default:
+      return "info";
+  }
+}
+
+function labelForDataStatus(value?: string | null) {
+  switch (value) {
+    case "ready":
+      return "Ready";
+    case "partial":
+      return "Partial";
+    case "empty":
+      return "Empty";
+    case "stale":
+      return "Stale";
+    case "failed":
+      return "Failed";
+    case "processing":
+      return "Processing";
+    default:
+      return "Unknown";
+  }
+}
+
 function redirectTopLevel(url: string) {
   if (window.top && window.top !== window) {
     window.top.location.href = url;
@@ -211,10 +263,18 @@ function buildDashboardSnapshot(
     recentInsightKeys:
       payload.metrics.recentInsights?.map((item) => `${item.id}:${item.createdAt}`) ?? [],
     quickAccessReadiness: {
-      trustAbuse: payload.metrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
-      competitor: payload.metrics.moduleReadiness?.competitor?.readinessState ?? null,
+      trustAbuse:
+        payload.metrics.moduleStates?.fraud?.dataStatus ??
+        payload.metrics.moduleReadiness?.trustAbuse?.readinessState ??
+        null,
+      competitor:
+        payload.metrics.moduleStates?.competitor?.dataStatus ??
+        payload.metrics.moduleReadiness?.competitor?.readinessState ??
+        null,
       pricingProfit:
-        payload.metrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
+        payload.metrics.moduleStates?.pricing?.dataStatus ??
+        payload.metrics.moduleReadiness?.pricingProfit?.readinessState ??
+        null,
     },
     syncHealth: {
       dataState: payload.metrics.dataState ?? null,
@@ -612,7 +672,7 @@ export function DashboardPage() {
         startedAt,
         finishedAt: new Date().toISOString(),
         refreshStatus: "failure",
-        dashboardDataChanged: false,
+        visibleDataChanged: false,
         changedSections: [],
         unchangedSections: ["KPI cards", "Recent insights", "Quick access readiness", "Sync health"],
         lastRefreshedAt: metrics?.lastRefreshedAt ?? null,
@@ -621,6 +681,34 @@ export function DashboardPage() {
           competitor: "failed",
           pricing: "failed",
         },
+        previousSnapshot: buildDashboardSnapshot(
+          metrics && diagnostics ? { metrics, diagnostics } : null
+        ),
+        nextSnapshot:
+          buildDashboardSnapshot(
+            metrics && diagnostics ? { metrics, diagnostics } : null
+          ) ?? {
+            kpiCards: {
+              fraudAlertsToday: 0,
+              competitorPriceChanges: 0,
+              aiPricingSuggestions: 0,
+              profitOptimizationOpportunities: 0,
+            },
+            recentInsightKeys: [],
+            quickAccessReadiness: {
+              trustAbuse: null,
+              competitor: null,
+              pricingProfit: null,
+            },
+            syncHealth: {
+              dataState: null,
+              summaryTitle: null,
+              summaryDetail: null,
+              syncHealthStatus: null,
+              syncHealthReason: null,
+            },
+            lastRefreshedAt: metrics?.lastRefreshedAt ?? null,
+          },
         summary: "Refresh failed. Retry the sync to update dashboard signals.",
       });
     } finally {
@@ -971,10 +1059,19 @@ export function DashboardPage() {
                           Fraud Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          Review risky orders, refund abuse, and trust signals.
+                          {metrics?.moduleStates?.fraud?.description ??
+                            "Review risky orders, refund abuse, and trust signals."}
                         </Text>
-                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}>
-                          {labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
+                        <Badge
+                          tone={
+                            metrics?.moduleStates?.fraud?.dataStatus
+                              ? toneForDataStatus(metrics.moduleStates.fraud.dataStatus)
+                              : toneForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)
+                          }
+                        >
+                          {metrics?.moduleStates?.fraud?.dataStatus
+                            ? labelForDataStatus(metrics.moduleStates.fraud.dataStatus)
+                            : labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
                         </Badge>
                       </BlockStack>
                       <Button onClick={() => navigateEmbedded("/app/fraud-intelligence")}>
@@ -990,10 +1087,19 @@ export function DashboardPage() {
                           Competitor Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          Review competitor pricing, promotions, and market moves.
+                          {metrics?.moduleStates?.competitor?.description ??
+                            "Review competitor pricing, promotions, and market moves."}
                         </Text>
-                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}>
-                          {labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
+                        <Badge
+                          tone={
+                            metrics?.moduleStates?.competitor?.dataStatus
+                              ? toneForDataStatus(metrics.moduleStates.competitor.dataStatus)
+                              : toneForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)
+                          }
+                        >
+                          {metrics?.moduleStates?.competitor?.dataStatus
+                            ? labelForDataStatus(metrics.moduleStates.competitor.dataStatus)
+                            : labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
                         </Badge>
                       </BlockStack>
                       <Button onClick={() => navigateEmbedded("/app/competitor-intelligence")}>
@@ -1009,10 +1115,19 @@ export function DashboardPage() {
                           AI Pricing Engine
                         </Text>
                         <Text as="p" tone="subdued">
-                          Review pricing opportunities and profit optimization records.
+                          {metrics?.moduleStates?.pricing?.description ??
+                            "Review pricing opportunities and profit optimization records."}
                         </Text>
-                        <Badge tone={toneForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}>
-                          {labelForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}
+                        <Badge
+                          tone={
+                            metrics?.moduleStates?.pricing?.dataStatus
+                              ? toneForDataStatus(metrics.moduleStates.pricing.dataStatus)
+                              : toneForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)
+                          }
+                        >
+                          {metrics?.moduleStates?.pricing?.dataStatus
+                            ? labelForDataStatus(metrics.moduleStates.pricing.dataStatus)
+                            : labelForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}
                         </Badge>
                       </BlockStack>
                       <Button
