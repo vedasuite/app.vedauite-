@@ -417,7 +417,24 @@ shopifyRouter.get("/sync-jobs/latest", async (req, res) => {
   }
 
   const result = await getLatestSyncJob(shop);
-  return res.json({ result });
+  const summary =
+    result?.summaryJson
+      ? (() => {
+          try {
+            return JSON.parse(result.summaryJson);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+  return res.json({
+    result: result
+      ? {
+          ...result,
+          summary,
+        }
+      : null,
+  });
 });
 
 shopifyRouter.post("/register-webhooks", async (req, res) => {

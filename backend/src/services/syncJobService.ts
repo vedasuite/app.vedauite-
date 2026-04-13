@@ -20,6 +20,65 @@ export type SyncTriggerSource =
 
 const ACTIVE_SYNC_STATUSES = ["PENDING", "RUNNING", "SYNC_IN_PROGRESS"] as const;
 
+function buildSyncActivitySummary(params: {
+  syncResult: Awaited<ReturnType<typeof syncShopifyStoreData>>;
+  recomputeResult: Awaited<ReturnType<typeof recomputeStoreDerivedData>>;
+  operational: Awaited<ReturnType<typeof getStoreOperationalSnapshot>>;
+}) {
+  const competitorRows = params.operational.counts.competitorRows;
+  const competitorReason =
+    competitorRows > 0
+      ? "Competitor module was not refreshed in this sync."
+      : "Competitor module was not refreshed in this sync. Run competitor monitoring separately to check domains and matches.";
+
+  return {
+    ordersProcessed: params.syncResult.ordersSynced,
+    customersEvaluated: params.recomputeResult.customersRecomputed,
+    competitorPagesChecked: 0,
+    pricingRecordsAnalyzed: params.recomputeResult.productOutputsUpdated,
+    fraudSignalsGenerated: params.recomputeResult.fraudSignalsGenerated ?? 0,
+    newInsightsCount: params.recomputeResult.timelineEventsCreated,
+    updatedInsightsCount: 0,
+    errorsCount: 0,
+    noChangeReasons: [
+      "no new fraud signals were triggered",
+      competitorRows > 0
+        ? "competitor module was not refreshed in this sync"
+        : "no competitor checks ran during this sync",
+      "pricing signals remained stable",
+    ],
+    moduleProcessing: {
+      fraud: {
+        processed: true,
+        status:
+          (params.recomputeResult.fraudSignalsGenerated ?? 0) > 0
+            ? "updated"
+            : "processed_no_changes",
+        reason:
+          (params.recomputeResult.fraudSignalsGenerated ?? 0) > 0
+            ? "Fraud checks ran and generated updated fraud signals."
+            : "Fraud checks ran, but no new fraud signals were triggered.",
+      },
+      competitor: {
+        processed: false,
+        status: "not_refreshed",
+        reason: competitorReason,
+      },
+      pricing: {
+        processed: true,
+        status:
+          params.recomputeResult.productOutputsUpdated > 0
+            ? "updated"
+            : "processed_no_changes",
+        reason:
+          params.recomputeResult.productOutputsUpdated > 0
+            ? "Pricing records were analyzed during this sync."
+            : "Pricing checks ran, but no pricing records changed.",
+      },
+    },
+  };
+}
+
 function mapDerivedSyncStatusToJobStatus(status: StoreSyncStatus) {
   switch (status) {
     case "READY_WITH_DATA":
@@ -62,6 +121,11 @@ async function finalizeSyncSuccess(params: {
   });
   const finalJobStatus = mapDerivedSyncStatusToJobStatus(derivedSync.status);
   const finishedAt = new Date();
+  const activitySummary = buildSyncActivitySummary({
+    syncResult: params.syncResult,
+    recomputeResult: params.recomputeResult,
+    operational,
+  });
 
   const completed = await prisma.syncJob.update({
     where: { id: params.jobId },
@@ -84,6 +148,7 @@ async function finalizeSyncSuccess(params: {
         },
         operationalCounts: operational.counts,
         derivedSync,
+        activitySummary,
       }),
       errorMessage:
         derivedSync.status === "FAILED" ? derivedSync.reason : null,

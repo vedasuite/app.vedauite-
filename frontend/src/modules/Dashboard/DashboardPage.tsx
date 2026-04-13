@@ -7,6 +7,7 @@ import {
   InlineGrid,
   InlineStack,
   Layout,
+  List,
   Page,
   SkeletonBodyText,
   SkeletonDisplayText,
@@ -156,11 +157,33 @@ type SyncJobResponse = {
     jobId?: string;
     status: string;
     summaryJson?: string | null;
+    summary?: {
+      activitySummary?: {
+        ordersProcessed: number;
+        customersEvaluated: number;
+        competitorPagesChecked: number;
+        pricingRecordsAnalyzed: number;
+        fraudSignalsGenerated: number;
+        newInsightsCount: number;
+        updatedInsightsCount: number;
+        errorsCount: number;
+        noChangeReasons?: string[];
+        moduleProcessing?: {
+          fraud?: { processed: boolean; status: string; reason: string };
+          competitor?: { processed: boolean; status: string; reason: string };
+          pricing?: { processed: boolean; status: string; reason: string };
+        };
+      } | null;
+    } | null;
     startedAt?: string | null;
     finishedAt?: string | null;
     errorMessage?: string | null;
   } | null;
 };
+
+type SyncActivitySummary = NonNullable<
+  NonNullable<NonNullable<SyncJobResponse["result"]>["summary"]>["activitySummary"]
+>;
 
 type DashboardPayload = {
   metrics: Metrics;
@@ -180,6 +203,8 @@ type DashboardRefreshResult = {
     competitor: "updated" | "unchanged" | "failed";
     pricing: "updated" | "unchanged" | "failed";
   };
+  activitySummary: SyncActivitySummary | null;
+  noChangeExplanation: string | null;
   previousSnapshot: DashboardVisibleSnapshot | null;
   nextSnapshot: DashboardVisibleSnapshot;
   summary: string;
@@ -278,11 +303,14 @@ function labelForDataStatus(value?: string | null) {
 function toneForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | null) {
   switch (value) {
     case "Ready":
+    case "Updated":
+    case "Ready (no changes)":
       return "success";
     case "Partial":
     case "Stale":
       return "attention";
     case "Needs setup":
+    case "Not refreshed":
       return "info";
     case "Refreshing":
       return "info";
@@ -295,6 +323,63 @@ function toneForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | 
 
 function labelForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | null) {
   return value ?? "Unknown";
+}
+
+function deriveQuickAccessDisplay(args: {
+  baseStatus?: DashboardQuickAccessStatus | string | null;
+  baseReason?: string | null;
+  baseFreshnessAt?: string | null;
+  processing?: SyncActivitySummary["moduleProcessing"][keyof SyncActivitySummary["moduleProcessing"]] | null;
+}) {
+  if (!args.processing) {
+    return {
+      status: args.baseStatus ?? "Unknown",
+      reason: args.baseReason ?? "",
+      freshnessAt: args.baseFreshnessAt ?? null,
+    };
+  }
+
+  switch (args.processing.status) {
+    case "not_refreshed":
+      return {
+        status: "Not refreshed",
+        reason: args.processing.reason,
+        freshnessAt: args.baseFreshnessAt ?? null,
+      };
+    case "processed_no_changes":
+      return {
+        status: "Ready (no changes)",
+        reason: args.processing.reason,
+        freshnessAt: args.baseFreshnessAt ?? null,
+      };
+    case "updated":
+      return {
+        status: "Updated",
+        reason: args.processing.reason,
+        freshnessAt: args.baseFreshnessAt ?? null,
+      };
+    case "failed":
+      return {
+        status: "Error",
+        reason: args.processing.reason,
+        freshnessAt: args.baseFreshnessAt ?? null,
+      };
+    default:
+      return {
+        status: args.baseStatus ?? "Unknown",
+        reason: args.baseReason ?? "",
+        freshnessAt: args.baseFreshnessAt ?? null,
+      };
+  }
+}
+
+function normalizeModuleRefreshStatus(
+  value?: string | null
+): "updated" | "unchanged" | "failed" {
+  if (!value) return "unchanged";
+  if (value === "updated") return "updated";
+  if (value === "failed") return "failed";
+  return "unchanged";
 }
 
 function redirectTopLevel(url: string) {
@@ -502,6 +587,7 @@ function deriveRefreshResult(args: {
         args.job?.status === "SUCCEEDED_NO_DATA"
       ? "partial"
       : "success";
+  const activitySummary = args.job?.summary?.activitySummary ?? null;
 
   const visibleDataChanged =
     kpiChanged || recentInsightsChanged || quickAccessChanged || syncHealthChanged;
@@ -526,6 +612,10 @@ function deriveRefreshResult(args: {
           .filter((section) => section !== "Last refreshed")
           .join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} remained unchanged.` : ""}`
       : `Refresh completed${refreshStatus === "partial" ? " with partial updates" : ""}. No visible dashboard changes were detected.`;
+  const noChangeExplanation =
+    !kpiChanged && activitySummary?.noChangeReasons?.length
+      ? `No changes were detected because ${activitySummary.noChangeReasons.join(", ")}.`
+      : null;
 
   return {
     startedAt: args.job?.startedAt ?? new Date().toISOString(),
@@ -536,20 +626,33 @@ function deriveRefreshResult(args: {
     unchangedSections,
     lastRefreshedAt: nextSnapshot.lastRefreshedAt ?? args.job?.finishedAt ?? new Date().toISOString(),
     moduleRefreshResults: {
-      fraud: refreshStatus === "failure" ? "failed" : fraudChanged ? "updated" : "unchanged",
+      fraud:
+        refreshStatus === "failure"
+          ? "failed"
+          : activitySummary?.moduleProcessing?.fraud
+          ? normalizeModuleRefreshStatus(activitySummary.moduleProcessing.fraud.status)
+          : fraudChanged
+          ? "updated"
+          : "unchanged",
       competitor:
         refreshStatus === "failure"
           ? "failed"
+          : activitySummary?.moduleProcessing?.competitor
+          ? normalizeModuleRefreshStatus(activitySummary.moduleProcessing.competitor.status)
           : competitorChanged
           ? "updated"
           : "unchanged",
       pricing:
         refreshStatus === "failure"
           ? "failed"
+          : activitySummary?.moduleProcessing?.pricing
+          ? normalizeModuleRefreshStatus(activitySummary.moduleProcessing.pricing.status)
           : pricingChanged
           ? "updated"
           : "unchanged",
     },
+    activitySummary,
+    noChangeExplanation,
     previousSnapshot,
     nextSnapshot,
     summary,
@@ -738,6 +841,24 @@ export function DashboardPage() {
   const dashboardRecentInsights =
     dashboardState?.recentInsights ?? metrics?.recentInsights ?? [];
   const dashboardQuickAccess = dashboardState?.quickAccess ?? null;
+  const fraudQuickAccessDisplay = deriveQuickAccessDisplay({
+    baseStatus: dashboardQuickAccess?.fraud.status,
+    baseReason: dashboardQuickAccess?.fraud.reason,
+    baseFreshnessAt: dashboardQuickAccess?.fraud.freshnessAt,
+    processing: refreshResult?.activitySummary?.moduleProcessing?.fraud ?? null,
+  });
+  const competitorQuickAccessDisplay = deriveQuickAccessDisplay({
+    baseStatus: dashboardQuickAccess?.competitor.status,
+    baseReason: dashboardQuickAccess?.competitor.reason,
+    baseFreshnessAt: dashboardQuickAccess?.competitor.freshnessAt,
+    processing: refreshResult?.activitySummary?.moduleProcessing?.competitor ?? null,
+  });
+  const pricingQuickAccessDisplay = deriveQuickAccessDisplay({
+    baseStatus: dashboardQuickAccess?.pricing.status,
+    baseReason: dashboardQuickAccess?.pricing.reason,
+    baseFreshnessAt: dashboardQuickAccess?.pricing.freshnessAt,
+    processing: refreshResult?.activitySummary?.moduleProcessing?.pricing ?? null,
+  });
 
   const syncLiveStoreData = useCallback(async () => {
     setSyncing(true);
@@ -773,6 +894,8 @@ export function DashboardPage() {
           competitor: "failed",
           pricing: "failed",
         },
+        activitySummary: null,
+        noChangeExplanation: null,
         previousSnapshot: buildDashboardSnapshot(
           metrics && diagnostics ? { metrics, diagnostics } : null
         ),
@@ -1057,6 +1180,42 @@ export function DashboardPage() {
             >
               <BlockStack gap="200">
                 <p>{refreshResult.summary}</p>
+                {refreshResult.activitySummary ? (
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Refresh activity
+                    </Text>
+                    <List type="bullet">
+                      <List.Item>
+                        {refreshResult.activitySummary.ordersProcessed} orders processed
+                      </List.Item>
+                      <List.Item>
+                        {refreshResult.activitySummary.customersEvaluated} customers evaluated
+                      </List.Item>
+                      <List.Item>
+                        {refreshResult.activitySummary.competitorPagesChecked} competitor pages checked
+                      </List.Item>
+                      <List.Item>
+                        {refreshResult.activitySummary.pricingRecordsAnalyzed} pricing records analyzed
+                      </List.Item>
+                      <List.Item>
+                        {refreshResult.activitySummary.newInsightsCount +
+                          refreshResult.activitySummary.updatedInsightsCount}{" "}
+                        insights updated
+                      </List.Item>
+                      <List.Item>
+                        {refreshResult.visibleDataChanged
+                          ? "Visible dashboard changes were verified after refresh."
+                          : "No KPI changes detected."}
+                      </List.Item>
+                    </List>
+                  </BlockStack>
+                ) : null}
+                {refreshResult.noChangeExplanation ? (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {refreshResult.noChangeExplanation}
+                  </Text>
+                ) : null}
                 <InlineStack gap="300">
                   <Text as="p" variant="bodySm" tone="subdued">
                     Fraud: {refreshResult.moduleRefreshResults.fraud}
@@ -1175,28 +1334,28 @@ export function DashboardPage() {
                           Fraud Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          {dashboardQuickAccess?.fraud.reason ??
+                          {fraudQuickAccessDisplay.reason ??
                             metrics?.moduleStates?.fraud?.description ??
                             "Review risky orders, refund abuse, and trust signals."}
                         </Text>
                         <Badge
                           tone={
-                            dashboardQuickAccess?.fraud.status
-                              ? toneForQuickAccessStatus(dashboardQuickAccess.fraud.status)
+                            fraudQuickAccessDisplay.status
+                              ? toneForQuickAccessStatus(fraudQuickAccessDisplay.status)
                               : metrics?.moduleStates?.fraud?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.fraud.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)
                           }
                         >
-                          {dashboardQuickAccess?.fraud.status
-                            ? labelForQuickAccessStatus(dashboardQuickAccess.fraud.status)
+                          {fraudQuickAccessDisplay.status
+                            ? labelForQuickAccessStatus(fraudQuickAccessDisplay.status)
                             : metrics?.moduleStates?.fraud?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.fraud.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
                         </Badge>
-                        {dashboardQuickAccess?.fraud.freshnessAt ? (
+                        {fraudQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.fraud.freshnessAt)}
+                            Last module refresh: {formatRelativeTimestamp(fraudQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>
@@ -1213,28 +1372,28 @@ export function DashboardPage() {
                           Competitor Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          {dashboardQuickAccess?.competitor.reason ??
+                          {competitorQuickAccessDisplay.reason ??
                             metrics?.moduleStates?.competitor?.description ??
                             "Review competitor pricing, promotions, and market moves."}
                         </Text>
                         <Badge
                           tone={
-                            dashboardQuickAccess?.competitor.status
-                              ? toneForQuickAccessStatus(dashboardQuickAccess.competitor.status)
+                            competitorQuickAccessDisplay.status
+                              ? toneForQuickAccessStatus(competitorQuickAccessDisplay.status)
                               : metrics?.moduleStates?.competitor?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.competitor.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)
                           }
                         >
-                          {dashboardQuickAccess?.competitor.status
-                            ? labelForQuickAccessStatus(dashboardQuickAccess.competitor.status)
+                          {competitorQuickAccessDisplay.status
+                            ? labelForQuickAccessStatus(competitorQuickAccessDisplay.status)
                             : metrics?.moduleStates?.competitor?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.competitor.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
                         </Badge>
-                        {dashboardQuickAccess?.competitor.freshnessAt ? (
+                        {competitorQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.competitor.freshnessAt)}
+                            Last module refresh: {formatRelativeTimestamp(competitorQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>
@@ -1251,28 +1410,28 @@ export function DashboardPage() {
                           AI Pricing Engine
                         </Text>
                         <Text as="p" tone="subdued">
-                          {dashboardQuickAccess?.pricing.reason ??
+                          {pricingQuickAccessDisplay.reason ??
                             metrics?.moduleStates?.pricing?.description ??
                             "Review pricing opportunities and profit optimization records."}
                         </Text>
                         <Badge
                           tone={
-                            dashboardQuickAccess?.pricing.status
-                              ? toneForQuickAccessStatus(dashboardQuickAccess.pricing.status)
+                            pricingQuickAccessDisplay.status
+                              ? toneForQuickAccessStatus(pricingQuickAccessDisplay.status)
                               : metrics?.moduleStates?.pricing?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.pricing.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)
                           }
                         >
-                          {dashboardQuickAccess?.pricing.status
-                            ? labelForQuickAccessStatus(dashboardQuickAccess.pricing.status)
+                          {pricingQuickAccessDisplay.status
+                            ? labelForQuickAccessStatus(pricingQuickAccessDisplay.status)
                             : metrics?.moduleStates?.pricing?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.pricing.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}
                         </Badge>
-                        {dashboardQuickAccess?.pricing.freshnessAt ? (
+                        {pricingQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.pricing.freshnessAt)}
+                            Last module refresh: {formatRelativeTimestamp(pricingQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>

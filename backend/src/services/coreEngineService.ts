@@ -565,6 +565,9 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
   }
 
   const timelineEvents = buildTimelineEvents(store);
+  const fraudSignalsGenerated = timelineEvents.filter(
+    (event) => event.category === "abuse" || event.severity === "critical"
+  ).length;
 
   await prisma.$transaction([
     ...customerUpdates,
@@ -588,5 +591,6 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
     ordersRecomputed: store.orders.length,
     productOutputsUpdated: baselineProducts.size,
     timelineEventsCreated: timelineEvents.length,
+    fraudSignalsGenerated,
   };
 }
