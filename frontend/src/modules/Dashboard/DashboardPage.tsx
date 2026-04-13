@@ -72,6 +72,58 @@ type Metrics = {
     createdAt: string;
     route: string;
   }>;
+  dashboardState?: DashboardState;
+};
+
+type DashboardQuickAccessStatus =
+  | "Ready"
+  | "Partial"
+  | "Needs setup"
+  | "Refreshing"
+  | "Stale"
+  | "Error";
+
+type DashboardInsight = {
+  id: string;
+  title: string;
+  detail: string;
+  severity: string;
+  createdAt: string;
+  route: string;
+};
+
+type DashboardQuickAccessItem = {
+  status: DashboardQuickAccessStatus;
+  freshnessAt: string | null;
+  reason: string;
+};
+
+type DashboardState = {
+  refreshedAt: string | null;
+  syncHealth: {
+    status: string;
+    title: string;
+    reason: string;
+  };
+  kpis: {
+    fraudAlerts: number;
+    competitorChanges: number;
+    pricingOpportunities: number;
+    profitOpportunities: number;
+  };
+  recentInsights: DashboardInsight[];
+  quickAccess: {
+    fraud: DashboardQuickAccessItem;
+    competitor: DashboardQuickAccessItem;
+    pricing: DashboardQuickAccessItem;
+  } | null;
+  refreshSummary?: {
+    visibleKpiChanged: boolean;
+    recentInsightsChanged: boolean;
+    quickAccessChanged: boolean;
+    changedSections: string[];
+    unchangedSections: string[];
+  };
 };
 
 type Diagnostics = {
@@ -134,24 +186,22 @@ type DashboardRefreshResult = {
 };
 
 type DashboardVisibleSnapshot = {
-  kpiCards: {
-    fraudAlertsToday: number;
-    competitorPriceChanges: number;
-    aiPricingSuggestions: number;
-    profitOptimizationOpportunities: number;
+  kpis: {
+    fraudAlerts: number;
+    competitorChanges: number;
+    pricingOpportunities: number;
+    profitOpportunities: number;
   };
   recentInsightKeys: string[];
-  quickAccessReadiness: {
-    trustAbuse: string | null;
+  quickAccess: {
+    fraud: string | null;
     competitor: string | null;
-    pricingProfit: string | null;
+    pricing: string | null;
   };
   syncHealth: {
-    dataState: string | null;
-    summaryTitle: string | null;
-    summaryDetail: string | null;
-    syncHealthStatus: string | null;
-    syncHealthReason: string | null;
+    status: string | null;
+    title: string | null;
+    reason: string | null;
   };
   lastRefreshedAt: string | null;
 };
@@ -225,6 +275,28 @@ function labelForDataStatus(value?: string | null) {
   }
 }
 
+function toneForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | null) {
+  switch (value) {
+    case "Ready":
+      return "success";
+    case "Partial":
+    case "Stale":
+      return "attention";
+    case "Needs setup":
+      return "info";
+    case "Refreshing":
+      return "info";
+    case "Error":
+      return "critical";
+    default:
+      return "info";
+  }
+}
+
+function labelForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | null) {
+  return value ?? "Unknown";
+}
+
 function redirectTopLevel(url: string) {
   if (window.top && window.top !== window) {
     window.top.location.href = url;
@@ -252,38 +324,59 @@ function buildDashboardSnapshot(
     return null;
   }
 
+  const dashboardState = payload.metrics.dashboardState;
+
   return {
-    kpiCards: {
-      fraudAlertsToday: payload.metrics.fraudAlertsToday,
-      competitorPriceChanges: payload.metrics.competitorPriceChanges,
-      aiPricingSuggestions: payload.metrics.aiPricingSuggestions,
-      profitOptimizationOpportunities:
+    kpis: {
+      fraudAlerts:
+        dashboardState?.kpis.fraudAlerts ?? payload.metrics.fraudAlertsToday,
+      competitorChanges:
+        dashboardState?.kpis.competitorChanges ??
+        payload.metrics.competitorPriceChanges,
+      pricingOpportunities:
+        dashboardState?.kpis.pricingOpportunities ??
+        payload.metrics.aiPricingSuggestions,
+      profitOpportunities:
+        dashboardState?.kpis.profitOpportunities ??
         payload.metrics.profitOptimizationOpportunities,
     },
     recentInsightKeys:
-      payload.metrics.recentInsights?.map((item) => `${item.id}:${item.createdAt}`) ?? [],
-    quickAccessReadiness: {
-      trustAbuse:
+      (
+        dashboardState?.recentInsights ?? payload.metrics.recentInsights ?? []
+      ).map((item) => `${item.id}:${item.createdAt}`),
+    quickAccess: {
+      fraud:
+        dashboardState?.quickAccess?.fraud.status ??
         payload.metrics.moduleStates?.fraud?.dataStatus ??
         payload.metrics.moduleReadiness?.trustAbuse?.readinessState ??
         null,
       competitor:
+        dashboardState?.quickAccess?.competitor.status ??
         payload.metrics.moduleStates?.competitor?.dataStatus ??
         payload.metrics.moduleReadiness?.competitor?.readinessState ??
         null,
-      pricingProfit:
+      pricing:
+        dashboardState?.quickAccess?.pricing.status ??
         payload.metrics.moduleStates?.pricing?.dataStatus ??
         payload.metrics.moduleReadiness?.pricingProfit?.readinessState ??
         null,
     },
     syncHealth: {
-      dataState: payload.metrics.dataState ?? null,
-      summaryTitle: payload.metrics.summaryTitle ?? null,
-      summaryDetail: payload.metrics.summaryDetail ?? null,
-      syncHealthStatus: payload.diagnostics.sync.syncHealth?.status ?? null,
-      syncHealthReason: payload.diagnostics.sync.syncHealth?.reason ?? null,
+      status:
+        dashboardState?.syncHealth.status ??
+        payload.diagnostics.sync.syncHealth?.status ??
+        payload.metrics.dataState ??
+        null,
+      title:
+        dashboardState?.syncHealth.title ?? payload.metrics.summaryTitle ?? null,
+      reason:
+        dashboardState?.syncHealth.reason ??
+        payload.diagnostics.sync.syncHealth?.reason ??
+        payload.metrics.summaryDetail ??
+        null,
     },
-    lastRefreshedAt: payload.metrics.lastRefreshedAt ?? null,
+    lastRefreshedAt:
+      dashboardState?.refreshedAt ?? payload.metrics.lastRefreshedAt ?? null,
   };
 }
 
@@ -315,104 +408,92 @@ function deriveRefreshResult(args: {
 }): DashboardRefreshResult {
   const previousSnapshot = buildDashboardSnapshot(args.previous);
   const nextSnapshot = buildDashboardSnapshot(args.next)!;
-  const previousMetrics = args.previous?.metrics ?? null;
-  const nextMetrics = args.next.metrics;
-
   const kpiChanged =
-    !previousSnapshot ||
-    !equalJson(previousSnapshot.kpiCards, nextSnapshot.kpiCards);
+    !previousSnapshot || !equalJson(previousSnapshot.kpis, nextSnapshot.kpis);
   const recentInsightsChanged =
     !previousSnapshot ||
     !equalJson(previousSnapshot.recentInsightKeys, nextSnapshot.recentInsightKeys);
   const quickAccessChanged =
-    !previousSnapshot ||
-    !equalJson(
-      previousSnapshot.quickAccessReadiness,
-      nextSnapshot.quickAccessReadiness
-    );
+    !previousSnapshot || !equalJson(previousSnapshot.quickAccess, nextSnapshot.quickAccess);
   const syncHealthChanged =
-    !previousSnapshot ||
-    !equalJson(previousSnapshot.syncHealth, nextSnapshot.syncHealth);
+    !previousSnapshot || !equalJson(previousSnapshot.syncHealth, nextSnapshot.syncHealth);
   const freshnessChanged =
     !previousSnapshot ||
     previousSnapshot.lastRefreshedAt !== nextSnapshot.lastRefreshedAt;
 
-  const sections = [
-    {
-      label: "KPI cards",
-      changed: kpiChanged,
-    },
-    {
-      label: "Recent insights",
-      changed: recentInsightsChanged,
-    },
-    {
-      label: "Quick access readiness",
-      changed: quickAccessChanged,
-    },
-    {
-      label: "Sync health",
-      changed: syncHealthChanged,
-    },
-    {
-      label: "Last refreshed",
-      changed: freshnessChanged,
-    },
-  ];
+  const changedSections = [
+    kpiChanged ? "KPI cards" : null,
+    recentInsightsChanged ? "Recent insights" : null,
+    quickAccessChanged ? "Quick access" : null,
+    syncHealthChanged ? "Sync health" : null,
+    freshnessChanged ? "Last refreshed" : null,
+  ].filter((value): value is string => !!value);
+  const unchangedSections = [
+    !kpiChanged ? "KPI cards" : null,
+    !recentInsightsChanged ? "Recent insights" : null,
+    !quickAccessChanged ? "Quick access" : null,
+    !syncHealthChanged ? "Sync health" : null,
+    !freshnessChanged ? "Last refreshed" : null,
+  ].filter((value): value is string => !!value);
 
-  const changedSections = sections.filter((item) => item.changed).map((item) => item.label);
-  const unchangedSections = sections
-    .filter((item) => !item.changed)
-    .map((item) => item.label);
+  const metricDiffs: string[] = [];
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.fraudAlerts !== nextSnapshot.kpis.fraudAlerts
+  ) {
+    metricDiffs.push(
+      `Fraud alerts changed from ${
+        previousSnapshot?.kpis.fraudAlerts ?? 0
+      } to ${nextSnapshot.kpis.fraudAlerts}`
+    );
+  }
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.competitorChanges !==
+      nextSnapshot.kpis.competitorChanges
+  ) {
+    metricDiffs.push(
+      `Competitor changes changed from ${
+        previousSnapshot?.kpis.competitorChanges ?? 0
+      } to ${nextSnapshot.kpis.competitorChanges}`
+    );
+  }
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.pricingOpportunities !==
+      nextSnapshot.kpis.pricingOpportunities
+  ) {
+    metricDiffs.push(
+      `Pricing opportunities changed from ${
+        previousSnapshot?.kpis.pricingOpportunities ?? 0
+      } to ${nextSnapshot.kpis.pricingOpportunities}`
+    );
+  }
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.profitOpportunities !==
+      nextSnapshot.kpis.profitOpportunities
+  ) {
+    metricDiffs.push(
+      `Profit opportunities changed from ${
+        previousSnapshot?.kpis.profitOpportunities ?? 0
+      } to ${nextSnapshot.kpis.profitOpportunities}`
+    );
+  }
 
   const fraudChanged =
-    !previousMetrics ||
-    !equalJson(
-      {
-        fraudAlertsToday: previousMetrics.fraudAlertsToday,
-        highRiskOrders: previousMetrics.highRiskOrders,
-        serialReturners: previousMetrics.serialReturners,
-        readiness: previousMetrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
-      },
-      {
-        fraudAlertsToday: nextMetrics.fraudAlertsToday,
-        highRiskOrders: nextMetrics.highRiskOrders,
-        serialReturners: nextMetrics.serialReturners,
-        readiness: nextMetrics.moduleReadiness?.trustAbuse?.readinessState ?? null,
-      }
-    );
+    !previousSnapshot ||
+    previousSnapshot.quickAccess.fraud !== nextSnapshot.quickAccess.fraud ||
+    previousSnapshot.kpis.fraudAlerts !== nextSnapshot.kpis.fraudAlerts;
   const competitorChanged =
-    !previousMetrics ||
-    !equalJson(
-      {
-        competitorPriceChanges: previousMetrics.competitorPriceChanges,
-        promotionAlerts: previousMetrics.promotionAlerts,
-        readiness: previousMetrics.moduleReadiness?.competitor?.readinessState ?? null,
-      },
-      {
-        competitorPriceChanges: nextMetrics.competitorPriceChanges,
-        promotionAlerts: nextMetrics.promotionAlerts,
-        readiness: nextMetrics.moduleReadiness?.competitor?.readinessState ?? null,
-      }
-    );
+    !previousSnapshot ||
+    previousSnapshot.quickAccess.competitor !== nextSnapshot.quickAccess.competitor ||
+    previousSnapshot.kpis.competitorChanges !== nextSnapshot.kpis.competitorChanges;
   const pricingChanged =
-    !previousMetrics ||
-    !equalJson(
-      {
-        aiPricingSuggestions: previousMetrics.aiPricingSuggestions,
-        profitOptimizationOpportunities:
-          previousMetrics.profitOptimizationOpportunities,
-        readiness:
-          previousMetrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
-      },
-      {
-        aiPricingSuggestions: nextMetrics.aiPricingSuggestions,
-        profitOptimizationOpportunities:
-          nextMetrics.profitOptimizationOpportunities,
-        readiness:
-          nextMetrics.moduleReadiness?.pricingProfit?.readinessState ?? null,
-      }
-    );
+    !previousSnapshot ||
+    previousSnapshot.quickAccess.pricing !== nextSnapshot.quickAccess.pricing ||
+    previousSnapshot.kpis.pricingOpportunities !== nextSnapshot.kpis.pricingOpportunities ||
+    previousSnapshot.kpis.profitOpportunities !== nextSnapshot.kpis.profitOpportunities;
 
   const refreshStatus =
     args.job?.status === "FAILED"
@@ -424,9 +505,6 @@ function deriveRefreshResult(args: {
 
   const visibleDataChanged =
     kpiChanged || recentInsightsChanged || quickAccessChanged || syncHealthChanged;
-  const changedBusinessSections = changedSections.filter(
-    (section) => section !== "Last refreshed"
-  );
   const unchangedModuleNames = [
     !fraudChanged ? "Fraud" : null,
     !competitorChanged ? "Competitor" : null,
@@ -434,14 +512,20 @@ function deriveRefreshResult(args: {
   ].filter((value): value is string => !!value);
   const summary =
     refreshStatus === "failure"
-      ? "Refresh failed. Retry the sync to update dashboard signals."
-      : refreshStatus === "partial"
-      ? visibleDataChanged
-        ? `Refresh completed with partial updates. Updated ${changedBusinessSections.join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} data unchanged.` : ""}`
-        : "Refresh completed with partial updates. No visible metric changes were detected."
+      ? "Refresh failed. Retry the sync to update dashboard data."
+      : metricDiffs.length > 0
+      ? `Refresh completed. ${metricDiffs.join(". ")}.`
+      : recentInsightsChanged && !quickAccessChanged && !syncHealthChanged
+      ? "Refresh completed. Recent insights were updated. KPI values were unchanged."
+      : quickAccessChanged && !recentInsightsChanged && !kpiChanged
+      ? "Refresh completed. Module readiness statuses were re-evaluated after refresh. KPI values were unchanged."
+      : syncHealthChanged && !recentInsightsChanged && !quickAccessChanged && !kpiChanged
+      ? "Refresh completed. Sync health was rechecked. KPI values were unchanged."
       : visibleDataChanged
-      ? `Refresh updated ${changedBusinessSections.join(", ")}.`
-      : "Refresh completed. No visible metric changes were detected.";
+      ? `Refresh completed${refreshStatus === "partial" ? " with partial updates" : ""}. Updated ${changedSections
+          .filter((section) => section !== "Last refreshed")
+          .join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} remained unchanged.` : ""}`
+      : `Refresh completed${refreshStatus === "partial" ? " with partial updates" : ""}. No visible dashboard changes were detected.`;
 
   return {
     startedAt: args.job?.startedAt ?? new Date().toISOString(),
@@ -647,6 +731,14 @@ export function DashboardPage() {
     ]
   );
 
+  const dashboardState = metrics?.dashboardState ?? null;
+  const dashboardLastRefreshedAt =
+    dashboardState?.refreshedAt ?? metrics?.lastRefreshedAt ?? null;
+  const dashboardSyncHealth = dashboardState?.syncHealth ?? null;
+  const dashboardRecentInsights =
+    dashboardState?.recentInsights ?? metrics?.recentInsights ?? [];
+  const dashboardQuickAccess = dashboardState?.quickAccess ?? null;
+
   const syncLiveStoreData = useCallback(async () => {
     setSyncing(true);
     setError(null);
@@ -674,8 +766,8 @@ export function DashboardPage() {
         refreshStatus: "failure",
         visibleDataChanged: false,
         changedSections: [],
-        unchangedSections: ["KPI cards", "Recent insights", "Quick access readiness", "Sync health"],
-        lastRefreshedAt: metrics?.lastRefreshedAt ?? null,
+        unchangedSections: ["KPI cards", "Recent insights", "Quick access", "Sync health"],
+        lastRefreshedAt: dashboardLastRefreshedAt,
         moduleRefreshResults: {
           fraud: "failed",
           competitor: "failed",
@@ -688,33 +780,31 @@ export function DashboardPage() {
           buildDashboardSnapshot(
             metrics && diagnostics ? { metrics, diagnostics } : null
           ) ?? {
-            kpiCards: {
-              fraudAlertsToday: 0,
-              competitorPriceChanges: 0,
-              aiPricingSuggestions: 0,
-              profitOptimizationOpportunities: 0,
+            kpis: {
+              fraudAlerts: 0,
+              competitorChanges: 0,
+              pricingOpportunities: 0,
+              profitOpportunities: 0,
             },
             recentInsightKeys: [],
-            quickAccessReadiness: {
-              trustAbuse: null,
+            quickAccess: {
+              fraud: null,
               competitor: null,
-              pricingProfit: null,
+              pricing: null,
             },
             syncHealth: {
-              dataState: null,
-              summaryTitle: null,
-              summaryDetail: null,
-              syncHealthStatus: null,
-              syncHealthReason: null,
+              status: null,
+              title: null,
+              reason: null,
             },
-            lastRefreshedAt: metrics?.lastRefreshedAt ?? null,
+            lastRefreshedAt: dashboardLastRefreshedAt,
           },
         summary: "Refresh failed. Retry the sync to update dashboard signals.",
       });
     } finally {
       setSyncing(false);
     }
-  }, [host, metrics?.lastRefreshedAt, pollSyncJob]);
+  }, [dashboardLastRefreshedAt, diagnostics, host, metrics, pollSyncJob]);
 
   const registerWebhooks = useCallback(async () => {
     setRegisteringWebhooks(true);
@@ -746,43 +836,59 @@ export function DashboardPage() {
     () => [
       {
         title: "Fraud alerts",
-        value: metrics?.fraudAlertsToday ?? 0,
+        value: dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0,
         note: "Refund abuse and risky orders",
       },
       {
         title: "Competitor changes",
-        value: metrics?.competitorPriceChanges ?? 0,
+        value:
+          dashboardState?.kpis.competitorChanges ??
+          metrics?.competitorPriceChanges ??
+          0,
         note: "Latest monitored price moves",
       },
       {
         title: "Pricing opportunities",
-        value: metrics?.aiPricingSuggestions ?? 0,
+        value:
+          dashboardState?.kpis.pricingOpportunities ??
+          metrics?.aiPricingSuggestions ??
+          0,
         note: "Pricing records ready to review",
       },
       {
         title: "Profit opportunities",
-        value: metrics?.profitOptimizationOpportunities ?? 0,
+        value:
+          dashboardState?.kpis.profitOpportunities ??
+          metrics?.profitOptimizationOpportunities ??
+          0,
         note: "Optimization records available",
       },
     ],
-    [metrics]
+    [dashboardState, metrics]
   );
   const currentRefreshSummary =
     syncing
       ? "Refreshing dashboard data and checking for updated metrics."
       : refreshResult?.summary ??
-    (metrics?.lastRefreshedAt
-      ? `Refreshed at ${formatRelativeTimestamp(metrics.lastRefreshedAt)}.`
+    (dashboardLastRefreshedAt
+      ? `Refreshed at ${formatRelativeTimestamp(dashboardLastRefreshedAt)}.`
       : "Refresh the dashboard to pull the latest Shopify data.");
 
   const syncHealthLabel =
-    diagnostics?.sync.syncHealth?.status
+    dashboardSyncHealth?.status
+      ? labelForReadiness(dashboardSyncHealth.status)
+      : diagnostics?.sync.syncHealth?.status
       ? labelForReadiness(diagnostics.sync.syncHealth.status)
       : labelForReadiness(metrics?.dataState);
   const syncHealthTone =
-    diagnostics?.sync.syncHealth?.status
+    dashboardSyncHealth?.status
+      ? toneForReadiness(dashboardSyncHealth.status)
+      : diagnostics?.sync.syncHealth?.status
       ? toneForReadiness(diagnostics.sync.syncHealth.status)
       : toneForReadiness(metrics?.dataState);
+  const showSyncHealthBanner = dashboardSyncHealth?.status
+    ? dashboardSyncHealth.status !== "READY_WITH_DATA"
+    : metrics?.dataState !== "READY_WITH_DATA";
 
   if (loading) {
     return (
@@ -862,14 +968,22 @@ export function DashboardPage() {
           </Layout.Section>
         ) : null}
 
-        {metrics?.dataState && metrics.dataState !== "READY_WITH_DATA" ? (
+        {showSyncHealthBanner ? (
           <Layout.Section>
             <Banner
-              title={metrics.summaryTitle ?? "Dashboard insights are still settling"}
-              tone={toneForReadiness(metrics.dataState)}
+              title={
+                dashboardSyncHealth?.title ??
+                metrics.summaryTitle ??
+                "Dashboard insights are still settling"
+              }
+              tone={toneForReadiness(dashboardSyncHealth?.status ?? metrics.dataState)}
             >
               <BlockStack gap="200">
-                <p>{metrics.summaryDetail ?? "VedaSuite is still preparing this store."}</p>
+                <p>
+                  {dashboardSyncHealth?.reason ??
+                    metrics.summaryDetail ??
+                    "VedaSuite is still preparing this store."}
+                </p>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => void syncLiveStoreData()} loading={syncing}>
                     Sync Data
@@ -895,8 +1009,8 @@ export function DashboardPage() {
                   Last refreshed
                 </Text>
                 <Text as="p" variant="headingMd">
-                  {metrics?.lastRefreshedAt
-                    ? formatRelativeTimestamp(metrics.lastRefreshedAt)
+                  {dashboardLastRefreshedAt
+                    ? formatRelativeTimestamp(dashboardLastRefreshedAt)
                     : "Not refreshed yet"}
                 </Text>
               </BlockStack>
@@ -907,7 +1021,9 @@ export function DashboardPage() {
                 <InlineStack gap="200" blockAlign="center">
                   <Badge tone={syncHealthTone}>{syncHealthLabel}</Badge>
                   <Text as="p" tone="subdued">
-                    {diagnostics?.sync.syncHealth?.reason ?? metrics?.summaryDetail}
+                    {dashboardSyncHealth?.reason ??
+                      diagnostics?.sync.syncHealth?.reason ??
+                      metrics?.summaryDetail}
                   </Text>
                 </InlineStack>
               </BlockStack>
@@ -1009,8 +1125,8 @@ export function DashboardPage() {
                         <SkeletonBodyText lines={3} />
                       </BlockStack>
                     </Card>
-                  ) : (metrics?.recentInsights?.length ?? 0) > 0 ? (
-                    metrics?.recentInsights?.map((insight) => (
+                  ) : dashboardRecentInsights.length > 0 ? (
+                    dashboardRecentInsights.map((insight) => (
                       <div key={insight.id} className="vs-action-card">
                         <InlineStack align="space-between" blockAlign="start" gap="300">
                           <BlockStack gap="100">
@@ -1059,20 +1175,30 @@ export function DashboardPage() {
                           Fraud Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          {metrics?.moduleStates?.fraud?.description ??
+                          {dashboardQuickAccess?.fraud.reason ??
+                            metrics?.moduleStates?.fraud?.description ??
                             "Review risky orders, refund abuse, and trust signals."}
                         </Text>
                         <Badge
                           tone={
-                            metrics?.moduleStates?.fraud?.dataStatus
+                            dashboardQuickAccess?.fraud.status
+                              ? toneForQuickAccessStatus(dashboardQuickAccess.fraud.status)
+                              : metrics?.moduleStates?.fraud?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.fraud.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)
                           }
                         >
-                          {metrics?.moduleStates?.fraud?.dataStatus
+                          {dashboardQuickAccess?.fraud.status
+                            ? labelForQuickAccessStatus(dashboardQuickAccess.fraud.status)
+                            : metrics?.moduleStates?.fraud?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.fraud.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.trustAbuse?.readinessState)}
                         </Badge>
+                        {dashboardQuickAccess?.fraud.freshnessAt ? (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.fraud.freshnessAt)}
+                          </Text>
+                        ) : null}
                       </BlockStack>
                       <Button onClick={() => navigateEmbedded("/app/fraud-intelligence")}>
                         Open
@@ -1087,20 +1213,30 @@ export function DashboardPage() {
                           Competitor Intelligence
                         </Text>
                         <Text as="p" tone="subdued">
-                          {metrics?.moduleStates?.competitor?.description ??
+                          {dashboardQuickAccess?.competitor.reason ??
+                            metrics?.moduleStates?.competitor?.description ??
                             "Review competitor pricing, promotions, and market moves."}
                         </Text>
                         <Badge
                           tone={
-                            metrics?.moduleStates?.competitor?.dataStatus
+                            dashboardQuickAccess?.competitor.status
+                              ? toneForQuickAccessStatus(dashboardQuickAccess.competitor.status)
+                              : metrics?.moduleStates?.competitor?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.competitor.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)
                           }
                         >
-                          {metrics?.moduleStates?.competitor?.dataStatus
+                          {dashboardQuickAccess?.competitor.status
+                            ? labelForQuickAccessStatus(dashboardQuickAccess.competitor.status)
+                            : metrics?.moduleStates?.competitor?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.competitor.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.competitor?.readinessState)}
                         </Badge>
+                        {dashboardQuickAccess?.competitor.freshnessAt ? (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.competitor.freshnessAt)}
+                          </Text>
+                        ) : null}
                       </BlockStack>
                       <Button onClick={() => navigateEmbedded("/app/competitor-intelligence")}>
                         Open
@@ -1115,20 +1251,30 @@ export function DashboardPage() {
                           AI Pricing Engine
                         </Text>
                         <Text as="p" tone="subdued">
-                          {metrics?.moduleStates?.pricing?.description ??
+                          {dashboardQuickAccess?.pricing.reason ??
+                            metrics?.moduleStates?.pricing?.description ??
                             "Review pricing opportunities and profit optimization records."}
                         </Text>
                         <Badge
                           tone={
-                            metrics?.moduleStates?.pricing?.dataStatus
+                            dashboardQuickAccess?.pricing.status
+                              ? toneForQuickAccessStatus(dashboardQuickAccess.pricing.status)
+                              : metrics?.moduleStates?.pricing?.dataStatus
                               ? toneForDataStatus(metrics.moduleStates.pricing.dataStatus)
                               : toneForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)
                           }
                         >
-                          {metrics?.moduleStates?.pricing?.dataStatus
+                          {dashboardQuickAccess?.pricing.status
+                            ? labelForQuickAccessStatus(dashboardQuickAccess.pricing.status)
+                            : metrics?.moduleStates?.pricing?.dataStatus
                             ? labelForDataStatus(metrics.moduleStates.pricing.dataStatus)
                             : labelForReadiness(metrics?.moduleReadiness?.pricingProfit?.readinessState)}
                         </Badge>
+                        {dashboardQuickAccess?.pricing.freshnessAt ? (
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Last module refresh: {formatRelativeTimestamp(dashboardQuickAccess.pricing.freshnessAt)}
+                          </Text>
+                        ) : null}
                       </BlockStack>
                       <Button
                         disabled={syncing}

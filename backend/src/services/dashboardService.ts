@@ -7,9 +7,46 @@ import {
 } from "./storeOperationalStateService";
 import {
   createUnifiedModuleState,
+  deriveDashboardQuickAccessState,
   isStaleTimestamp,
   toIsoString,
 } from "./unifiedModuleStateService";
+
+function latestIsoTimestamp(...values: Array<Date | string | null | undefined>) {
+  const timestamps = values
+    .map((value) => (value ? new Date(value).getTime() : null))
+    .filter((value): value is number => value != null && !Number.isNaN(value));
+
+  if (timestamps.length === 0) {
+    return null;
+  }
+
+  return new Date(Math.max(...timestamps)).toISOString();
+}
+
+function buildDashboardSummaryTitle(status: string) {
+  if (status === "READY_WITH_DATA") {
+    return "Store data and module outputs are ready";
+  }
+
+  if (status === "SYNC_COMPLETED_PROCESSING_PENDING") {
+    return "Sync completed, processing is still catching up";
+  }
+
+  if (status === "EMPTY_STORE_DATA") {
+    return "Sync completed, but the store returned no usable data";
+  }
+
+  if (status === "FAILED") {
+    return "Latest sync failed";
+  }
+
+  if (status === "SYNC_IN_PROGRESS") {
+    return "Shopify sync is running";
+  }
+
+  return "Run first sync to populate store signals";
+}
 
 export async function getDashboardMetrics(shopDomain: string) {
   const [store, operational, onboarding] = await Promise.all([
@@ -132,12 +169,14 @@ export async function getDashboardMetrics(shopDomain: string) {
       })
     : null;
   const lastRefreshedAt = operational
-    ? (
-        operational.latestProcessingAt ??
-        operational.latestCompetitorAt ??
-        operational.store.lastSyncAt ??
-        null
-      )?.toISOString() ?? null
+    ? latestIsoTimestamp(
+        operational.latestProcessingAt,
+        operational.latestCompetitorAt,
+        operational.latestSyncJob?.finishedAt ??
+          operational.latestSyncJob?.startedAt ??
+          null,
+        operational.store.lastSyncAt
+      )
     : null;
   const lastCompetitorAt = toIsoString(operational?.latestCompetitorAt ?? null);
   const lastProcessingAt = toIsoString(operational?.latestProcessingAt ?? null);
@@ -395,6 +434,61 @@ export async function getDashboardMetrics(shopDomain: string) {
               }),
       }
     : null;
+  const summaryTitle = buildDashboardSummaryTitle(syncState.status);
+  const recentInsights = store.timelineEvents.slice(0, 5).map((event) => ({
+    id: event.id,
+    title: event.title,
+    detail: event.detail,
+    severity: event.severity,
+    createdAt: event.createdAt.toISOString(),
+    route:
+      event.category === "competitor"
+        ? "/app/competitor-intelligence"
+        : event.category === "pricing" || event.category === "profit"
+        ? "/app/ai-pricing-engine"
+        : "/app/fraud-intelligence",
+  }));
+  const quickAccess = moduleStates
+    ? {
+        fraud: deriveDashboardQuickAccessState(moduleStates.fraud),
+        competitor: deriveDashboardQuickAccessState(moduleStates.competitor),
+        pricing: deriveDashboardQuickAccessState(moduleStates.pricing),
+      }
+    : null;
+  const staleModules = quickAccess
+    ? [
+        quickAccess.fraud.status === "Stale" ? "Fraud" : null,
+        quickAccess.competitor.status === "Stale" ? "Competitor" : null,
+        quickAccess.pricing.status === "Stale" ? "Pricing" : null,
+      ].filter((value): value is string => !!value)
+    : [];
+  const syncHealthReason =
+    syncState.status === "READY_WITH_DATA" && staleModules.length > 0
+      ? `${syncState.reason} ${staleModules.join(" and ")} data has not refreshed recently.`
+      : syncState.reason;
+  const dashboardState = {
+    refreshedAt: lastRefreshedAt,
+    syncHealth: {
+      status: syncState.status,
+      title: summaryTitle,
+      reason: syncHealthReason,
+    },
+    kpis: {
+      fraudAlerts: todayHighRiskOrders,
+      competitorChanges,
+      pricingOpportunities: pricingSuggestions,
+      profitOpportunities,
+    },
+    recentInsights,
+    quickAccess,
+    refreshSummary: {
+      visibleKpiChanged: false,
+      recentInsightsChanged: false,
+      quickAccessChanged: false,
+      changedSections: [],
+      unchangedSections: ["KPI cards", "Recent insights", "Quick access", "Sync health"],
+    },
+  };
 
   return {
     fraudAlertsToday: todayHighRiskOrders,
@@ -409,38 +503,16 @@ export async function getDashboardMetrics(shopDomain: string) {
     timelineEventsGenerated: store.timelineEvents.length,
     dataState: syncState.status,
     lastRefreshedAt,
-    summaryTitle:
-      syncState.status === "READY_WITH_DATA"
-        ? "Store data and module outputs are ready"
-        : syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-        ? "Sync completed, processing is still catching up"
-        : syncState.status === "EMPTY_STORE_DATA"
-        ? "Sync completed, but the store returned no usable data"
-        : syncState.status === "FAILED"
-        ? "Latest sync failed"
-        : syncState.status === "SYNC_IN_PROGRESS"
-        ? "Shopify sync is running"
-        : "Run first sync to populate store signals",
-    summaryDetail: syncState.reason,
-    recentInsights: store.timelineEvents.slice(0, 5).map((event) => ({
-      id: event.id,
-      title: event.title,
-      detail: event.detail,
-      severity: event.severity,
-      createdAt: event.createdAt.toISOString(),
-      route:
-        event.category === "competitor"
-          ? "/app/competitor-intelligence"
-          : event.category === "pricing" || event.category === "profit"
-          ? "/app/ai-pricing-engine"
-          : "/app/fraud-intelligence",
-    })),
+    summaryTitle,
+    summaryDetail: syncHealthReason,
+    recentInsights,
     moduleReadiness: {
       trustAbuse: trustReadiness,
       competitor: competitorReadiness,
       pricingProfit: pricingReadiness,
     },
     moduleStates,
+    dashboardState,
     persistedCounts: operational?.counts ?? null,
     onboarding,
   };

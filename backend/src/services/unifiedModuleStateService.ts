@@ -9,6 +9,13 @@ export type UnifiedDataStatus =
   | "processing";
 export type UnifiedCoverage = "full" | "partial" | "none";
 export type UnifiedDependencyStatus = "ready" | "missing";
+export type DashboardQuickAccessStatus =
+  | "Ready"
+  | "Partial"
+  | "Needs setup"
+  | "Refreshing"
+  | "Stale"
+  | "Error";
 
 export type UnifiedModuleState = {
   setupStatus: UnifiedSetupStatus;
@@ -26,6 +33,12 @@ export type UnifiedModuleState = {
   title: string;
   description: string;
   nextAction: string | null;
+};
+
+export type DashboardQuickAccessState = {
+  status: DashboardQuickAccessStatus;
+  freshnessAt: string | null;
+  reason: string;
 };
 
 type CreateUnifiedModuleStateArgs = {
@@ -76,5 +89,61 @@ export function createUnifiedModuleState(
     title: args.title,
     description: args.description,
     nextAction: args.nextAction ?? null,
+  };
+}
+
+export function deriveDashboardQuickAccessState(
+  moduleState: UnifiedModuleState
+): DashboardQuickAccessState {
+  if (moduleState.setupStatus === "incomplete") {
+    return {
+      status: "Needs setup",
+      freshnessAt: moduleState.lastSuccessfulSyncAt,
+      reason: moduleState.description,
+    };
+  }
+
+  if (
+    moduleState.syncStatus === "running" ||
+    moduleState.dataStatus === "processing"
+  ) {
+    return {
+      status: "Refreshing",
+      freshnessAt: moduleState.lastSuccessfulSyncAt,
+      reason: moduleState.description,
+    };
+  }
+
+  if (
+    moduleState.syncStatus === "failed" ||
+    moduleState.dataStatus === "failed"
+  ) {
+    return {
+      status: "Error",
+      freshnessAt: moduleState.lastSuccessfulSyncAt,
+      reason: moduleState.description,
+    };
+  }
+
+  if (moduleState.dataStatus === "stale") {
+    return {
+      status: "Stale",
+      freshnessAt: moduleState.lastSuccessfulSyncAt,
+      reason: moduleState.description,
+    };
+  }
+
+  if (moduleState.dataStatus === "partial") {
+    return {
+      status: "Partial",
+      freshnessAt: moduleState.lastSuccessfulSyncAt,
+      reason: moduleState.description,
+    };
+  }
+
+  return {
+    status: "Ready",
+    freshnessAt: moduleState.lastSuccessfulSyncAt,
+    reason: moduleState.description,
   };
 }
