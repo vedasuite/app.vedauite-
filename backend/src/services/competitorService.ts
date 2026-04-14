@@ -7,7 +7,6 @@ import {
 } from "./storeOperationalStateService";
 import {
   createUnifiedModuleState,
-  isStaleTimestamp,
   toIsoString,
 } from "./unifiedModuleStateService";
 
@@ -39,6 +38,139 @@ type CompetitorSnapshotStatus =
   | "FAILED";
 
 type CompetitorFreshnessStatus = "UNKNOWN" | "FRESH" | "STALE";
+type CompetitorPrimaryState =
+  | "SETUP_INCOMPLETE"
+  | "AWAITING_FIRST_RUN"
+  | "NO_MATCHES"
+  | "NO_CHANGES"
+  | "CHANGES_DETECTED"
+  | "STALE"
+  | "FAILURE";
+type CompetitorChannelAvailability = "Live" | "Configured" | "Preview" | "Not enabled";
+
+function getCompetitorFreshnessLabel(
+  freshnessHours: number | null,
+  lastSuccessfulRunAt: Date | null
+) {
+  if (!lastSuccessfulRunAt) {
+    return "Awaiting first successful refresh";
+  }
+  if (freshnessHours == null) {
+    return "Refresh time unavailable";
+  }
+  if (freshnessHours <= 1) {
+    return "Refreshed recently";
+  }
+  if (freshnessHours > 24) {
+    return `Stale: last refreshed ${freshnessHours} hours ago`;
+  }
+  return `Last refreshed ${freshnessHours} hours ago`;
+}
+
+function getCompetitorPrimaryState(args: {
+  hasDomains: boolean;
+  syncStatusLabel: CompetitorSyncStatus;
+  lastSuccessfulRunAt: Date | null;
+  freshnessHours: number | null;
+  matchedProductsCount: number;
+  changesDetected: boolean;
+}) {
+  if (!args.hasDomains) {
+    return "SETUP_INCOMPLETE" as const;
+  }
+  if (args.syncStatusLabel === "FAILED") {
+    return "FAILURE" as const;
+  }
+  if (!args.lastSuccessfulRunAt) {
+    return "AWAITING_FIRST_RUN" as const;
+  }
+  if (args.freshnessHours != null && args.freshnessHours > 24) {
+    return "STALE" as const;
+  }
+  if (args.matchedProductsCount === 0) {
+    return "NO_MATCHES" as const;
+  }
+  if (!args.changesDetected) {
+    return "NO_CHANGES" as const;
+  }
+  return "CHANGES_DETECTED" as const;
+}
+
+function getCompetitorPrimaryStateCopy(args: {
+  primaryState: CompetitorPrimaryState;
+  freshnessLabel: string;
+  matchedProductsCount: number;
+  checkedDomainsCount: number;
+  changesDetected: number;
+  latestError: string | null;
+  lastSuccessfulRunAt: Date | null;
+}) {
+  switch (args.primaryState) {
+    case "SETUP_INCOMPLETE":
+      return {
+        title: "Competitor setup is incomplete",
+        description:
+          "Add competitor domains before VedaSuite can check live competitor websites for comparable products.",
+        nextAction: "Add competitor domains",
+        coverageStatus: "Setup required",
+        toastMessage: "Add competitor domains before refreshing competitor monitoring.",
+      };
+    case "AWAITING_FIRST_RUN":
+      return {
+        title: "Configured, awaiting first successful run",
+        description:
+          "Domains are configured, but VedaSuite has not completed its first successful competitor refresh yet.",
+        nextAction: "Run competitor monitoring",
+        coverageStatus: "Awaiting first run",
+        toastMessage: "Refresh started. VedaSuite is preparing the first competitor monitoring run.",
+      };
+    case "NO_MATCHES":
+      return {
+        title: "Monitoring is active, but no comparable competitor products were found",
+        description:
+          "The latest refresh completed successfully, but none of the monitored competitor pages matched your tracked products yet.",
+        nextAction: "Review tracked products or add more competitor domains",
+        coverageStatus: "No comparable matches found",
+        toastMessage: "Refresh completed. No comparable competitor products were found.",
+      };
+    case "NO_CHANGES":
+      return {
+        title: "Monitoring is active. No competitor changes detected",
+        description:
+          "Comparable products were matched successfully, but the latest refresh did not detect any new price, promotion, or stock changes.",
+        nextAction: "Review tracked products or refresh again later",
+        coverageStatus: "Healthy with no changes",
+        toastMessage: "Refresh completed. No competitor changes detected.",
+      };
+    case "CHANGES_DETECTED":
+      return {
+        title: "Competitor changes were detected across matched products",
+        description: `The latest refresh checked ${args.checkedDomainsCount} domains, matched ${args.matchedProductsCount} products, and found ${args.changesDetected} live competitor changes.`,
+        nextAction: "View changes",
+        coverageStatus: "Changes detected",
+        toastMessage: "Refresh completed. New competitor changes detected.",
+      };
+    case "STALE":
+      return {
+        title: "Competitor monitoring is stale",
+        description: `Competitor data is older than the freshness threshold. ${args.freshnessLabel}.`,
+        nextAction: "Refresh competitor monitoring",
+        coverageStatus: "Stale: refresh recommended",
+        toastMessage: "Competitor data is stale. Run a refresh to update monitoring.",
+      };
+    case "FAILURE":
+    default:
+      return {
+        title: "Competitor refresh failed",
+        description:
+          args.latestError ??
+          "VedaSuite could not complete the latest competitor refresh.",
+        nextAction: "Retry refresh",
+        coverageStatus: "Refresh failed",
+        toastMessage: "Competitor refresh failed. Please try again.",
+      };
+  }
+}
 
 function normalizeCompetitorName(domain: string, label?: string | null) {
   return label ?? domain.replace(/\..+$/, "").replace(/[-_]/g, " ");
@@ -389,8 +521,8 @@ export async function getCompetitorOverview(shopDomain: string) {
     latestCompetitorJob?.finishedAt ??
     latestCompetitorJob?.startedAt ??
     null;
-  const freshnessHours = lastIngestedAt
-    ? Number(((Date.now() - new Date(lastIngestedAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
+  const freshnessHours = lastSuccessAt
+    ? Number(((Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
     : null;
   const checkedDomainsCount =
     latestCompetitorSummary?.domains ?? store.competitorDomains.length;
@@ -470,30 +602,74 @@ export async function getCompetitorOverview(shopDomain: string) {
     failureReason: freshnessFailureReason,
   });
 
+  const competitorDependencyState = operational.counts.competitorRows > 0 ? "ready" : "missing";
+  const pricingDependencyState = operational.counts.pricingRows > 0 ? "ready" : "missing";
+  const fraudDependencyState = operational.counts.timelineEvents > 0 ? "ready" : "missing";
+  const changesDetected =
+    detectedPriceChangesCount +
+    detectedPromotionChangesCount +
+    stockAlerts;
+  const freshnessLabel = getCompetitorFreshnessLabel(
+    freshnessHours,
+    lastSuccessAt
+  );
+  const primaryState = getCompetitorPrimaryState({
+    hasDomains: store.competitorDomains.length > 0,
+    syncStatusLabel,
+    lastSuccessfulRunAt: lastSuccessAt,
+    freshnessHours,
+    matchedProductsCount,
+    changesDetected: changesDetected > 0,
+  });
+  const primaryStateCopy = getCompetitorPrimaryStateCopy({
+    primaryState,
+    freshnessLabel,
+    matchedProductsCount,
+    checkedDomainsCount,
+    changesDetected,
+    latestError:
+      latestCompetitorJob?.errorMessage ??
+      latestCompetitorSummary?.reason ??
+      null,
+    lastSuccessfulRunAt: lastSuccessAt,
+  });
   const weeklyReport = {
     headline:
-      recentRows.length > 0
+      primaryState === "CHANGES_DETECTED"
         ? `${recentChanges} competitor signals detected in the last 24 hours`
+        : primaryState === "NO_CHANGES"
+        ? "Monitoring is active with no new competitor changes"
+        : primaryState === "NO_MATCHES"
+        ? "Monitoring is active, but no comparable matches were found"
         : store.competitorDomains.length > 0
-        ? "Competitor monitoring configured"
+        ? "Competitor monitoring is not ready for a brief yet"
         : "Competitor monitoring needs setup",
     whyItMatters:
-      recentRows.length > 0
+      primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor observations are available for pricing, promotion, stock, and visibility review."
+        : primaryState === "NO_MATCHES"
+        ? "Your domains were refreshed successfully, but VedaSuite did not find overlapping competitor products to compare yet."
         : store.competitorDomains.length > 0
-        ? "Domains are configured, but VedaSuite is still waiting for the first successful ingestion run."
+        ? "Domains are configured, but VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful."
         : "Add monitored domains to start collecting competitor pricing and promotion data.",
     suggestedActions:
       actionSuggestions.length > 0
         ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+        : primaryState === "NO_MATCHES"
+        ? [
+            "Review tracked products and competitor domains for overlap.",
+            "Add more competitor domains and run another refresh.",
+          ]
         : store.competitorDomains.length > 0
         ? ["Run competitor ingestion.", "Review the move feed after the first live pull."]
         : ["Add competitor domains.", "Run your first ingestion."],
     reportReadiness:
-      recentRows.length > 0
+      primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor report available"
-        : latestSyncJob?.status === "SUCCEEDED"
-        ? "Waiting for competitor ingestion"
+        : primaryState === "NO_MATCHES"
+        ? "Waiting for matched products"
+        : lastSuccessAt
+        ? "Waiting for matched competitor products"
         : "Awaiting first sync",
     biggestMoves: moveFeed.slice(0, 3).map((item) => ({
       headline: item.headline,
@@ -502,21 +678,21 @@ export async function getCompetitorOverview(shopDomain: string) {
     })),
     merchantBrief:
       strategyDetections[0]?.implication ??
-      (recentRows.length > 0
+      ((primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES")
         ? "No dominant competitor strategy has been inferred yet from the current live data."
-        : "VedaSuite will build a weekly competitor brief after the first successful ingestion."),
+        : primaryState === "NO_MATCHES"
+        ? "VedaSuite needs comparable competitor product matches before it can build a reliable weekly brief."
+        : "VedaSuite will build a weekly competitor brief after the first successful matched refresh."),
     nextBestAction:
       actionSuggestions[0]?.suggestion ??
-      (store.competitorDomains.length > 0
+      (primaryState === "NO_MATCHES"
+        ? "Review tracked products and add more relevant competitor domains."
+        : store.competitorDomains.length > 0
         ? "Run ingestion to populate the move feed."
         : "Add competitor domains and start monitoring."),
   };
-
-  const competitorDependencyState = operational.counts.competitorRows > 0 ? "ready" : "missing";
-  const pricingDependencyState = operational.counts.pricingRows > 0 ? "ready" : "missing";
-  const fraudDependencyState = operational.counts.timelineEvents > 0 ? "ready" : "missing";
   const moduleState =
-    setupStatus === "NO_DOMAINS"
+    primaryState === "SETUP_INCOMPLETE"
       ? createUnifiedModuleState({
           setupStatus: "incomplete",
           syncStatus: syncStatusLabel === "FAILED" ? "failed" : "idle",
@@ -529,10 +705,9 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Competitor setup is incomplete",
-          description:
-            "Add competitor domains before VedaSuite can monitor competitor prices, promotions, and changes.",
-          nextAction: "Add competitor domains",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         })
       : syncStatusLabel === "RUNNING"
       ? createUnifiedModuleState({
@@ -552,7 +727,7 @@ export async function getCompetitorOverview(shopDomain: string) {
             "VedaSuite is checking competitor domains and updating matched products.",
           nextAction: "Wait for refresh to finish",
         })
-      : syncStatusLabel === "FAILED"
+      : primaryState === "FAILURE"
       ? createUnifiedModuleState({
           setupStatus: "complete",
           syncStatus: "failed",
@@ -565,33 +740,52 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Competitor refresh failed",
-          description:
-            latestCompetitorJob?.errorMessage ??
-            "VedaSuite could not refresh competitor data for the latest attempt.",
-          nextAction: "Retry refresh",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         })
-      : isStaleTimestamp(lastSuccessAt)
+      : primaryState === "STALE"
       ? createUnifiedModuleState({
           setupStatus: "complete",
           syncStatus: "completed",
           dataStatus: "stale",
           lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
           lastAttemptAt: toIsoString(lastAttemptAt),
-          dataChanged:
-            detectedPriceChangesCount > 0 || detectedPromotionChangesCount > 0,
+          dataChanged: changesDetected > 0,
           coverage: matchedProductsCount > 0 ? "partial" : "none",
           dependencies: {
             competitor: competitorDependencyState,
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Competitor data is out of date",
-          description:
-            "The last successful competitor refresh is older than 24 hours. Run a new refresh to see current changes.",
-          nextAction: "Refresh competitor data",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         })
-      : matchedProductsCount === 0
+      : primaryState === "AWAITING_FIRST_RUN"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus:
+            operational.latestCompetitorIngestJob?.status === "RUNNING"
+              ? "running"
+              : "idle",
+          dataStatus:
+            operational.latestCompetitorIngestJob?.status === "RUNNING"
+              ? "processing"
+              : "empty",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: "none",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
+        })
+      : primaryState === "NO_MATCHES"
       ? createUnifiedModuleState({
           setupStatus: "complete",
           syncStatus: "completed",
@@ -604,11 +798,9 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Monitoring is active, but no competitor matches were found",
-          description:
-            "VedaSuite checked your configured domains, but it did not find matching competitor products yet.",
-          nextAction:
-            "Try adding more competitor domains or review whether your products overlap.",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         })
       : crawlStatus === "PARTIAL" || snapshotStatus === "PARTIAL"
       ? createUnifiedModuleState({
@@ -630,7 +822,7 @@ export async function getCompetitorOverview(shopDomain: string) {
             "Some competitor products matched, but coverage is still incomplete across the tracked catalog.",
           nextAction: "Review tracked products or update competitor domains",
         })
-      : detectedPriceChangesCount === 0 && detectedPromotionChangesCount === 0
+      : primaryState === "NO_CHANGES"
       ? createUnifiedModuleState({
           setupStatus: "complete",
           syncStatus: "completed",
@@ -643,10 +835,9 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Monitoring is active. No competitor changes were found.",
-          description:
-            "The latest refresh completed successfully, but no competitor price or promotion changes were detected.",
-          nextAction: "Refresh again later or update tracked domains",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         })
       : createUnifiedModuleState({
           setupStatus: "complete",
@@ -661,13 +852,59 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Competitor data is ready",
-          description:
-            "VedaSuite found usable competitor matches and detected live market changes for review.",
-          nextAction: "View competitor changes",
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
         });
 
   return {
+    competitorState: {
+      primaryState,
+      setupStatus:
+        store.competitorDomains.length === 0 ? "not_configured" : "configured",
+      ingestionStatus:
+        syncStatusLabel === "RUNNING"
+          ? "running"
+          : syncStatusLabel === "FAILED"
+          ? "failed"
+          : lastSuccessAt
+          ? "completed"
+          : "never_run",
+      matchStatus:
+        matchedProductsCount === 0
+          ? "no_matches"
+          : crawlStatus === "PARTIAL"
+          ? "partial_matches"
+          : "matched",
+      changeStatus: changesDetected > 0 ? "changes_detected" : "no_changes",
+      freshnessStatus: freshnessStatus === "STALE" ? "stale" : "fresh",
+      freshnessLabel,
+      channels: {
+        website:
+          store.competitorDomains.length === 0
+            ? "not_configured"
+            : lastSuccessAt
+            ? "connected"
+            : "preview_only",
+        googleShopping: "preview_only",
+        metaAds: "preview_only",
+      },
+      lastSuccessfulRunAt: toIsoString(lastSuccessAt),
+      lastAttemptAt: toIsoString(lastAttemptAt),
+      configuredDomainsCount: store.competitorDomains.length,
+      checkedDomainsCount,
+      matchedProductsCount,
+      activePromotionsCount: promoCount,
+      activePromotionCount: promoCount,
+      stockAlertsCount: stockAlerts,
+      detectedPriceChangesCount,
+      detectedPromotionChangesCount,
+      coverageStatus: primaryStateCopy.coverageStatus,
+      title: primaryStateCopy.title,
+      description: primaryStateCopy.description,
+      nextAction: primaryStateCopy.nextAction,
+      toastMessage: primaryStateCopy.toastMessage,
+    },
     moduleState,
     monitoringStatus: {
       setupStatus,
@@ -719,23 +956,11 @@ export async function getCompetitorOverview(shopDomain: string) {
     coverageSummary: {
       domainsConfigured: store.competitorDomains.length,
       channelsReady: [
-        sourceBreakdown.website > 0 ? "Website monitoring" : null,
+        store.competitorDomains.length > 0 ? "Website monitoring" : null,
         sourceBreakdown.googleShopping > 0 ? "Google Shopping" : null,
-        sourceBreakdown.metaAds > 0 ? "Imported ad preview" : null,
+        sourceBreakdown.metaAds > 0 ? "Meta Ad Library" : null,
       ].filter((item): item is string => item !== null),
-      monitoringPosture:
-        readiness.readinessState === "READY_WITH_DATA" &&
-        freshnessHours != null &&
-        freshnessHours <= 72
-          ? "Live monitoring"
-          : operational.counts.competitorDomains > 0 &&
-            readiness.readinessState === "FAILED"
-          ? "Monitoring failed"
-          : recentRows.length > 0
-          ? "Monitoring stale"
-          : store.competitorDomains.length > 0
-          ? "Configured, awaiting ingestion"
-          : "Needs setup",
+      monitoringPosture: primaryStateCopy.coverageStatus,
     },
   };
 }
@@ -749,6 +974,10 @@ export async function listCompetitorConnectors(shopDomain: string) {
   const store = await getStore(shopDomain);
   const rows = await getCompetitorRows(store.id, 300);
   const latestBySource = new Map<string, Date>();
+  const websiteLastIngestedAt =
+    rows.find((row) => row.source === "website_live")?.collectedAt ??
+    rows.find((row) => row.source === "website")?.collectedAt ??
+    null;
 
   for (const row of rows) {
     if (!latestBySource.has(row.source)) {
@@ -763,14 +992,19 @@ export async function listCompetitorConnectors(shopDomain: string) {
       description: "Fetches live competitor storefront observations from tracked domains.",
       connected: store.competitorDomains.length > 0,
       trackedTargets: store.competitorDomains.length,
-      lastIngestedAt:
-        latestBySource.get("website_live") ?? latestBySource.get("website") ?? null,
+      lastIngestedAt: websiteLastIngestedAt,
       readiness:
-        latestBySource.get("website_live") || latestBySource.get("website")
-          ? "Healthy"
-          : store.competitorDomains.length > 0
-          ? "Waiting for first ingest"
-          : "Needs setup",
+        store.competitorDomains.length === 0
+          ? "Not enabled"
+          : websiteLastIngestedAt
+          ? "Live"
+          : "Configured",
+      action:
+        store.competitorDomains.length === 0
+          ? "Add domains"
+          : websiteLastIngestedAt
+          ? "No action needed"
+          : "Run refresh",
     },
     {
       id: "google_shopping",
@@ -780,7 +1014,8 @@ export async function listCompetitorConnectors(shopDomain: string) {
       connected: false,
       trackedTargets: 0,
       lastIngestedAt: null,
-      readiness: "Limited preview only",
+      readiness: "Preview",
+      action: "No action needed",
     },
     {
       id: "meta_ads",
@@ -790,7 +1025,8 @@ export async function listCompetitorConnectors(shopDomain: string) {
       connected: false,
       trackedTargets: 0,
       lastIngestedAt: null,
-      readiness: "Limited preview only",
+      readiness: "Preview",
+      action: "No action needed",
     },
   ];
 }
@@ -950,7 +1186,7 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         ingested > 0
           ? "Competitor monitoring refreshed successfully."
           : skipped > 0
-          ? "Refresh completed, but some products could not be matched to competitor snapshots."
+          ? "Refresh completed. No comparable competitor products were found."
           : "Refresh completed. No competitor changes detected.",
     };
 
@@ -1049,15 +1285,19 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
   return {
     summary: {
       responseMode:
-        responsePlans.length === 0
-          ? "Awaiting competitor data"
+        overview.competitorState?.primaryState === "NO_MATCHES"
+          ? "No matched products yet"
+          : responsePlans.length === 0
+          ? "No response needed"
           : responsePlans.some((plan) => plan.pressureScore >= 70)
           ? "Respond selectively"
           : "Hold and monitor",
       topPressureCount: responsePlans.filter((plan) => plan.pressureScore >= 50).length,
       automationReadiness:
-        responsePlans.length === 0
-          ? "No live competitor response plans are available yet."
+        overview.competitorState?.primaryState === "NO_MATCHES"
+          ? "Response recommendations appear after VedaSuite finds comparable competitor products."
+          : responsePlans.length === 0
+          ? "Matched competitor products are live, but no response action is needed right now."
           : "Competitor response suggestions are ready for merchant review.",
     },
     responsePlans,

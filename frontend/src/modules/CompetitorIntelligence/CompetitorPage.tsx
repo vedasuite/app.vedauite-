@@ -24,6 +24,15 @@ import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
+type CompetitorPrimaryState =
+  | "SETUP_INCOMPLETE"
+  | "AWAITING_FIRST_RUN"
+  | "NO_MATCHES"
+  | "NO_CHANGES"
+  | "CHANGES_DETECTED"
+  | "STALE"
+  | "FAILURE";
+
 type CompetitorRow = {
   id: string;
   productHandle: string;
@@ -33,114 +42,44 @@ type CompetitorRow = {
   promotion?: string | null;
   stockStatus?: string | null;
   source?: string;
-  adCopy?: string | null;
 };
 
 type CompetitorOverview = {
-  moduleState?: {
-    setupStatus: string;
-    syncStatus: string;
-    dataStatus: string;
-    lastSuccessfulSyncAt?: string | null;
+  competitorState?: {
+    primaryState: CompetitorPrimaryState;
+    freshnessLabel: string;
+    lastSuccessfulRunAt?: string | null;
     lastAttemptAt?: string | null;
-    dataChanged?: boolean;
-    coverage: string;
-    dependencies: {
-      competitor: string;
-      pricing: string;
-      fraud: string;
-    };
+    checkedDomainsCount: number;
+    matchedProductsCount: number;
+    activePromotionsCount: number;
+    stockAlertsCount: number;
+    coverageStatus: string;
     title: string;
     description: string;
     nextAction?: string | null;
+    toastMessage?: string | null;
   };
-  monitoringStatus?: {
-    setupStatus: string;
-    syncStatus: string;
-    crawlStatus: string;
-    snapshotStatus: string;
-    freshnessStatus: string;
-    lastSuccessAt?: string | null;
-    lastAttemptAt?: string | null;
-    checkedDomainsCount: number;
-    monitoredProductsCount: number;
-    matchedProductsCount: number;
-    detectedPriceChangesCount: number;
-    detectedPromotionChangesCount: number;
-    latestSyncReason?: string | null;
-  };
-  readiness?: {
-    readinessState: string;
-    reason: string;
-    processingState?: string;
-    lastUpdatedAt?: string | null;
-  };
-  recentPriceChanges: number;
-  promotionAlerts: number;
-  stockMovementAlerts: number;
-  trackedDomains: number;
-  lastIngestedAt?: string | null;
-  freshnessHours?: number | null;
-  promotionalHeat?: string;
-  marketPressure?: string;
-  adPressure?: string;
-  launchAlerts?: Array<{
-    productHandle: string;
-    competitorName: string;
-    source: string;
-    collectedAt: string;
-  }>;
   sourceBreakdown?: { website: number; googleShopping: number; metaAds: number };
-  topMovers?: Array<{
-    productHandle: string;
-    priceDelta: number;
-    promotionSignals: number;
-    stockSignals: number;
-  }>;
   moveFeed?: Array<{
     id: string;
     headline: string;
     moveType: string;
     source: string;
     priority: string;
-    impactScore: number;
-    actionWindow?: string;
-    eventCluster?: string;
     whyItMatters: string;
     suggestedAction: string;
-    collectedAt: string;
-  }>;
-  strategyDetections?: Array<{
-    strategy: string;
-    signalStrength: string;
-    why: string;
-    implication: string;
-    recommendedMove: string;
   }>;
   actionSuggestions?: Array<{
     productHandle: string;
     suggestion: string;
     why: string;
-    urgency?: string;
-    expectedOutcome?: string;
   }>;
   weeklyReport?: {
     headline: string;
     whyItMatters: string;
-    suggestedActions: string[];
-    reportReadiness: string;
-    biggestMoves?: Array<{
-      headline: string;
-      impactScore: number;
-      suggestedAction: string;
-    }>;
     merchantBrief?: string;
     nextBestAction?: string;
-  };
-  coverageSummary?: {
-    domainsConfigured: number;
-    channelsReady: string[];
-    monitoringPosture: string;
   };
 };
 
@@ -148,16 +87,15 @@ type CompetitorConnector = {
   id: string;
   label: string;
   description: string;
-  connected: boolean;
   trackedTargets: number;
   lastIngestedAt?: string | null;
   readiness?: string;
+  action?: string;
 };
 
 type CompetitorResponseEngine = {
   summary: {
     responseMode: string;
-    topPressureCount: number;
     automationReadiness: string;
   };
   responsePlans: Array<{
@@ -165,202 +103,83 @@ type CompetitorResponseEngine = {
     pressureScore: number;
     recommendedPlay: string;
     rationale: string;
-    priceDelta: number;
-    promotionSignals: number;
-    stockSignals: number;
-    sourceCount: number;
-    confidence: number;
-    reasons: string[];
-    automationPosture: string;
     executionHint: string;
+    automationPosture: string;
   }>;
 };
 
-type DerivedCompetitorModuleState =
-  | "success"
-  | "partial"
-  | "setup_incomplete"
-  | "empty_healthy"
-  | "failure"
-  | "stale";
-
 const resourceName = { singular: "competitor product", plural: "competitor products" };
 
-function createEmptyOverview(
-  readinessState = "SYNC_REQUIRED",
-  reason = "Add monitored domains and run the first competitor ingestion."
-): CompetitorOverview {
+function createEmptyOverview(): CompetitorOverview {
   return {
-    moduleState: {
-      setupStatus: "incomplete",
-      syncStatus: "idle",
-      dataStatus: "empty",
-      lastSuccessfulSyncAt: null,
-      lastAttemptAt: null,
-      dataChanged: false,
-      coverage: "none",
-      dependencies: {
-        competitor: "missing",
-        pricing: "missing",
-        fraud: "missing",
-      },
-      title: "Competitor setup is incomplete",
-      description: reason,
-      nextAction: "Add competitor domains",
-    },
-    monitoringStatus: {
-      setupStatus: "NO_DOMAINS",
-      syncStatus: "NOT_STARTED",
-      crawlStatus: "NOT_STARTED",
-      snapshotStatus: "NOT_STARTED",
-      freshnessStatus: "UNKNOWN",
-      lastSuccessAt: null,
+    competitorState: {
+      primaryState: "SETUP_INCOMPLETE",
+      freshnessLabel: "Awaiting first successful refresh",
+      lastSuccessfulRunAt: null,
       lastAttemptAt: null,
       checkedDomainsCount: 0,
-      monitoredProductsCount: 0,
       matchedProductsCount: 0,
-      detectedPriceChangesCount: 0,
-      detectedPromotionChangesCount: 0,
-      latestSyncReason: reason,
+      activePromotionsCount: 0,
+      stockAlertsCount: 0,
+      coverageStatus: "Setup required",
+      title: "Competitor setup is incomplete",
+      description:
+        "Add competitor domains before VedaSuite can monitor comparable competitor products.",
+      nextAction: "Add competitor domains",
+      toastMessage: "Add competitor domains before refreshing competitor monitoring.",
     },
-    readiness: {
-      readinessState,
-      reason,
-      processingState: "NOT_STARTED",
-      lastUpdatedAt: null,
-    },
-    recentPriceChanges: 0,
-    promotionAlerts: 0,
-    stockMovementAlerts: 0,
-    trackedDomains: 0,
-    lastIngestedAt: null,
-    freshnessHours: null,
-    promotionalHeat: "Unavailable",
-    marketPressure: "Unavailable",
-    adPressure: "Unavailable",
-    launchAlerts: [],
     sourceBreakdown: { website: 0, googleShopping: 0, metaAds: 0 },
-    topMovers: [],
     moveFeed: [],
-    strategyDetections: [],
     actionSuggestions: [],
-    weeklyReport: undefined,
-    coverageSummary: {
-      domainsConfigured: 0,
-      channelsReady: [],
-      monitoringPosture: reason,
+    weeklyReport: {
+      headline: "Competitor monitoring is not ready for a brief yet",
+      whyItMatters:
+        "VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful.",
+      merchantBrief:
+        "VedaSuite will build a weekly competitor brief after the first successful matched refresh.",
+      nextBestAction: "Add competitor domains and run your first refresh.",
     },
   };
 }
 
-function createEmptyConnectors(): CompetitorConnector[] {
-  return [];
-}
-
-function createEmptyResponseEngine(
-  reason = "Response suggestions appear after successful competitor ingestion."
-): CompetitorResponseEngine {
+function createEmptyResponseEngine(): CompetitorResponseEngine {
   return {
     summary: {
-      responseMode: "Awaiting monitored competitor data",
-      topPressureCount: 0,
-      automationReadiness: reason,
+      responseMode: "No response needed",
+      automationReadiness:
+        "Response recommendations appear after VedaSuite finds comparable competitor products.",
     },
     responsePlans: [],
   };
 }
 
 function normalizeOverview(input: CompetitorOverview): CompetitorOverview {
+  const fallback = createEmptyOverview();
   return {
-    ...createEmptyOverview(
-      input.readiness?.readinessState,
-      input.readiness?.reason
-    ),
+    ...fallback,
     ...input,
+    competitorState: {
+      ...fallback.competitorState!,
+      ...input.competitorState,
+    },
     sourceBreakdown: {
       website: input.sourceBreakdown?.website ?? 0,
       googleShopping: input.sourceBreakdown?.googleShopping ?? 0,
       metaAds: input.sourceBreakdown?.metaAds ?? 0,
     },
     moveFeed: input.moveFeed ?? [],
-    topMovers: input.topMovers ?? [],
-    launchAlerts: input.launchAlerts ?? [],
-    strategyDetections: input.strategyDetections ?? [],
     actionSuggestions: input.actionSuggestions ?? [],
     weeklyReport: {
-      headline:
-        input.weeklyReport?.headline ??
-        "Awaiting competitor ingestion",
-      whyItMatters:
-        input.weeklyReport?.whyItMatters ??
-        "Add monitored domains and run ingestion to build an event-driven competitor feed.",
-      suggestedActions:
-        input.weeklyReport?.suggestedActions ?? [],
-      reportReadiness:
-        input.weeklyReport?.reportReadiness ?? "Awaiting competitor ingestion",
-      biggestMoves: input.weeklyReport?.biggestMoves ?? [],
-      merchantBrief:
-        input.weeklyReport?.merchantBrief ?? reasonForWeeklyBrief(input),
-      nextBestAction:
-        input.weeklyReport?.nextBestAction ??
-        "Add competitor domains and run your first ingestion.",
-    },
-    coverageSummary: {
-      domainsConfigured:
-        input.coverageSummary?.domainsConfigured ??
-        0,
-      channelsReady:
-        input.coverageSummary?.channelsReady ??
-        [],
-      monitoringPosture:
-        input.coverageSummary?.monitoringPosture ??
-        "Needs setup",
-    },
-    monitoringStatus: {
-      setupStatus: input.monitoringStatus?.setupStatus ?? "NO_DOMAINS",
-      syncStatus: input.monitoringStatus?.syncStatus ?? "NOT_STARTED",
-      crawlStatus: input.monitoringStatus?.crawlStatus ?? "NOT_STARTED",
-      snapshotStatus: input.monitoringStatus?.snapshotStatus ?? "NOT_STARTED",
-      freshnessStatus: input.monitoringStatus?.freshnessStatus ?? "UNKNOWN",
-      lastSuccessAt: input.monitoringStatus?.lastSuccessAt ?? null,
-      lastAttemptAt: input.monitoringStatus?.lastAttemptAt ?? null,
-      checkedDomainsCount: input.monitoringStatus?.checkedDomainsCount ?? 0,
-      monitoredProductsCount: input.monitoringStatus?.monitoredProductsCount ?? 0,
-      matchedProductsCount: input.monitoringStatus?.matchedProductsCount ?? 0,
-      detectedPriceChangesCount:
-        input.monitoringStatus?.detectedPriceChangesCount ?? 0,
-      detectedPromotionChangesCount:
-        input.monitoringStatus?.detectedPromotionChangesCount ?? 0,
-      latestSyncReason: input.monitoringStatus?.latestSyncReason ?? null,
-    },
-    moduleState: {
-      setupStatus: input.moduleState?.setupStatus ?? "incomplete",
-      syncStatus: input.moduleState?.syncStatus ?? "idle",
-      dataStatus: input.moduleState?.dataStatus ?? "empty",
-      lastSuccessfulSyncAt: input.moduleState?.lastSuccessfulSyncAt ?? null,
-      lastAttemptAt: input.moduleState?.lastAttemptAt ?? null,
-      dataChanged: input.moduleState?.dataChanged ?? false,
-      coverage: input.moduleState?.coverage ?? "none",
-      dependencies: {
-        competitor: input.moduleState?.dependencies?.competitor ?? "missing",
-        pricing: input.moduleState?.dependencies?.pricing ?? "missing",
-        fraud: input.moduleState?.dependencies?.fraud ?? "missing",
-      },
-      title: input.moduleState?.title ?? input.readiness?.reason ?? "Competitor data is updating",
-      description:
-        input.moduleState?.description ??
-        input.readiness?.reason ??
-        "VedaSuite is preparing competitor data.",
-      nextAction: input.moduleState?.nextAction ?? null,
+      ...fallback.weeklyReport!,
+      ...input.weeklyReport,
     },
   };
 }
 
-function reasonForWeeklyBrief(input: CompetitorOverview) {
-  return (
-    input.readiness?.reason ??
-    "The weekly brief will populate after live competitor monitoring data is collected."
-  );
+function formatDateTime(value?: string | null) {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function toneForPriority(value: string) {
@@ -370,170 +189,64 @@ function toneForPriority(value: string) {
   return "info";
 }
 
-function toneForHeat(value?: string | null) {
-  const normalized = (value ?? "").toLowerCase();
-  if (normalized === "high") return "critical";
-  if (normalized === "medium") return "attention";
-  return "success";
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
-function deriveCompetitorModuleState(
-  data: CompetitorOverview
-): DerivedCompetitorModuleState {
-  const state = data.moduleState;
-
-  if (!state || state.setupStatus === "incomplete") {
-    return "setup_incomplete";
-  }
-  if (state.dataStatus === "failed") {
-    return "failure";
-  }
-  if (state.dataStatus === "stale") {
-    return "stale";
-  }
-  if (state.dataStatus === "partial") {
-    return "partial";
-  }
-  if (state.dataStatus === "empty") {
-    return "empty_healthy";
-  }
-  if (state.dataStatus === "ready") {
-    return "success";
-  }
-  return state.syncStatus === "running" ? "partial" : "empty_healthy";
-}
-
-function deriveCompetitorBanner(data: CompetitorOverview) {
-  const state = deriveCompetitorModuleState(data);
-  const status = data.monitoringStatus;
-  const moduleState = data.moduleState;
-
+function getBannerTone(state: CompetitorPrimaryState) {
   switch (state) {
-    case "success":
-      return {
-        state,
-        tone: "success" as const,
-        title: moduleState?.title ?? "Competitor monitoring refreshed successfully",
-        body: `${moduleState?.description ?? "Competitor data is ready."} Last updated ${formatDateTime(moduleState?.lastSuccessfulSyncAt ?? status?.lastSuccessAt)}. ${status?.checkedDomainsCount ?? 0} domains checked, ${status?.matchedProductsCount ?? 0} products matched, ${status?.detectedPriceChangesCount ?? 0} price changes and ${status?.detectedPromotionChangesCount ?? 0} promotion changes detected.`,
-        summary: moduleState?.nextAction ?? "View competitor changes.",
-        primaryAction: "View changes",
-        secondaryAction: null,
-      };
-    case "partial":
-      return {
-        state,
-        tone: "warning" as const,
-        title: moduleState?.title ?? "Competitor data is available with partial coverage",
-        body: moduleState?.description ?? "Some competitor data is available, but coverage is still incomplete.",
-        summary: moduleState?.nextAction ?? "Review tracked products or update domains.",
-        primaryAction: "Review tracked products",
-        secondaryAction: "Update domains",
-      };
-    case "setup_incomplete":
-      return {
-        state,
-        tone: "info" as const,
-        title: moduleState?.title ?? "Complete competitor setup to start monitoring",
-        body: moduleState?.description ?? "Competitor setup is incomplete.",
-        summary: moduleState?.nextAction ?? "Add competitor domains to continue.",
-        primaryAction: "Complete setup",
-        secondaryAction: "Update domains",
-      };
-    case "empty_healthy":
-      return {
-        state,
-        tone: "info" as const,
-        title:
-          moduleState?.title ??
-          "Monitoring is active. No competitor changes were found.",
-        body: `${moduleState?.description ?? "The latest refresh completed successfully."} Last successful refresh: ${formatDateTime(moduleState?.lastSuccessfulSyncAt ?? status?.lastSuccessAt)}.`,
-        summary: moduleState?.nextAction ?? "Refresh again later or update tracked domains.",
-        primaryAction: "Refresh again",
-        secondaryAction: "Update domains",
-      };
-    case "failure":
-      return {
-        state,
-        tone: "critical" as const,
-        title: moduleState?.title ?? "Competitor refresh failed",
-        body: moduleState?.description ?? "VedaSuite could not complete the latest competitor refresh.",
-        summary: moduleState?.nextAction ?? "Retry the refresh.",
-        primaryAction: "Retry refresh",
-        secondaryAction: "Update domains",
-      };
-    case "stale":
+    case "CHANGES_DETECTED":
+      return "success" as const;
+    case "FAILURE":
+      return "critical" as const;
+    case "STALE":
+    case "NO_MATCHES":
+      return "warning" as const;
     default:
-      return {
-        state: "stale" as const,
-        tone: "warning" as const,
-        title: moduleState?.title ?? "Competitor data is out of date",
-        body: moduleState?.description ?? `The latest usable competitor refresh is getting old. Last successful refresh: ${formatDateTime(status?.lastSuccessAt)}.`,
-        summary: moduleState?.nextAction ?? "Refresh competitor data.",
-        primaryAction: "Re-run sync",
-        secondaryAction: "Update domains",
-      };
+      return "info" as const;
   }
 }
 
-function monitoringCoverageLabel(data: CompetitorOverview) {
-  const state = deriveCompetitorModuleState(data);
-
+function getPageSubtitle(state: CompetitorPrimaryState) {
   switch (state) {
-    case "success":
-      return "Healthy coverage";
-    case "partial":
-      return "Partial coverage";
-    case "setup_incomplete":
-      return "Setup required";
-    case "empty_healthy":
-      return "Healthy with no changes";
-    case "failure":
-      return "Refresh failed";
-    case "stale":
-    default:
-      return "Stale coverage";
+    case "SETUP_INCOMPLETE":
+      return "Complete setup to start monitoring competitor domains and matched products.";
+    case "AWAITING_FIRST_RUN":
+      return "Domains are configured. Run the first refresh to begin competitor monitoring.";
+    case "NO_MATCHES":
+      return "Monitoring ran successfully, but VedaSuite has not found comparable competitor products yet.";
+    case "NO_CHANGES":
+      return "Monitoring is active and ready to surface competitor changes when they appear.";
+    case "CHANGES_DETECTED":
+      return "Review competitor price moves, promotion changes, and recommended responses.";
+    case "STALE":
+      return "Competitor data needs a fresh refresh before you act on it.";
+    case "FAILURE":
+      return "The latest competitor refresh needs attention before fresh monitoring can resume.";
   }
 }
 
-function EmptyState(props: {
-  title: string;
-  body: string;
-  action?: React.ReactNode;
-  secondaryAction?: React.ReactNode;
-}) {
-  return (
-    <Card>
-      <BlockStack gap="300">
-        <Text as="h3" variant="headingMd">{props.title}</Text>
-        <Text as="p" tone="subdued">{props.body}</Text>
-        {props.action || props.secondaryAction ? (
-          <InlineStack gap="300">
-            {props.action}
-            {props.secondaryAction}
-          </InlineStack>
-        ) : null}
-      </BlockStack>
-    </Card>
-  );
+function getPrimaryActionLabel(state: CompetitorPrimaryState) {
+  if (state === "SETUP_INCOMPLETE") return "Add competitor domains";
+  if (state === "CHANGES_DETECTED") return "View changes";
+  return "Refresh monitoring";
 }
 
-function BulletList({ items, empty }: { items: string[]; empty: string }) {
-  if (items.length === 0) {
-    return <Text as="p" tone="subdued">{empty}</Text>;
+function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" | "strategy") {
+  if (tab === "tracked") {
+    if (state === "SETUP_INCOMPLETE") return "Add competitor domains to build the tracked products table.";
+    if (state === "AWAITING_FIRST_RUN") return "Run the first refresh to build the tracked products table.";
+    if (state === "NO_MATCHES") return "Monitoring ran successfully, but no comparable competitor products were found.";
+    return "Tracked products will appear here after competitor data becomes available.";
   }
-  return (
-    <BlockStack gap="100">
-      {items.map((item) => (
-        <Text key={item} as="p" variant="bodySm">- {item}</Text>
-      ))}
-    </BlockStack>
-  );
+  if (tab === "feed") {
+    if (state === "NO_MATCHES") return "No move feed is available yet because VedaSuite has not found comparable competitor products.";
+    if (state === "NO_CHANGES") return "Monitoring is active. No price, stock, or promotion changes were detected in the latest refresh.";
+    return "The move feed will populate as competitor changes are detected.";
+  }
+  if (state === "NO_MATCHES") {
+    return "Response recommendations appear after VedaSuite finds comparable competitor products.";
+  }
+  if (state === "NO_CHANGES") {
+    return "Matched products are active, but no response action is needed right now.";
+  }
+  return "Response guidance will appear here when competitor pressure increases.";
 }
 
 export function CompetitorPage() {
@@ -544,36 +257,26 @@ export function CompetitorPage() {
     readModuleCache<CompetitorRow[]>("competitor-rows") ?? []
   );
   const [overview, setOverview] = useState<CompetitorOverview>(
-    readModuleCache<CompetitorOverview>("competitor-overview") ??
-      createEmptyOverview()
+    readModuleCache<CompetitorOverview>("competitor-overview") ?? createEmptyOverview()
   );
   const [connectors, setConnectors] = useState<CompetitorConnector[]>(
-    readModuleCache<CompetitorConnector[]>("competitor-connectors") ??
-      createEmptyConnectors()
+    readModuleCache<CompetitorConnector[]>("competitor-connectors") ?? []
   );
   const [responseEngine, setResponseEngine] = useState<CompetitorResponseEngine>(
     readModuleCache<CompetitorResponseEngine>("competitor-response-engine") ??
       createEmptyResponseEngine()
   );
-  const [loading, setLoading] = useState(
-    rows.length === 0 && (overview.moveFeed?.length ?? 0) === 0
-  );
   const [selectedTab, setSelectedTab] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [domainsInput, setDomainsInput] = useState(
-    "styleorbit.example, urbanloom.example"
-  );
+  const [domainsInput, setDomainsInput] = useState("styleorbit.example, urbanloom.example");
 
-  const focus = searchParams.get("focus");
   const allowed = !!subscription?.enabledModules?.competitor;
-  const canSeeStrategy =
-    subscription?.capabilities?.["competitor.strategyDetection"] ?? false;
   const canSeeWeeklyReports =
     subscription?.capabilities?.["competitor.weeklyReports"] ?? false;
-  const canSeeAdvancedReports =
-    subscription?.capabilities?.["competitor.advancedReports"] ?? false;
+  const focus = searchParams.get("focus");
+  const primaryState = overview.competitorState?.primaryState ?? "SETUP_INCOMPLETE";
 
   useEffect(() => {
     setSelectedTab(focus === "feed" ? 1 : focus === "strategy" ? 2 : 0);
@@ -582,49 +285,46 @@ export function CompetitorPage() {
   useEffect(() => {
     if (!allowed) return;
     let mounted = true;
-    setLoading(true);
+
     Promise.all([
-      embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", { timeoutMs: 30000 }),
-      embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", { timeoutMs: 30000 }),
-      embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", { timeoutMs: 30000 }),
-      embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>("/api/competitor/response-engine", { timeoutMs: 30000 }),
+      embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", {
+        timeoutMs: 30000,
+      }),
+      embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
+        timeoutMs: 30000,
+      }),
+      embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", {
+        timeoutMs: 30000,
+      }),
+      embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>(
+        "/api/competitor/response-engine",
+        { timeoutMs: 30000 }
+      ),
     ])
-      .then(([productsResponse, overviewResponse, connectorsResponse, responseEngineResponse]) => {
-        if (!mounted) return;
-        const nextOverview = normalizeOverview(overviewResponse);
-        setRows(productsResponse.products);
-        setOverview(nextOverview);
-        setConnectors(connectorsResponse.connectors);
-        setResponseEngine(
-          responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
-        );
-        writeModuleCache("competitor-rows", productsResponse.products);
-        writeModuleCache("competitor-overview", nextOverview);
-        writeModuleCache("competitor-connectors", connectorsResponse.connectors);
-        writeModuleCache(
-          "competitor-response-engine",
-          responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
-        );
-      })
+      .then(
+        ([productsResponse, overviewResponse, connectorsResponse, responseEngineResponse]) => {
+          if (!mounted) return;
+          const nextOverview = normalizeOverview(overviewResponse);
+          const nextResponseEngine =
+            responseEngineResponse.responseEngine ?? createEmptyResponseEngine();
+          setRows(productsResponse.products);
+          setOverview(nextOverview);
+          setConnectors(connectorsResponse.connectors);
+          setResponseEngine(nextResponseEngine);
+          writeModuleCache("competitor-rows", productsResponse.products);
+          writeModuleCache("competitor-overview", nextOverview);
+          writeModuleCache("competitor-connectors", connectorsResponse.connectors);
+          writeModuleCache("competitor-response-engine", nextResponseEngine);
+        }
+      )
       .catch(() => {
         if (!mounted) return;
-        setOverview(
-          createEmptyOverview(
-            "FAILED",
-            "VedaSuite could not load persisted competitor monitoring outputs."
-          )
-        );
-        setConnectors(createEmptyConnectors());
-        setResponseEngine(
-          createEmptyResponseEngine(
-            "Response suggestions are unavailable until competitor monitoring loads."
-          )
-        );
+        setOverview(createEmptyOverview());
+        setConnectors([]);
+        setResponseEngine(createEmptyResponseEngine());
         setToast("Competitor monitoring could not be loaded. Please try again.");
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
       });
+
     return () => {
       mounted = false;
     };
@@ -640,33 +340,52 @@ export function CompetitorPage() {
     return rows;
   }, [focus, rows]);
 
+  const refreshCompetitorState = async (merchantMessage?: string | null) => {
+    const [productsResponse, overviewResponse, connectorsResponse, responseEngineResponse] =
+      await Promise.all([
+        embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", {
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", {
+          timeoutMs: 30000,
+        }),
+        embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>(
+          "/api/competitor/response-engine",
+          { timeoutMs: 30000 }
+        ),
+      ]);
+
+    const nextOverview = normalizeOverview(overviewResponse);
+    const nextResponseEngine =
+      responseEngineResponse.responseEngine ?? createEmptyResponseEngine();
+    setRows(productsResponse.products);
+    setOverview(nextOverview);
+    setConnectors(connectorsResponse.connectors);
+    setResponseEngine(nextResponseEngine);
+    writeModuleCache("competitor-rows", productsResponse.products);
+    writeModuleCache("competitor-overview", nextOverview);
+    writeModuleCache("competitor-connectors", connectorsResponse.connectors);
+    writeModuleCache("competitor-response-engine", nextResponseEngine);
+    setToast(merchantMessage ?? nextOverview.competitorState?.toastMessage ?? null);
+  };
+
   const saveDomains = async () => {
     const domains = domainsInput
       .split(",")
       .map((domain) => domain.trim())
       .filter(Boolean)
       .map((domain) => ({ domain }));
+
     try {
-      const [, overviewResponse, connectorsResponse] = await Promise.all([
-        embeddedShopRequest("/api/competitor/domains", {
-          method: "POST",
-          body: { domains },
-          timeoutMs: 30000,
-        }),
-        embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", {
-          timeoutMs: 30000,
-        }),
-        embeddedShopRequest<{ connectors: CompetitorConnector[] }>(
-          "/api/competitor/connectors",
-          { timeoutMs: 30000 }
-        ),
-      ]);
-      const nextOverview = normalizeOverview(overviewResponse);
-      setOverview(nextOverview);
-      setConnectors(connectorsResponse.connectors);
-      writeModuleCache("competitor-overview", nextOverview);
-      writeModuleCache("competitor-connectors", connectorsResponse.connectors);
-      setToast(
+      await embeddedShopRequest("/api/competitor/domains", {
+        method: "POST",
+        body: { domains },
+        timeoutMs: 30000,
+      });
+      await refreshCompetitorState(
         domains.length > 0
           ? "Competitor tracking domains updated."
           : "Competitor tracking domains cleared."
@@ -677,73 +396,13 @@ export function CompetitorPage() {
     }
   };
 
-  const handleBannerPrimaryAction = () => {
-    switch (banner.primaryAction) {
-      case "View changes":
-        setSelectedTab(1);
-        return;
-      case "Review tracked products":
-        setSelectedTab(0);
-        return;
-      case "Complete setup":
-        setModalOpen(true);
-        return;
-      case "Refresh again":
-      case "Retry refresh":
-      case "Re-run sync":
-        void ingestCompetitorData();
-        return;
-      default:
-        return;
-    }
-  };
-
-  const handleBannerSecondaryAction = () => {
-    if (banner.secondaryAction === "Update domains") {
-      setModalOpen(true);
-    }
-  };
-
   const ingestCompetitorData = async () => {
     try {
       setIngesting(true);
-      const [ingestResponse, productsResponse, overviewResponse, connectorsResponse, responseEngineResponse] =
-        await Promise.all([
-          embeddedShopRequest<{ result: { ingested: number; status?: string; reason?: string | null; merchantMessage?: string | null } }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 }),
-          embeddedShopRequest<{ products: CompetitorRow[] }>("/api/competitor/products", { timeoutMs: 30000 }),
-          embeddedShopRequest<CompetitorOverview>("/api/competitor/overview", { timeoutMs: 30000 }),
-          embeddedShopRequest<{ connectors: CompetitorConnector[] }>("/api/competitor/connectors", { timeoutMs: 30000 }),
-          embeddedShopRequest<{ responseEngine: CompetitorResponseEngine }>("/api/competitor/response-engine", { timeoutMs: 30000 }),
-        ]);
-      const nextOverview = normalizeOverview(overviewResponse);
-      setRows(productsResponse.products);
-      setOverview(nextOverview);
-      setConnectors(connectorsResponse.connectors);
-      setResponseEngine(
-        responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
-      );
-      writeModuleCache("competitor-rows", productsResponse.products);
-      writeModuleCache("competitor-overview", nextOverview);
-      writeModuleCache("competitor-connectors", connectorsResponse.connectors);
-      writeModuleCache(
-        "competitor-response-engine",
-        responseEngineResponse.responseEngine ?? createEmptyResponseEngine()
-      );
-      const nextBanner = deriveCompetitorBanner(nextOverview);
-      setToast(
-        ingestResponse.result.merchantMessage ??
-          (nextBanner.state === "success"
-            ? "Competitor monitoring refreshed successfully."
-            : nextBanner.state === "partial"
-            ? "Refresh completed, but some products could not be matched to competitor snapshots."
-            : nextBanner.state === "empty_healthy"
-            ? "Refresh completed. No competitor changes detected."
-            : nextBanner.state === "setup_incomplete"
-            ? "Competitor setup is incomplete."
-            : nextBanner.state === "stale"
-            ? "Refresh completed, but monitoring still needs a fresher result."
-            : "Competitor refresh failed. Please try again.")
-      );
+      const ingestResponse = await embeddedShopRequest<{
+        result: { merchantMessage?: string | null };
+      }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 });
+      await refreshCompetitorState(ingestResponse.result.merchantMessage ?? null);
     } catch {
       setToast("Competitor refresh failed. Please try again.");
     } finally {
@@ -751,79 +410,88 @@ export function CompetitorPage() {
     }
   };
 
+  const handlePrimaryAction = () => {
+    if (primaryState === "SETUP_INCOMPLETE") {
+      setModalOpen(true);
+      return;
+    }
+    if (primaryState === "CHANGES_DETECTED") {
+      setSelectedTab(1);
+      return;
+    }
+    void ingestCompetitorData();
+  };
+
+  const summaryCards = [
+    ["Matched products", overview.competitorState?.matchedProductsCount ?? 0],
+    ["Active promotions", overview.competitorState?.activePromotionsCount ?? 0],
+    ["Stock alerts", overview.competitorState?.stockAlertsCount ?? 0],
+    ["Domains checked", overview.competitorState?.checkedDomainsCount ?? 0],
+    ["Monitoring freshness", overview.competitorState?.freshnessLabel ?? "Unknown"],
+    ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
+  ];
+
+  const monitoringStatusRows = [
+    ["Primary state", overview.competitorState?.title ?? "Unknown"],
+    [
+      "Last successful refresh",
+      formatDateTime(overview.competitorState?.lastSuccessfulRunAt),
+    ],
+    ["Last refresh attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
+    ["Domains checked", String(overview.competitorState?.checkedDomainsCount ?? 0)],
+    ["Matched products", String(overview.competitorState?.matchedProductsCount ?? 0)],
+    ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
+  ];
+
   const sourceBreakdown = overview.sourceBreakdown ?? {
     website: 0,
     googleShopping: 0,
     metaAds: 0,
   };
-  const moduleState = deriveCompetitorModuleState(overview);
-  const banner = deriveCompetitorBanner(overview);
-  const monitoringStatusRows = [
-    ["Last successful refresh", formatDateTime(overview.monitoringStatus?.lastSuccessAt)],
-    ["Last refresh attempt", formatDateTime(overview.monitoringStatus?.lastAttemptAt)],
-    ["Domains checked", String(overview.monitoringStatus?.checkedDomainsCount ?? 0)],
-    ["Products matched", String(overview.monitoringStatus?.matchedProductsCount ?? 0)],
-    ["Coverage status", monitoringCoverageLabel(overview)],
-    ["Refresh result", banner.summary],
-  ];
 
   return (
     <ModuleGate
       title="Competitor Intelligence"
-      subtitle="Track price moves, promotions, stock posture, and response opportunities across key competitor domains."
+      subtitle="Track competitor pricing, promotions, stock posture, and response opportunities across key domains."
       requiredPlan="Starter, Growth, or Pro"
       allowed={allowed}
     >
       <Page
         title="Competitor Intelligence"
-        subtitle={
-          moduleState === "success"
-            ? "Review competitor price moves, promotion changes, and recommended responses."
-            : moduleState === "empty_healthy"
-            ? "Monitoring is active and ready to surface competitor changes when they appear."
-            : moduleState === "setup_incomplete"
-            ? "Complete setup to start monitoring competitor domains and matched products."
-            : moduleState === "failure"
-            ? "The latest competitor refresh needs attention before fresh monitoring can resume."
-            : moduleState === "stale"
-            ? "Competitor monitoring needs a fresh refresh to restore current market coverage."
-            : "Review coverage gaps and refresh competitor monitoring to improve matched snapshots."
-        }
+        subtitle={getPageSubtitle(primaryState)}
         primaryAction={{
-          content: ingesting ? "Refreshing..." : "Refresh competitor monitoring",
-          onAction: ingestCompetitorData,
+          content: ingesting ? "Refreshing..." : getPrimaryActionLabel(primaryState),
+          onAction: handlePrimaryAction,
           disabled: ingesting,
         }}
         secondaryActions={[{ content: "Update domains", onAction: () => setModalOpen(true) }]}
       >
         <Layout>
-          {subscriptionLoading || loading ? (
+          {subscriptionLoading ? (
             <Layout.Section>
-              <Banner title="Refreshing competitor intelligence" tone="info">
-                <p>VedaSuite is loading market signals, event feed items, and response plays in the background.</p>
+              <Banner title="Loading competitor monitoring" tone="info">
+                <p>VedaSuite is loading competitor state, coverage, and response guidance.</p>
               </Banner>
             </Layout.Section>
           ) : null}
 
-        <Layout.Section>
+          <Layout.Section>
             <Banner
-              title={banner.title}
-              tone={banner.tone}
+              title={overview.competitorState?.title ?? "Competitor monitoring"}
+              tone={getBannerTone(primaryState)}
             >
               <BlockStack gap="200">
-                <Text as="p">{banner.body}</Text>
-                <Text as="p" tone="subdued">{banner.summary}</Text>
+                <Text as="p">{overview.competitorState?.description}</Text>
+                <Text as="p" tone="subdued">
+                  {overview.competitorState?.nextAction}
+                </Text>
                 <InlineStack gap="300">
-                  {banner.primaryAction ? (
-                    <Button onClick={handleBannerPrimaryAction} disabled={ingesting}>
-                      {banner.primaryAction}
-                    </Button>
-                  ) : null}
-                  {banner.secondaryAction ? (
-                    <Button variant="secondary" onClick={handleBannerSecondaryAction}>
-                      {banner.secondaryAction}
-                    </Button>
-                  ) : null}
+                  <Button onClick={handlePrimaryAction} disabled={ingesting}>
+                    {getPrimaryActionLabel(primaryState)}
+                  </Button>
+                  <Button variant="secondary" onClick={() => setModalOpen(true)}>
+                    Update domains
+                  </Button>
                 </InlineStack>
               </BlockStack>
             </Banner>
@@ -831,31 +499,15 @@ export function CompetitorPage() {
 
           <Layout.Section>
             <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-              {[
-                [
-                  "Matched products",
-                  overview.monitoringStatus?.matchedProductsCount ?? rows.length,
-                ],
-                ["Active promotions", overview.promotionAlerts],
-                ["Stock alerts", overview.stockMovementAlerts],
-                [
-                  "Domains checked",
-                  overview.monitoringStatus?.checkedDomainsCount ?? overview.trackedDomains,
-                ],
-                [
-                  "Monitoring freshness",
-                  overview.monitoringStatus?.freshnessStatus === "FRESH"
-                    ? "Fresh"
-                    : overview.monitoringStatus?.freshnessStatus === "STALE"
-                    ? "Stale"
-                    : "Unknown",
-                ],
-                ["Coverage status", monitoringCoverageLabel(overview)],
-              ].map(([label, value]) => (
+              {summaryCards.map(([label, value]) => (
                 <Card key={String(label)}>
-                  <BlockStack gap="200">
-                    <Text as="h3" variant="headingMd">{String(label)}</Text>
-                    <Text as="p" variant="heading2xl">{String(value)}</Text>
+                  <BlockStack gap="150">
+                    <Text as="h3" variant="headingMd">
+                      {String(label)}
+                    </Text>
+                    <Text as="p" variant="headingLg">
+                      {String(value)}
+                    </Text>
                   </BlockStack>
                 </Card>
               ))}
@@ -867,29 +519,33 @@ export function CompetitorPage() {
               <Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingMd">Monitoring status</Text>
-                    <Badge
-                      tone={
-                        banner.tone === "success"
-                          ? "success"
-                          : banner.tone === "critical"
-                          ? "critical"
-                          : "attention"
-                      }
-                    >
-                      {monitoringCoverageLabel(overview)}
+                    <Text as="h3" variant="headingMd">
+                      What to do next
+                    </Text>
+                    <Badge tone={getBannerTone(primaryState)}>
+                      {overview.competitorState?.coverageStatus}
                     </Badge>
                   </InlineStack>
-                  <Text as="p" tone="subdued">
-                    Use this summary to confirm whether the latest refresh succeeded, partially covered your tracked catalog, or needs setup changes.
+                  <BlockStack gap="150">
+                    {(overview.actionSuggestions?.length
+                      ? overview.actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+                      : [overview.competitorState?.nextAction ?? "Review competitor monitoring state."]).map((item) => (
+                      <Text key={item} as="p">
+                        - {item}
+                      </Text>
+                    ))}
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    Monitoring status
                   </Text>
                   <BlockStack gap="200">
                     {monitoringStatusRows.map(([label, value]) => (
-                      <InlineStack
-                        key={label}
-                        align="space-between"
-                        blockAlign="start"
-                      >
+                      <InlineStack key={label} align="space-between" blockAlign="start">
                         <Text as="p" variant="bodySm" tone="subdued">
                           {label}
                         </Text>
@@ -901,183 +557,7 @@ export function CompetitorPage() {
                   </BlockStack>
                 </BlockStack>
               </Card>
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingMd">Monitoring coverage</Text>
-                    <Badge
-                      tone={
-                        overview.coverageSummary?.monitoringPosture === "Live monitoring"
-                          ? "success"
-                          : "attention"
-                      }
-                    >
-                      {overview.coverageSummary?.monitoringPosture}
-                    </Badge>
-                  </InlineStack>
-                  <Text as="p" tone="subdued">
-                    VedaSuite turns website, shopping-surface, and ad-pressure signals into one event-driven market view.
-                  </Text>
-                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-                    <div className="vs-action-card">
-                      <Text as="p" variant="headingSm">Configured domains</Text>
-                      <Text as="p" variant="headingLg">
-                        {overview.coverageSummary?.domainsConfigured ?? 0}
-                      </Text>
-                    </div>
-                    <div className="vs-action-card">
-                      <Text as="p" variant="headingSm">Channels ready</Text>
-                      <BulletList
-                        items={overview.coverageSummary?.channelsReady ?? []}
-                        empty="Website monitoring and limited-preview imported channel summaries become available after competitor domains are configured."
-                      />
-                    </div>
-                  </InlineGrid>
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingMd">Weekly competitor brief</Text>
-                    <Badge tone={canSeeWeeklyReports ? "success" : "attention"}>
-                      {canSeeWeeklyReports ? "Included" : "Growth+"}
-                    </Badge>
-                  </InlineStack>
-                  <Text as="p" variant="headingSm">
-                    {overview.weeklyReport?.headline}
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    {overview.weeklyReport?.merchantBrief}
-                  </Text>
-                  <div className="vs-action-card">
-                    <Text as="p" variant="headingSm">Next best action</Text>
-                    <Text as="p" tone="subdued">
-                      {overview.weeklyReport?.nextBestAction}
-                    </Text>
-                  </div>
-                  <BulletList
-                    items={(overview.weeklyReport?.biggestMoves ?? []).map(
-                      (item) =>
-                        `${item.headline} (${item.impactScore}/100): ${item.suggestedAction}`
-                    )}
-                    empty="The weekly brief will highlight the biggest competitor moves once the first ingest completes."
-                  />
-                </BlockStack>
-              </Card>
             </InlineGrid>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">Competitor Move Feed</Text>
-                  <Badge tone={overview.moveFeed && overview.moveFeed.length > 0 ? "success" : "info"}>
-                    {overview.moveFeed && overview.moveFeed.length > 0 ? `${overview.moveFeed.length} recent moves` : "Awaiting first ingest"}
-                  </Badge>
-                </InlineStack>
-                {(overview.moveFeed ?? []).length === 0 ? (
-                  <Text as="p" tone="subdued">The move feed translates website, shopping-surface, promotion, stock, and ad-pressure signals into merchant-ready decisions.</Text>
-                ) : (
-                  <BlockStack gap="200">
-                    {(overview.moveFeed ?? []).map((item) => (
-                      <div key={item.id} className="vs-action-card">
-                        <InlineStack align="space-between" blockAlign="start">
-                          <BlockStack gap="100">
-                            <InlineStack gap="200" blockAlign="center">
-                              <Text as="p" variant="headingSm">{item.headline}</Text>
-                              <Badge tone={toneForPriority(item.priority)}>{`${item.priority} impact`}</Badge>
-                            </InlineStack>
-                            <Text as="p" tone="subdued">{`${item.moveType} via ${item.source}`}</Text>
-                            {item.eventCluster ? (
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                {item.eventCluster}
-                              </Text>
-                            ) : null}
-                            <Text as="p">{item.whyItMatters}</Text>
-                            <Text as="p" variant="bodySm">{`What should I do? ${item.suggestedAction}`}</Text>
-                            {item.actionWindow ? (
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                {`Action window: ${item.actionWindow}`}
-                              </Text>
-                            ) : null}
-                          </BlockStack>
-                          <Badge tone="info">{`${item.impactScore}/100`}</Badge>
-                        </InlineStack>
-                      </div>
-                    ))}
-                  </BlockStack>
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-
-          <Layout.Section>
-            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-              {connectors.map((connector) => (
-                <Card key={connector.id}>
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="h3" variant="headingMd">{connector.label}</Text>
-                      <Badge tone={connector.connected ? "success" : "attention"}>{connector.connected ? "Connected" : "Needs setup"}</Badge>
-                    </InlineStack>
-                    <Text as="p" tone="subdued">{connector.description}</Text>
-                    <Text as="p" variant="bodySm" tone="subdued">{`Targets: ${connector.trackedTargets}`}</Text>
-                    <Text as="p" variant="bodySm" tone="subdued">{`Status: ${connector.readiness ?? "Not configured"}`}</Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {connector.lastIngestedAt ? `Last ingested ${new Date(connector.lastIngestedAt).toLocaleString()}` : "No ingestion yet"}
-                    </Text>
-                  </BlockStack>
-                </Card>
-              ))}
-            </InlineGrid>
-          </Layout.Section>
-
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h3" variant="headingMd">Weekly market brief</Text>
-                  <Badge tone={canSeeWeeklyReports ? "success" : "attention"}>{canSeeWeeklyReports ? "Included" : "Upgrade for full reports"}</Badge>
-                </InlineStack>
-                <Text as="p" variant="headingSm">{overview.weeklyReport?.headline}</Text>
-                <Text as="p" tone="subdued">{overview.weeklyReport?.whyItMatters}</Text>
-                <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-                  <div className="vs-action-card">
-                    <BlockStack gap="100">
-                      <Text as="p" variant="headingSm">Suggested merchant actions</Text>
-                      <BulletList items={overview.weeklyReport?.suggestedActions ?? []} empty="Run first ingestion to build your first weekly competitor brief." />
-                    </BlockStack>
-                  </div>
-                  <div className="vs-action-card">
-                    <BlockStack gap="100">
-                      <Text as="p" variant="headingSm">Report readiness</Text>
-                      <Text as="p" tone="subdued">{overview.weeklyReport?.reportReadiness}</Text>
-                      {!canSeeAdvancedReports ? <Text as="p" variant="bodySm">Upgrade to Pro for advanced weekly recommendations and deeper strategy detection.</Text> : null}
-                    </BlockStack>
-                  </div>
-                </InlineGrid>
-                {(overview.weeklyReport?.biggestMoves ?? []).length > 0 ? (
-                  <Card>
-                    <BlockStack gap="200">
-                      <Text as="h3" variant="headingMd">Biggest moves this week</Text>
-                      {(overview.weeklyReport?.biggestMoves ?? []).map((item) => (
-                        <InlineStack key={`${item.headline}-${item.impactScore}`} align="space-between" blockAlign="center">
-                          <BlockStack gap="100">
-                            <Text as="p">{item.headline}</Text>
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              {item.suggestedAction}
-                            </Text>
-                          </BlockStack>
-                          <Badge tone="attention">{`${item.impactScore}/100`}</Badge>
-                        </InlineStack>
-                      ))}
-                    </BlockStack>
-                  </Card>
-                ) : null}
-              </BlockStack>
-            </Card>
           </Layout.Section>
 
           <Layout.Section>
@@ -1095,31 +575,13 @@ export function CompetitorPage() {
                   {selectedTab === 0 ? (
                     visibleRows.length === 0 ? (
                       <Card>
-                        <BlockStack gap="300">
+                        <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">
-                            Competitor watchlist is ready
+                            No tracked products to review
                           </Text>
                           <Text as="p" tone="subdued">
-                            Connect domains and run ingestion to start collecting live competitor products and events.
+                            {getEmptyMessage(primaryState, "tracked")}
                           </Text>
-                          <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-                            {(overview.moveFeed ?? []).slice(0, 2).map((item) => (
-                              <div key={item.id} className="vs-action-card">
-                                <BlockStack gap="100">
-                                  <InlineStack align="space-between" blockAlign="start">
-                                    <Text as="p" variant="headingSm">{item.headline}</Text>
-                                    <Badge tone={toneForPriority(item.priority)}>{item.priority}</Badge>
-                                  </InlineStack>
-                                  <Text as="p" tone="subdued">{item.whyItMatters}</Text>
-                                  <Text as="p" variant="bodySm">Suggested action: {item.suggestedAction}</Text>
-                                </BlockStack>
-                              </div>
-                            ))}
-                          </InlineGrid>
-                          <InlineStack gap="300">
-                            <Button onClick={() => setModalOpen(true)}>Add competitor domains</Button>
-                            <Button variant="secondary" onClick={ingestCompetitorData}>Run first ingestion</Button>
-                          </InlineStack>
                         </BlockStack>
                       </Card>
                     ) : (
@@ -1140,17 +602,21 @@ export function CompetitorPage() {
                           <IndexTable.Row id={row.id} key={row.id} position={index}>
                             <IndexTable.Cell>{row.productHandle}</IndexTable.Cell>
                             <IndexTable.Cell>{row.competitorName}</IndexTable.Cell>
-                            <IndexTable.Cell>{row.price != null ? `$${row.price.toFixed(2)}` : "-"}</IndexTable.Cell>
-                            <IndexTable.Cell>{row.promotion ? <Badge tone="info">{row.promotion}</Badge> : "-"}</IndexTable.Cell>
                             <IndexTable.Cell>
-                              <BlockStack gap="100">
-                                <Text as="span">{row.stockStatus ?? "-"}</Text>
-                                {row.source ? <Badge tone="info">{row.source}</Badge> : null}
-                              </BlockStack>
+                              {row.price != null ? `$${row.price.toFixed(2)}` : "-"}
                             </IndexTable.Cell>
                             <IndexTable.Cell>
+                              {row.promotion ? <Badge tone="info">{row.promotion}</Badge> : "-"}
+                            </IndexTable.Cell>
+                            <IndexTable.Cell>{row.stockStatus ?? "-"}</IndexTable.Cell>
+                            <IndexTable.Cell>
                               {getProductUrl(row.productHandle) ? (
-                                <Button url={getProductUrl(row.productHandle) ?? undefined} external>Product</Button>
+                                <Button
+                                  url={getProductUrl(row.productHandle) ?? undefined}
+                                  external
+                                >
+                                  Product
+                                </Button>
                               ) : (
                                 "-"
                               )}
@@ -1163,212 +629,196 @@ export function CompetitorPage() {
                     <BlockStack gap="300">
                       <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
                         {[
-                          ["Website crawl", sourceBreakdown.website],
+                          ["Website", sourceBreakdown.website],
                           ["Google Shopping", sourceBreakdown.googleShopping],
-                          ["Meta Ad Library", sourceBreakdown.metaAds],
+                          ["Meta Ads", sourceBreakdown.metaAds],
                         ].map(([label, value]) => (
-                          <div key={String(label)} className="vs-signal-stat">
-                            <Text as="p" variant="bodySm" tone="subdued">{String(label)}</Text>
-                            <Text as="p" variant="headingLg">{String(value)}</Text>
-                          </div>
+                          <Card key={String(label)}>
+                            <BlockStack gap="150">
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {String(label)}
+                              </Text>
+                              <Text as="p" variant="headingLg">
+                                {String(value)}
+                              </Text>
+                            </BlockStack>
+                          </Card>
                         ))}
                       </InlineGrid>
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text as="h3" variant="headingMd">Highest market movers</Text>
-                          {(overview.topMovers ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">No high-signal competitor movers are available yet.</Text>
-                          ) : (
-                            (overview.topMovers ?? []).map((mover) => (
-                              <InlineStack key={mover.productHandle} align="space-between" blockAlign="center">
+
+                      {(overview.moveFeed ?? []).length === 0 ? (
+                        <Card>
+                          <BlockStack gap="200">
+                            <Text as="h3" variant="headingMd">
+                              No move feed items yet
+                            </Text>
+                            <Text as="p" tone="subdued">
+                              {getEmptyMessage(primaryState, "feed")}
+                            </Text>
+                          </BlockStack>
+                        </Card>
+                      ) : (
+                        (overview.moveFeed ?? []).map((item) => (
+                          <Card key={item.id}>
+                            <BlockStack gap="200">
+                              <InlineStack align="space-between" blockAlign="start">
                                 <BlockStack gap="100">
-                                  <Text as="p">{mover.productHandle}</Text>
-                                  <Text as="p" variant="bodySm" tone="subdued">{`${mover.promotionSignals} promotion signals | ${mover.stockSignals} stock signals`}</Text>
+                                  <Text as="p" variant="headingSm">
+                                    {item.headline}
+                                  </Text>
+                                  <Text as="p" tone="subdued">
+                                    {`${item.moveType} via ${item.source}`}
+                                  </Text>
+                                  <Text as="p">{item.whyItMatters}</Text>
+                                  <Text as="p" variant="bodySm">
+                                    Recommended action: {item.suggestedAction}
+                                  </Text>
                                 </BlockStack>
-                                <Badge tone={mover.priceDelta < 0 ? "attention" : "info"}>
-                                  {mover.priceDelta >= 0 ? `+$${mover.priceDelta.toFixed(2)}` : `-$${Math.abs(mover.priceDelta).toFixed(2)}`}
+                                <Badge tone={toneForPriority(item.priority)}>
+                                  {item.priority}
                                 </Badge>
                               </InlineStack>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text as="h3" variant="headingMd">Move feed detail</Text>
-                          {(overview.moveFeed ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">
-                              Live competitor event detail will appear after the first successful ingestion.
-                            </Text>
-                          ) : (
-                            (overview.moveFeed ?? []).slice(0, 5).map((item) => (
-                              <div key={`${item.id}-detail`} className="vs-action-card">
-                                <InlineStack align="space-between" blockAlign="start">
-                                  <BlockStack gap="100">
-                                    <Text as="p" variant="headingSm">{item.moveType}</Text>
-                                    <Text as="p" tone="subdued">{item.eventCluster}</Text>
-                                    <Text as="p" variant="bodySm">
-                                      Why this matters: {item.whyItMatters}
-                                    </Text>
-                                    <Text as="p" variant="bodySm">
-                                      Action window: {item.actionWindow ?? "Monitor"}
-                                    </Text>
-                                  </BlockStack>
-                                  <Badge tone={toneForPriority(item.priority)}>
-                                    {item.priority}
-                                  </Badge>
-                                </InlineStack>
-                              </div>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text as="h3" variant="headingMd">Product launch alerts</Text>
-                          {(overview.launchAlerts ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">No launch push has been inferred yet, so the module is keeping launch watch in a monitor posture.</Text>
-                          ) : (
-                            (overview.launchAlerts ?? []).map((alert) => (
-                              <InlineStack key={`${alert.productHandle}-${alert.collectedAt}`} align="space-between" blockAlign="center">
-                                <BlockStack gap="100">
-                                  <Text as="p">{alert.productHandle}</Text>
-                                  <Text as="p" variant="bodySm" tone="subdued">{`${alert.competitorName} | ${alert.source}`}</Text>
-                                </BlockStack>
-                                <Badge tone="attention">Launch watch</Badge>
-                              </InlineStack>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
+                            </BlockStack>
+                          </Card>
+                        ))
+                      )}
                     </BlockStack>
                   ) : (
                     <BlockStack gap="300">
                       <Card>
                         <BlockStack gap="200">
-                          <InlineStack align="space-between" blockAlign="center">
-                            <Text as="h3" variant="headingMd">Recommended market response</Text>
-                            <Badge tone={toneForHeat(overview.marketPressure)}>{`${responseEngine.summary.responseMode} | ${responseEngine.summary.topPressureCount} high-pressure SKUs`}</Badge>
-                          </InlineStack>
-                          <Text as="p" tone="subdued">{responseEngine.summary.automationReadiness}</Text>
-                          <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
-                            {[
-                              ["Hold price", "Margin-first", "Best when promotional heat is low and competitor signals are not concentrated on hero SKUs."],
-                              ["Selective match", "Tactical", "Use when a few products show repeated price drops and promotion clustering."],
-                              ["Bundle defense", "Response plan", "Protect margin by bundling complementary products instead of broad catalog discounting."],
-                            ].map(([title, label, body]) => (
-                              <Card key={String(title)}>
-                                <BlockStack gap="200">
-                                  <InlineStack align="space-between" blockAlign="center">
-                                    <Text as="h3" variant="headingMd">{String(title)}</Text>
-                                    <Badge tone={title === "Hold price" ? "success" : title === "Selective match" ? "attention" : "info"}>{String(label)}</Badge>
-                                  </InlineStack>
-                                  <Text as="p" tone="subdued">{String(body)}</Text>
-                                </BlockStack>
-                              </Card>
-                            ))}
-                          </InlineGrid>
+                          <Text as="h3" variant="headingMd">
+                            Response strategy
+                          </Text>
+                          <Text as="p" tone="subdued">
+                            {responseEngine.summary.automationReadiness}
+                          </Text>
                         </BlockStack>
                       </Card>
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text as="h3" variant="headingMd">What should I do?</Text>
-                          {(overview.actionSuggestions ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">Action suggestions are currently calm because no concentrated competitor pressure has been detected.</Text>
-                          ) : (
-                            (overview.actionSuggestions ?? []).map((item) => (
-                              <div key={item.productHandle} className="vs-action-card">
+
+                      {(responseEngine.responsePlans ?? []).length === 0 ? (
+                        <Card>
+                          <BlockStack gap="200">
+                            <Text as="h3" variant="headingMd">
+                              No active response recommendations
+                            </Text>
+                            <Text as="p" tone="subdued">
+                              {getEmptyMessage(primaryState, "strategy")}
+                            </Text>
+                          </BlockStack>
+                        </Card>
+                      ) : (
+                        (responseEngine.responsePlans ?? []).slice(0, 4).map((item) => (
+                          <Card key={`${item.productHandle}-strategy`}>
+                            <BlockStack gap="200">
+                              <InlineStack align="space-between" blockAlign="start">
                                 <BlockStack gap="100">
-                                  <InlineStack align="space-between">
-                                    <Text as="p" variant="headingSm">{item.productHandle}</Text>
-                                    <Badge tone="info">{item.suggestion}</Badge>
-                                  </InlineStack>
-                                  <Text as="p" tone="subdued">{item.why}</Text>
-                                  {item.expectedOutcome ? (
-                                    <Text as="p" variant="bodySm">
-                                      Expected outcome: {item.expectedOutcome}
-                                    </Text>
-                                  ) : null}
-                                  {item.urgency ? (
-                                    <Badge tone="attention">{item.urgency}</Badge>
-                                  ) : null}
+                                  <Text as="p" variant="headingSm">
+                                    {item.productHandle}
+                                  </Text>
+                                  <Text as="p" tone="subdued">
+                                    {item.rationale}
+                                  </Text>
+                                  <Text as="p" variant="bodySm">
+                                    {item.executionHint}
+                                  </Text>
                                 </BlockStack>
-                              </div>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text as="h3" variant="headingMd">Priority watchlist</Text>
-                          {(responseEngine.responsePlans ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">The response engine is in watch mode and will elevate products here if competitor pressure intensifies.</Text>
-                          ) : (
-                            (responseEngine.responsePlans ?? []).slice(0, 4).map((item) => (
-                              <InlineStack key={`${item.productHandle}-strategy`} align="space-between" blockAlign="center">
-                                <BlockStack gap="100">
-                                  <Text as="p">{item.productHandle}</Text>
-                                  <Text as="p" variant="bodySm" tone="subdued">{`${item.promotionSignals} promotion signals | ${item.stockSignals} stock signals | ${item.confidence}% estimated strength`}</Text>
-                                  <Text as="p" variant="bodySm">{item.executionHint}</Text>
-                                  <Text as="p" variant="bodySm" tone="subdued">{item.automationPosture}</Text>
-                                </BlockStack>
-                                <Button
-                                  onClick={() =>
-                                    window.open(
-                                      getProductUrl(item.productHandle) ?? undefined,
-                                      "_blank",
-                                      "noopener,noreferrer"
-                                    )
-                                  }
-                                  disabled={!getProductUrl(item.productHandle)}
-                                >
-                                  Open Shopify product
-                                </Button>
+                                <Badge tone={item.pressureScore >= 70 ? "critical" : "attention"}>
+                                  {`${item.pressureScore}/100`}
+                                </Badge>
                               </InlineStack>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
-                      <Card>
-                        <BlockStack gap="200">
-                          <InlineStack align="space-between" blockAlign="center">
-                            <Text as="h3" variant="headingMd">Competitor strategy detection</Text>
-                            <Badge tone={canSeeStrategy ? "success" : "attention"}>{canSeeStrategy ? "Included" : "Pro feature"}</Badge>
-                          </InlineStack>
-                          {!canSeeStrategy ? (
-                            <Banner title="Upgrade to Pro for strategy detection" tone="info">
-                              <p>Growth keeps the move feed and action suggestions active, while Pro unlocks deeper competitor intent inference.</p>
-                            </Banner>
-                          ) : null}
-                          {(overview.strategyDetections ?? []).length === 0 ? (
-                            <Text as="p" tone="subdued">No live competitor strategy pattern has been detected yet.</Text>
-                          ) : (
-                            (overview.strategyDetections ?? []).map((detection) => (
-                              <div key={`${detection.strategy}-${detection.why}`} className="vs-action-card">
-                                <InlineStack align="space-between" blockAlign="start">
-                                  <BlockStack gap="100">
-                                    <Text as="p" variant="headingSm">{detection.strategy}</Text>
-                                    <Text as="p" tone="subdued">{detection.why}</Text>
-                                    <Text as="p" variant="bodySm">
-                                      Why this matters: {detection.implication}
-                                    </Text>
-                                    <Text as="p" variant="bodySm">
-                                      Recommended move: {detection.recommendedMove}
-                                    </Text>
-                                  </BlockStack>
-                                    <Badge tone="attention">{detection.signalStrength}</Badge>
-                                </InlineStack>
-                              </div>
-                            ))
-                          )}
-                        </BlockStack>
-                      </Card>
+                              <InlineStack gap="200">
+                                <Badge tone="info">{item.automationPosture}</Badge>
+                                <Badge tone="info">{item.recommendedPlay}</Badge>
+                              </InlineStack>
+                            </BlockStack>
+                          </Card>
+                        ))
+                      )}
                     </BlockStack>
                   )}
                 </Box>
               </Tabs>
             </Card>
           </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  Channel and connector status
+                </Text>
+                <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                  {connectors.map((connector) => (
+                    <Card key={connector.id}>
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h3" variant="headingMd">
+                            {connector.label}
+                          </Text>
+                          <Badge
+                            tone={
+                              connector.readiness === "Live"
+                                ? "success"
+                                : connector.readiness === "Configured"
+                                ? "info"
+                                : connector.readiness === "Preview"
+                                ? "attention"
+                                : "subdued"
+                            }
+                          >
+                            {connector.readiness ?? "Not enabled"}
+                          </Badge>
+                        </InlineStack>
+                        <Text as="p" tone="subdued">
+                          {connector.description}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {`Targets: ${connector.trackedTargets}`}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {connector.lastIngestedAt
+                            ? `Last pulled ${formatDateTime(connector.lastIngestedAt)}`
+                            : "No data pulled yet"}
+                        </Text>
+                        <Text as="p" variant="bodySm">
+                          {connector.action ?? "No action needed"}
+                        </Text>
+                      </BlockStack>
+                    </Card>
+                  ))}
+                </InlineGrid>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+
+          {canSeeWeeklyReports &&
+          (primaryState === "NO_CHANGES" || primaryState === "CHANGES_DETECTED") ? (
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingMd">
+                      Weekly market brief
+                    </Text>
+                    <Badge tone="success">Included</Badge>
+                  </InlineStack>
+                  <Text as="p" variant="headingSm">
+                    {overview.weeklyReport?.headline}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {overview.weeklyReport?.whyItMatters}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    {overview.weeklyReport?.merchantBrief}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Next step: {overview.weeklyReport?.nextBestAction}
+                  </Text>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          ) : null}
         </Layout>
 
         <Modal
@@ -1379,7 +829,9 @@ export function CompetitorPage() {
         >
           <Modal.Section>
             <BlockStack gap="300">
-              <Text as="p">Add domains to monitor for promotions, launches, price shifts, and stock pressure.</Text>
+              <Text as="p">
+                Add domains to monitor for competitor price, promotion, and stock changes.
+              </Text>
               <TextField
                 label="Domains"
                 value={domainsInput}
