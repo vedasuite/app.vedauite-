@@ -10,7 +10,7 @@ import {
   Page,
   Text,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
@@ -91,6 +91,14 @@ type PricingProfitOverview = {
 };
 
 const CACHE_KEY = "pricing-profit-overview";
+const MIN_LOADING_MS = 400;
+
+type CanonicalPricingViewState = {
+  status: "idle" | "loading" | "ready" | "empty" | "error";
+  lastUpdatedAt: string | null;
+  hasRecommendations: boolean;
+  hasProfitData: boolean;
+};
 
 function createEmptyOverview(): PricingProfitOverview {
   return {
@@ -164,55 +172,178 @@ function gainLabel(overview: PricingProfitOverview) {
   return "Projected gain";
 }
 
+function deriveCanonicalPricingState(
+  overview: PricingProfitOverview
+): CanonicalPricingViewState {
+  const hasRecommendations = (overview.prioritizedRecommendations?.length ?? 0) > 0;
+  const hasProfitData = (overview.summary.profitOpportunityCount ?? 0) > 0;
+  const lastUpdatedAt = overview.pricingState?.lastSuccessfulRunAt ?? null;
+
+  if (hasRecommendations || hasProfitData) {
+    return {
+      status: "ready",
+      lastUpdatedAt,
+      hasRecommendations,
+      hasProfitData,
+    };
+  }
+
+  return {
+    status: "empty",
+    lastUpdatedAt,
+    hasRecommendations: false,
+    hasProfitData: false,
+  };
+}
+
+function StatusBanner(props: {
+  status: CanonicalPricingViewState["status"];
+  overview: PricingProfitOverview;
+}) {
+  const pricingState = props.overview.pricingState ?? createEmptyOverview().pricingState!;
+
+  switch (props.status) {
+    case "loading":
+      return (
+        <Banner title="Loading pricing engine" tone="info">
+          <p>VedaSuite is loading the latest pricing recommendations and profit guidance.</p>
+        </Banner>
+      );
+    case "ready":
+      return (
+        <Banner title={pricingState.title} tone="success">
+          <p>{pricingState.description}</p>
+        </Banner>
+      );
+    case "empty":
+      return (
+        <Banner title="No pricing changes recommended right now" tone="info">
+          <p>
+            {pricingState.primaryState === "EMPTY_HEALTHY"
+              ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
+              : pricingState.description}
+          </p>
+        </Banner>
+      );
+    case "error":
+      return (
+        <Banner title="Pricing engine could not be loaded" tone="critical">
+          <p>VedaSuite could not load the latest pricing data. Try refreshing again.</p>
+        </Banner>
+      );
+    case "idle":
+    default:
+      return (
+        <Banner title="Pricing engine is idle" tone="info">
+          <p>{pricingState.description}</p>
+        </Banner>
+      );
+  }
+}
+
 export function PricingProfitPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { subscription } = useSubscriptionPlan();
   const cachedOverview = readModuleCache<PricingProfitOverview>(CACHE_KEY);
-  const [overview, setOverview] = useState<PricingProfitOverview>(
+  const initialOverviewRef = useRef<PricingProfitOverview>(
     cachedOverview ?? createEmptyOverview()
   );
-  const [loading, setLoading] = useState(!cachedOverview);
-  const [refreshing, setRefreshing] = useState(false);
+  const initialOverview = initialOverviewRef.current;
+  const [overview, setOverview] = useState<PricingProfitOverview>(
+    initialOverview
+  );
+  const [pageState, setPageState] = useState<CanonicalPricingViewState>(
+    cachedOverview
+      ? deriveCanonicalPricingState(initialOverview)
+      : {
+          status: "loading",
+          lastUpdatedAt: null,
+          hasRecommendations: false,
+          hasProfitData: false,
+        }
+  );
+  const requestIdRef = useRef(0);
   const allowed = !!subscription?.enabledModules?.pricingProfit;
 
   const loadOverview = async () => {
+    const requestId = ++requestIdRef.current;
+    const startedAt = Date.now();
+    setPageState((current) => ({
+      ...current,
+      status: "loading",
+    }));
+
     const response = await embeddedShopRequest<{ overview: PricingProfitOverview }>(
       "/api/pricing-profit/overview",
       { timeoutMs: 15000 }
     );
+    const elapsed = Date.now() - startedAt;
+    const remainingDelay = Math.max(0, MIN_LOADING_MS - elapsed);
+    if (remainingDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+    }
+    if (requestId !== requestIdRef.current) {
+      return;
+    }
     setOverview(response.overview);
     writeModuleCache(CACHE_KEY, response.overview);
+    setPageState(deriveCanonicalPricingState(response.overview));
   };
 
   useEffect(() => {
     if (!allowed) {
-      setLoading(false);
-      setOverview(cachedOverview ?? createEmptyOverview());
+      setOverview(initialOverview);
+      setPageState(
+        cachedOverview
+          ? deriveCanonicalPricingState(initialOverview)
+          : {
+              status: "idle",
+              lastUpdatedAt: null,
+              hasRecommendations: false,
+              hasProfitData: false,
+            }
+      );
       return;
     }
 
     let mounted = true;
-    setLoading(true);
+    const requestId = ++requestIdRef.current;
+    const startedAt = Date.now();
+    setPageState((current) => ({
+      ...current,
+      status: "loading",
+    }));
+
     embeddedShopRequest<{ overview: PricingProfitOverview }>("/api/pricing-profit/overview", {
       timeoutMs: 15000,
     })
-      .then((response) => {
-        if (!mounted) return;
+      .then(async (response) => {
+        const elapsed = Date.now() - startedAt;
+        const remainingDelay = Math.max(0, MIN_LOADING_MS - elapsed);
+        if (remainingDelay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+        }
+        if (!mounted || requestId !== requestIdRef.current) return;
         setOverview(response.overview);
         writeModuleCache(CACHE_KEY, response.overview);
+        setPageState(deriveCanonicalPricingState(response.overview));
       })
       .catch(() => {
-        if (!mounted) return;
-        setOverview(cachedOverview ?? createEmptyOverview());
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
+        if (!mounted || requestId !== requestIdRef.current) return;
+        setOverview(initialOverview);
+        setPageState({
+          status: "error",
+          lastUpdatedAt: initialOverview.pricingState?.lastSuccessfulRunAt ?? null,
+          hasRecommendations:
+            (initialOverview.prioritizedRecommendations?.length ?? 0) > 0,
+          hasProfitData: (initialOverview.summary.profitOpportunityCount ?? 0) > 0,
+        });
       });
 
     return () => {
       mounted = false;
     };
-  }, [allowed, cachedOverview]);
+  }, [allowed, cachedOverview, initialOverview]);
 
   if (!allowed) {
     return (
@@ -250,278 +381,279 @@ export function PricingProfitPage() {
     );
   }
 
-  const pricingState = overview.pricingState ?? createEmptyOverview().pricingState!;
-  const topBannerTone = toneForPrimaryState(pricingState.primaryState);
+  const pricingOverviewState = overview.pricingState ?? createEmptyOverview().pricingState!;
+  const topBannerTone = toneForPrimaryState(pricingOverviewState.primaryState);
   const gainValue =
-    pricingState.projectedGainStatus === "not_available"
+    pricingOverviewState.projectedGainStatus === "not_available"
       ? "Not available"
-      : `$${Math.round(pricingState.projectedGainValue)}`;
+      : `$${Math.round(pricingOverviewState.projectedGainValue)}`;
 
   return (
     <Page
       title="AI Pricing Engine"
       subtitle="Review the products that need pricing attention, why they were flagged, and what data supports each action."
       primaryAction={{
-        content: refreshing ? "Refreshing..." : "Refresh pricing view",
-        onAction: async () => {
-          try {
-            setRefreshing(true);
-            await loadOverview();
-          } finally {
-            setRefreshing(false);
-          }
-        },
-        disabled: refreshing,
+        content: pageState.status === "loading" ? "Refreshing..." : "Refresh pricing view",
+        onAction: loadOverview,
+        disabled: pageState.status === "loading",
       }}
     >
       <Layout>
-        {loading ? (
+        <Layout.Section>
+          <StatusBanner status={pageState.status} overview={overview} />
+        </Layout.Section>
+
+        {pageState.status === "loading" || pageState.status === "error" ? null : pageState.status === "empty" ? (
           <Layout.Section>
-            <Banner title="Loading pricing engine" tone="info">
-              <p>VedaSuite is loading the latest pricing recommendations and profit guidance.</p>
-            </Banner>
-          </Layout.Section>
-        ) : null}
-
-        <Layout.Section>
-          <Banner title={pricingState.title} tone={topBannerTone}>
-            <p>{pricingState.description}</p>
-          </Banner>
-        </Layout.Section>
-
-        <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
-                  Recommendations ready
+                  No pricing changes recommended
                 </Text>
-                <Text as="p" variant="heading2xl">
-                  {pricingState.prioritizedRecommendationCount}
-                </Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Profit opportunities
-                </Text>
-                <Text as="p" variant="heading2xl">
-                  {overview.summary.profitOpportunityCount}
-                </Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  Response mode
-                </Text>
-                <Text as="p" variant="headingMd">
-                  {overview.summary.responseMode}
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {pricingState.responseMode === "baseline_only"
-                    ? "Recommendations are currently based on store, order, and margin signals."
-                    : pricingState.responseMode === "mixed"
-                    ? "Store, competitor, and profit signals are all contributing."
-                    : pricingState.responseMode === "competitor_informed"
-                    ? "Competitor monitoring is contributing to current pricing guidance."
-                    : "Margin protection is active while deeper competitor context catches up."}
-                </Text>
-              </BlockStack>
-            </Card>
-            <Card>
-              <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">
-                  {gainLabel(overview)}
-                </Text>
-                <Text as="p" variant="heading2xl">
-                  {gainValue}
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {pricingState.projectedGainStatus === "available"
-                    ? "Based on live pricing and profit model outputs."
-                    : pricingState.projectedGainStatus === "estimated_baseline"
-                    ? "Estimated from current store data and baseline pricing logic."
-                    : "A stronger pricing or profit signal is needed before a gain estimate is shown."}
-                </Text>
-              </BlockStack>
-            </Card>
-          </InlineGrid>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingMd">
-                  Priority recommendations
-                </Text>
-                <Badge tone={topBannerTone}>
-                  {pricingState.primaryState === "READY"
-                    ? "Ready"
-                    : pricingState.primaryState === "PARTIAL_READINESS"
-                    ? "Partial readiness"
-                    : pricingState.primaryState === "EMPTY_HEALTHY"
-                    ? "No action needed"
-                    : pricingState.primaryState === "PROCESSING"
-                    ? "Processing"
-                    : pricingState.primaryState === "FAILED"
-                    ? "Needs attention"
-                    : "Setup required"}
-                </Badge>
-              </InlineStack>
-
-              {(overview.prioritizedRecommendations ?? []).length === 0 ? (
                 <Text as="p" tone="subdued">
-                  {pricingState.primaryState === "EMPTY_HEALTHY"
-                    ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
-                    : pricingState.description}
+                  The pricing engine ran successfully, but no important pricing changes are recommended right now.
                 </Text>
-              ) : (
-                (overview.prioritizedRecommendations ?? []).map((item) => (
-                  <Card key={item.id}>
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between" blockAlign="start">
-                        <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Last successful pricing run: {formatDateTime(pageState.lastUpdatedAt)}
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        ) : (
+          <>
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Recommendations ready
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      {pricingOverviewState.prioritizedRecommendationCount}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Profit opportunities
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      {overview.summary.profitOpportunityCount}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      Response mode
+                    </Text>
+                    <Text as="p" variant="headingMd">
+                      {overview.summary.responseMode}
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {pricingOverviewState.responseMode === "baseline_only"
+                        ? "Recommendations are currently based on store, order, and margin signals."
+                        : pricingOverviewState.responseMode === "mixed"
+                        ? "Store, competitor, and profit signals are all contributing."
+                        : pricingOverviewState.responseMode === "competitor_informed"
+                        ? "Competitor monitoring is contributing to current pricing guidance."
+                        : "Margin protection is active while deeper competitor context catches up."}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingMd">
+                      {gainLabel(overview)}
+                    </Text>
+                    <Text as="p" variant="heading2xl">
+                      {gainValue}
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {pricingOverviewState.projectedGainStatus === "available"
+                        ? "Based on live pricing and profit model outputs."
+                        : pricingOverviewState.projectedGainStatus === "estimated_baseline"
+                        ? "Estimated from current store data and baseline pricing logic."
+                        : "A stronger pricing or profit signal is needed before a gain estimate is shown."}
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </InlineGrid>
+            </Layout.Section>
+
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h3" variant="headingMd">
+                          Priority recommendations
+                        </Text>
+                        <Badge tone={topBannerTone}>
+                          {pricingOverviewState.primaryState === "READY"
+                            ? "Ready"
+                            : pricingOverviewState.primaryState === "PARTIAL_READINESS"
+                            ? "Partial readiness"
+                            : pricingOverviewState.primaryState === "EMPTY_HEALTHY"
+                            ? "No action needed"
+                            : pricingOverviewState.primaryState === "PROCESSING"
+                            ? "Processing"
+                            : pricingOverviewState.primaryState === "FAILED"
+                            ? "Needs attention"
+                            : "Setup required"}
+                        </Badge>
+                      </InlineStack>
+
+                      {(overview.prioritizedRecommendations ?? []).length === 0 ? (
+                        <Text as="p" tone="subdued">
+                          {pricingOverviewState.description}
+                        </Text>
+                      ) : (
+                        (overview.prioritizedRecommendations ?? []).map((item) => (
+                          <Card key={item.id}>
+                            <BlockStack gap="200">
+                              <InlineStack align="space-between" blockAlign="start">
+                                <BlockStack gap="100">
+                                  <Text as="p" variant="headingSm">
+                                    {`${item.rank}. ${item.productHandle}`}
+                                  </Text>
+                                  <Text as="p" tone="subdued">
+                                    {`$${item.currentPrice.toFixed(2)} -> $${item.recommendedPrice.toFixed(2)}`}
+                                  </Text>
+                                </BlockStack>
+                                <InlineStack gap="200">
+                                  <Badge tone="info">{item.recommendationType}</Badge>
+                                  <Badge tone={item.confidence === "High" ? "success" : item.confidence === "Medium" ? "attention" : "info"}>
+                                    {item.confidence}
+                                  </Badge>
+                                </InlineStack>
+                              </InlineStack>
+                              <Text as="p">{item.expectedImpact}</Text>
+                              <Text as="p" tone="subdued">
+                                {item.why}
+                              </Text>
+                              <Text as="p" variant="bodySm" tone="subdued">
+                                {item.support}
+                              </Text>
+                              <InlineStack gap="200">
+                                <Badge tone="info">{item.dataBasis}</Badge>
+                                {item.inputsUsed.map((input) => (
+                                  <Badge key={`${item.id}-${input}`} tone="subdued">
+                                    {input}
+                                  </Badge>
+                                ))}
+                              </InlineStack>
+                              <Text as="p" variant="bodySm">
+                                {item.merchantActionNote}
+                              </Text>
+                            </BlockStack>
+                          </Card>
+                        ))
+                      )}
+                    </BlockStack>
+                  </Card>
+                </Layout.Section>
+
+                <Layout.Section>
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Why these recommendations exist
+                        </Text>
+                        {(overview.diagnosticSummary ?? []).map((item) => (
+                          <div key={item.title}>
+                            <InlineStack align="space-between" blockAlign="start">
+                              <BlockStack gap="100">
+                                <Text as="p" variant="headingSm">
+                                  {item.title}
+                                </Text>
+                                <Text as="p" tone="subdued">
+                                  {item.detail}
+                                </Text>
+                              </BlockStack>
+                              <Badge tone={toneForDiagnostic(item.status)}>
+                                {item.status}
+                              </Badge>
+                            </InlineStack>
+                          </div>
+                        ))}
+                      </BlockStack>
+                    </Card>
+
+                    <Card>
+                      <BlockStack gap="300">
+                        <Text as="h3" variant="headingMd">
+                          Pricing modes and strategy
+                        </Text>
+                        {(overview.pricingModes ?? []).length === 0 ? (
+                          <Text as="p" tone="subdued">
+                            Pricing modes will appear after pricing recommendations are available.
+                          </Text>
+                        ) : (
+                          (overview.pricingModes ?? []).map((mode) => (
+                            <div key={mode.key}>
+                              <InlineStack align="space-between" blockAlign="start">
+                                <BlockStack gap="100">
+                                  <Text as="p" variant="headingSm">
+                                    {mode.label}
+                                  </Text>
+                                  <Text as="p" tone="subdued">
+                                    {mode.description}
+                                  </Text>
+                                </BlockStack>
+                                <Badge tone={mode.available ? (mode.recommended ? "success" : "info") : "attention"}>
+                                  {mode.available
+                                    ? mode.recommended
+                                      ? "Recommended"
+                                      : "Available"
+                                    : mode.gate ?? "Pro"}
+                                </Badge>
+                              </InlineStack>
+                            </div>
+                          ))
+                        )}
+                      </BlockStack>
+                    </Card>
+                  </InlineGrid>
+                </Layout.Section>
+
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h3" variant="headingMd">
+                          Plan-gated advanced capabilities
+                        </Text>
+                        <Button variant="secondary" onClick={() => navigateEmbedded("/app/billing")}>
+                          Manage plan
+                        </Button>
+                      </InlineStack>
+                      {(overview.planGateSummary ?? []).map((item) => (
+                        <div key={item.title}>
                           <Text as="p" variant="headingSm">
-                            {`${item.rank}. ${item.productHandle}`}
+                            {item.title}
                           </Text>
                           <Text as="p" tone="subdued">
-                            {`$${item.currentPrice.toFixed(2)} -> $${item.recommendedPrice.toFixed(2)}`}
+                            {item.detail}
                           </Text>
-                        </BlockStack>
-                        <InlineStack gap="200">
-                          <Badge tone="info">{item.recommendationType}</Badge>
-                          <Badge tone={item.confidence === "High" ? "success" : item.confidence === "Medium" ? "attention" : "info"}>
-                            {item.confidence}
-                          </Badge>
-                        </InlineStack>
-                      </InlineStack>
-                      <Text as="p">{item.expectedImpact}</Text>
-                      <Text as="p" tone="subdued">
-                        {item.why}
-                      </Text>
+                        </div>
+                      ))}
+                    </BlockStack>
+                  </Card>
+                </Layout.Section>
+
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="200">
                       <Text as="p" variant="bodySm" tone="subdued">
-                        {item.support}
-                      </Text>
-                      <InlineStack gap="200">
-                        <Badge tone="info">{item.dataBasis}</Badge>
-                        {item.inputsUsed.map((input) => (
-                          <Badge key={`${item.id}-${input}`} tone="subdued">
-                            {input}
-                          </Badge>
-                        ))}
-                      </InlineStack>
-                      <Text as="p" variant="bodySm">
-                        {item.merchantActionNote}
+                        Last successful pricing run: {formatDateTime(pageState.lastUpdatedAt)}
                       </Text>
                     </BlockStack>
                   </Card>
-                ))
-              )}
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">
-                  Why these recommendations exist
-                </Text>
-                {(overview.diagnosticSummary ?? []).map((item) => (
-                  <div key={item.title}>
-                    <InlineStack align="space-between" blockAlign="start">
-                      <BlockStack gap="100">
-                        <Text as="p" variant="headingSm">
-                          {item.title}
-                        </Text>
-                        <Text as="p" tone="subdued">
-                          {item.detail}
-                        </Text>
-                      </BlockStack>
-                      <Badge tone={toneForDiagnostic(item.status)}>
-                        {item.status}
-                      </Badge>
-                    </InlineStack>
-                  </div>
-                ))}
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">
-                  Pricing modes and strategy
-                </Text>
-                {(overview.pricingModes ?? []).length === 0 ? (
-                  <Text as="p" tone="subdued">
-                    Pricing modes will appear after pricing recommendations are available.
-                  </Text>
-                ) : (
-                  (overview.pricingModes ?? []).map((mode) => (
-                    <div key={mode.key}>
-                      <InlineStack align="space-between" blockAlign="start">
-                        <BlockStack gap="100">
-                          <Text as="p" variant="headingSm">
-                            {mode.label}
-                          </Text>
-                          <Text as="p" tone="subdued">
-                            {mode.description}
-                          </Text>
-                        </BlockStack>
-                        <Badge tone={mode.available ? (mode.recommended ? "success" : "info") : "attention"}>
-                          {mode.available
-                            ? mode.recommended
-                              ? "Recommended"
-                              : "Available"
-                            : mode.gate ?? "Pro"}
-                        </Badge>
-                      </InlineStack>
-                    </div>
-                  ))
-                )}
-              </BlockStack>
-            </Card>
-          </InlineGrid>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingMd">
-                  Plan-gated advanced capabilities
-                </Text>
-                <Button variant="secondary" onClick={() => navigateEmbedded("/app/billing")}>
-                  Manage plan
-                </Button>
-              </InlineStack>
-              {(overview.planGateSummary ?? []).map((item) => (
-                <div key={item.title}>
-                  <Text as="p" variant="headingSm">
-                    {item.title}
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    {item.detail}
-                  </Text>
-                </div>
-              ))}
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="200">
-              <Text as="p" variant="bodySm" tone="subdued">
-                Last successful pricing run: {formatDateTime(pricingState.lastSuccessfulRunAt)}
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+                </Layout.Section>
+          </>
+        )}
       </Layout>
     </Page>
   );
