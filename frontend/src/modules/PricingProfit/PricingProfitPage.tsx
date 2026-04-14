@@ -7,99 +7,75 @@ import {
   InlineGrid,
   InlineStack,
   Layout,
-  List,
   Page,
   Text,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
+type PricingPrimaryState =
+  | "SETUP_INCOMPLETE"
+  | "PARTIAL_READINESS"
+  | "READY"
+  | "EMPTY_HEALTHY"
+  | "PROCESSING"
+  | "FAILED";
+
 type PricingProfitOverview = {
+  subscription: {
+    capabilities: Record<string, boolean>;
+    enabledModules?: Record<string, boolean>;
+  };
   moduleState?: {
-    setupStatus: string;
-    syncStatus: string;
     dataStatus: string;
-    lastSuccessfulSyncAt?: string | null;
-    lastAttemptAt?: string | null;
-    dataChanged?: boolean;
-    coverage: string;
-    dependencies: {
-      competitor: string;
-      pricing: string;
-      fraud: string;
-    };
     title: string;
     description: string;
     nextAction?: string | null;
   };
-  subscription: {
-    capabilities: Record<string, boolean>;
-    featureAccess: {
-      fullProfitEngine: boolean;
-      dailyActionBoard: boolean;
-      scenarioSimulator: boolean;
-      marginAtRisk: boolean;
-    };
-  };
-  readiness?: {
-    readinessState: string;
-    reason: string;
-    processingState?: string;
-    lastUpdatedAt?: string | null;
+  pricingState?: {
+    primaryState: PricingPrimaryState;
+    pricingStatus: string;
+    competitorDependency: string;
+    profitModelStatus: string;
+    recommendationCount: number;
+    prioritizedRecommendationCount: number;
+    projectedGainStatus: "available" | "estimated_baseline" | "not_available";
+    projectedGainValue: number;
+    responseMode: "baseline_only" | "competitor_informed" | "margin_protection" | "mixed";
+    lastSuccessfulRunAt?: string | null;
+    title: string;
+    description: string;
+    nextAction?: string | null;
   };
   summary: {
     recommendationCount: number;
     profitOpportunityCount: number;
     responseMode: string;
-    automationReadiness: string;
-    fullProfitEngine: boolean;
-    advancedModesEnabled?: boolean;
-    scenarioSimulatorEnabled?: boolean;
-    marginAtRiskEnabled?: boolean;
-    profitLeakDetectorEnabled?: boolean;
-    explainableRecommendationsEnabled?: boolean;
   };
-  pricingRecommendations: Array<{
+  prioritizedRecommendations?: Array<{
     id: string;
+    rank: number;
     productHandle: string;
     currentPrice: number;
     recommendedPrice: number;
-    expectedProfitGain: number | null;
-    automationPosture: string;
-    demandSignals: string[];
+    recommendationType: string;
+    expectedImpact: string;
+    confidence: string;
+    confidenceScore: number;
+    dataBasis: string;
+    why: string;
+    support: string;
+    inputsUsed: string[];
+    merchantActionNote: string;
   }>;
-  profitOpportunities: Array<{
-    productHandle: string;
-    currentPrice: number;
-    recommendedPrice: number | null;
-    projectedMonthlyProfitGain: number | null;
-  }>;
-  dailyActionBoard: Array<{
-    id: string;
+  diagnosticSummary?: Array<{
     title: string;
     detail: string;
-    actionType: string;
-    priority?: string;
-    expectedImpact?: string;
+    status: string;
   }>;
-  scenarioPreset: {
-    projectedMonthlyProfitGain: number;
-    expectedMarginImprovement: number;
-    automationPosture: string;
-  } | null;
-  marginAtRisk: {
-    pressureProducts: Array<{
-      productHandle: string;
-      pressureScore: number;
-      rationale: string;
-    }>;
-    projectedMonthlyGain: number;
-    summary?: string;
-  };
   pricingModes?: Array<{
     key: string;
     label: string;
@@ -108,221 +84,129 @@ type PricingProfitOverview = {
     gate?: string;
     recommended?: boolean;
   }>;
-  doNothingRecommendation?: {
-    headline: string;
-    rationale: string;
-  } | null;
-  profitLeakSummary?: Array<{
+  planGateSummary?: Array<{
     title: string;
     detail: string;
-    severity?: string;
-    action?: string;
-  }>;
-  scenarioPlaybook?: Array<{
-    scenario: string;
-    outcome: string;
-  }>;
-  explainabilityHighlights?: Array<{
-    id: string;
-    productHandle: string;
-    recommendation: string;
-    why: string;
-    factors: string[];
-    guardrail: string;
-  }>;
-  simulatorSnapshots?: Array<{
-    id: string;
-    title: string;
-    summary: string;
-    projectedMonthlyProfitGain: number;
-    expectedMarginImprovement: number;
-    actionQueue: string;
-  }>;
-  marginRiskDrivers?: Array<{
-    title: string;
-    detail: string;
-    severity: string;
   }>;
 };
 
-function createEmptyOverview(
-  readinessState = "SYNC_REQUIRED",
-  reason = "Run the first live sync to populate pricing and profit outputs."
-): PricingProfitOverview {
+const CACHE_KEY = "pricing-profit-overview";
+
+function createEmptyOverview(): PricingProfitOverview {
   return {
-    moduleState: {
-      setupStatus: "incomplete",
-      syncStatus: "idle",
-      dataStatus: "empty",
-      lastSuccessfulSyncAt: null,
-      lastAttemptAt: null,
-      dataChanged: false,
-      coverage: "none",
-      dependencies: {
-        competitor: "missing",
-        pricing: "missing",
-        fraud: "missing",
-      },
-      title: "Pricing setup is incomplete",
-      description: reason,
-      nextAction: "Run live sync",
-    },
     subscription: {
       capabilities: {},
-      featureAccess: {
-        fullProfitEngine: false,
-        dailyActionBoard: false,
-        scenarioSimulator: false,
-        marginAtRisk: false,
-      },
+      enabledModules: {},
     },
-    readiness: {
-      readinessState,
-      reason,
-      processingState: "NOT_STARTED",
-      lastUpdatedAt: null,
+    moduleState: {
+      dataStatus: "empty",
+      title: "Pricing setup is incomplete",
+      description: "Run the first live sync to populate pricing and profit outputs.",
+      nextAction: "Run live sync",
+    },
+    pricingState: {
+      primaryState: "SETUP_INCOMPLETE",
+      pricingStatus: "empty",
+      competitorDependency: "missing",
+      profitModelStatus: "missing",
+      recommendationCount: 0,
+      prioritizedRecommendationCount: 0,
+      projectedGainStatus: "not_available",
+      projectedGainValue: 0,
+      responseMode: "baseline_only",
+      lastSuccessfulRunAt: null,
+      title: "Pricing setup is incomplete",
+      description: "Run the first live sync to populate pricing and profit outputs.",
+      nextAction: "Run live sync",
     },
     summary: {
       recommendationCount: 0,
       profitOpportunityCount: 0,
-      responseMode: "Monitor",
-      automationReadiness: reason,
-      fullProfitEngine: false,
-      advancedModesEnabled: false,
-      scenarioSimulatorEnabled: false,
-      marginAtRiskEnabled: false,
-      profitLeakDetectorEnabled: false,
-      explainableRecommendationsEnabled: false,
+      responseMode: "Baseline recommendations active",
     },
-    pricingRecommendations: [],
-    profitOpportunities: [],
-    dailyActionBoard: [],
-    scenarioPreset: null,
-    marginAtRisk: {
-      pressureProducts: [],
-      projectedMonthlyGain: 0,
-      summary: reason,
-    },
+    prioritizedRecommendations: [],
+    diagnosticSummary: [],
     pricingModes: [],
-    doNothingRecommendation: null,
-    profitLeakSummary: [],
-    scenarioPlaybook: [],
-    explainabilityHighlights: [],
-    simulatorSnapshots: [],
-    marginRiskDrivers: [],
+    planGateSummary: [],
   };
 }
 
-const PRICING_PROFIT_CACHE_KEY = "pricing-profit-overview";
-
-function toneForSeverity(value?: string) {
-  const normalized = (value ?? "").toLowerCase();
-  if (normalized.includes("high")) return "critical";
-  if (normalized.includes("medium")) return "attention";
-  return "success";
+function formatDateTime(value?: string | null) {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function toneForPriority(value?: string) {
-  const normalized = (value ?? "").toLowerCase();
-  if (normalized.includes("high")) return "critical";
-  if (normalized.includes("medium")) return "attention";
-  return "info";
-}
-
-function toneForModuleState(value?: string) {
-  switch (value) {
-    case "ready":
-      return "success";
-    case "partial":
-      return "warning";
-    case "failed":
-      return "critical";
-    case "processing":
-    case "empty":
-    case "stale":
+function toneForPrimaryState(state: PricingPrimaryState) {
+  switch (state) {
+    case "READY":
+      return "success" as const;
+    case "FAILED":
+      return "critical" as const;
+    case "PARTIAL_READINESS":
+      return "warning" as const;
     default:
-      return "info";
+      return "info" as const;
   }
 }
 
-function EmptyState({ text }: { text: string }) {
-  return (
-    <Text as="p" tone="subdued">
-      {text}
-    </Text>
-  );
+function toneForDiagnostic(status: string) {
+  if (status === "ready") return "success";
+  if (status === "partial") return "attention";
+  if (status === "empty") return "info";
+  return "subdued";
+}
+
+function gainLabel(overview: PricingProfitOverview) {
+  const state = overview.pricingState!;
+  if (state.projectedGainStatus === "available") return "Projected gain";
+  if (state.projectedGainStatus === "estimated_baseline") return "Estimated gain";
+  return "Projected gain";
 }
 
 export function PricingProfitPage() {
-  const [searchParams] = useSearchParams();
-  const { subscription } = useSubscriptionPlan();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const cachedOverview = readModuleCache<PricingProfitOverview>(PRICING_PROFIT_CACHE_KEY);
+  const { subscription } = useSubscriptionPlan();
+  const cachedOverview = readModuleCache<PricingProfitOverview>(CACHE_KEY);
   const [overview, setOverview] = useState<PricingProfitOverview>(
     cachedOverview ?? createEmptyOverview()
   );
   const [loading, setLoading] = useState(!cachedOverview);
-  const [syncIssue, setSyncIssue] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const allowed = !!subscription?.enabledModules?.pricingProfit;
-  const focus = searchParams.get("focus");
-  const showingProfitFocus = focus === "profit";
 
-  const hasAdvancedModes =
-    overview.summary.advancedModesEnabled ||
-    !!overview.subscription.capabilities["pricing.advancedModes"];
-  const hasScenarioSimulator =
-    overview.summary.scenarioSimulatorEnabled ||
-    !!overview.subscription.capabilities["pricing.scenarioSimulator"];
-  const hasMarginAtRisk =
-    overview.summary.marginAtRiskEnabled ||
-    !!overview.subscription.capabilities["pricing.marginAtRisk"];
-  const hasProfitLeakDetector =
-    overview.summary.profitLeakDetectorEnabled ||
-    !!overview.subscription.capabilities["pricing.profitLeakDetector"];
-  const hasExplainableRecommendations =
-    overview.summary.explainableRecommendationsEnabled ||
-    !!overview.subscription.capabilities["pricing.explainableRecommendations"];
-  const hasDailyActionBoard =
-    overview.subscription.featureAccess.dailyActionBoard ||
-    !!overview.subscription.capabilities["pricing.dailyActionBoard"];
+  const loadOverview = async () => {
+    const response = await embeddedShopRequest<{ overview: PricingProfitOverview }>(
+      "/api/pricing-profit/overview",
+      { timeoutMs: 15000 }
+    );
+    setOverview(response.overview);
+    writeModuleCache(CACHE_KEY, response.overview);
+  };
 
   useEffect(() => {
     if (!allowed) {
       setLoading(false);
-      setSyncIssue(false);
       setOverview(cachedOverview ?? createEmptyOverview());
       return;
     }
 
     let mounted = true;
     setLoading(true);
-    setSyncIssue(false);
-
-    embeddedShopRequest<{ overview: PricingProfitOverview }>(
-      "/api/pricing-profit/overview",
-      { timeoutMs: 15000 }
-    )
-      .then((res) => {
+    embeddedShopRequest<{ overview: PricingProfitOverview }>("/api/pricing-profit/overview", {
+      timeoutMs: 15000,
+    })
+      .then((response) => {
         if (!mounted) return;
-        const nextOverview = res.overview;
-        setOverview(nextOverview);
-        writeModuleCache(PRICING_PROFIT_CACHE_KEY, nextOverview);
+        setOverview(response.overview);
+        writeModuleCache(CACHE_KEY, response.overview);
       })
       .catch(() => {
         if (!mounted) return;
-        setOverview((current) =>
-          current.readiness?.readinessState === "READY_WITH_DATA"
-            ? current
-            : createEmptyOverview(
-                "FAILED",
-                "VedaSuite could not load persisted pricing and profit outputs."
-              )
-        );
-        setSyncIssue(true);
+        setOverview(cachedOverview ?? createEmptyOverview());
       })
       .finally(() => {
-        if (!mounted) return;
-        setLoading(false);
+        if (mounted) setLoading(false);
       });
 
     return () => {
@@ -334,14 +218,13 @@ export function PricingProfitPage() {
     return (
       <Page
         title="AI Pricing Engine"
-        subtitle="Optimize pricing for margin and demand with recommendation logic, guardrails, and explainable decision support."
+        subtitle="Optimize pricing for margin and demand with clearer pricing workflows."
       >
         <Layout>
           <Layout.Section>
             <Banner title="Upgrade required: Growth or Pro" tone="info">
               <p>
-                Pricing &amp; Profit Engine unlocks on Growth and expands fully on
-                Pro.
+                AI Pricing Engine unlocks on Growth and expands fully on Pro.
               </p>
             </Banner>
           </Layout.Section>
@@ -349,18 +232,14 @@ export function PricingProfitPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">
-                  What you get when this module is active
+                  What unlocks when pricing is active
                 </Text>
-                <List type="bullet">
-                  <List.Item>Pricing mode selector and explainable recommendations</List.Item>
-                  <List.Item>Daily action board and scenario simulator</List.Item>
-                  <List.Item>Margin-at-risk and profit leak detection</List.Item>
-                  <List.Item>Competitor-informed pricing response playbooks</List.Item>
-                </List>
-                <Button
-                  variant="primary"
-                  onClick={() => navigateEmbedded("/app/billing")}
-                >
+                <BlockStack gap="150">
+                  <Text as="p">- Baseline pricing recommendations</Text>
+                  <Text as="p">- Explainable recommendation review</Text>
+                  <Text as="p">- Profit protection and advanced pricing modes on Pro</Text>
+                </BlockStack>
+                <Button onClick={() => navigateEmbedded("/app/billing")}>
                   Manage subscription plans
                 </Button>
               </BlockStack>
@@ -371,57 +250,54 @@ export function PricingProfitPage() {
     );
   }
 
+  const pricingState = overview.pricingState ?? createEmptyOverview().pricingState!;
+  const topBannerTone = toneForPrimaryState(pricingState.primaryState);
+  const gainValue =
+    pricingState.projectedGainStatus === "not_available"
+      ? "Not available"
+      : `$${Math.round(pricingState.projectedGainValue)}`;
+
   return (
     <Page
       title="AI Pricing Engine"
-      subtitle={
-        showingProfitFocus
-          ? "Optimize pricing, discounting, and bundle strategy with explainable profit decision support."
-          : "Optimize pricing for margin and demand with recommendation logic, guardrails, and profit impact previews."
-      }
+      subtitle="Review the products that need pricing attention, why they were flagged, and what data supports each action."
+      primaryAction={{
+        content: refreshing ? "Refreshing..." : "Refresh pricing view",
+        onAction: async () => {
+          try {
+            setRefreshing(true);
+            await loadOverview();
+          } finally {
+            setRefreshing(false);
+          }
+        },
+        disabled: refreshing,
+      }}
     >
       <Layout>
         {loading ? (
           <Layout.Section>
-            <Banner
-              title={
-                showingProfitFocus
-                  ? "Refreshing profit intelligence"
-                  : "Refreshing pricing and profit signals"
-              }
-              tone="info"
-            >
-              <p>
-                VedaSuite is refreshing pricing, competitor, and profit signals in
-                the background.
-              </p>
+            <Banner title="Loading pricing engine" tone="info">
+              <p>VedaSuite is loading the latest pricing recommendations and profit guidance.</p>
             </Banner>
           </Layout.Section>
         ) : null}
-        {syncIssue || overview.moduleState?.dataStatus !== "ready" ? (
-          <Layout.Section>
-            <Banner
-              title={overview.moduleState?.title ?? "Pricing data is updating"}
-              tone={toneForModuleState(overview.moduleState?.dataStatus)}
-            >
-              <p>
-                {overview.moduleState?.description ??
-                  overview.readiness?.reason ??
-                  "VedaSuite will populate pricing and profit outputs after live sync and processing complete."}
-              </p>
-            </Banner>
-          </Layout.Section>
-        ) : null}
+
+        <Layout.Section>
+          <Banner title={pricingState.title} tone={topBannerTone}>
+            <p>{pricingState.description}</p>
+          </Banner>
+        </Layout.Section>
 
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 4 }} gap="400">
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
-                  Pricing actions
+                  Recommendations ready
                 </Text>
                 <Text as="p" variant="heading2xl">
-                  {overview.summary.recommendationCount}
+                  {pricingState.prioritizedRecommendationCount}
                 </Text>
               </BlockStack>
             </Card>
@@ -443,15 +319,31 @@ export function PricingProfitPage() {
                 <Text as="p" variant="headingMd">
                   {overview.summary.responseMode}
                 </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {pricingState.responseMode === "baseline_only"
+                    ? "Recommendations are currently based on store, order, and margin signals."
+                    : pricingState.responseMode === "mixed"
+                    ? "Store, competitor, and profit signals are all contributing."
+                    : pricingState.responseMode === "competitor_informed"
+                    ? "Competitor monitoring is contributing to current pricing guidance."
+                    : "Margin protection is active while deeper competitor context catches up."}
+                </Text>
               </BlockStack>
             </Card>
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
-                  Projected gain
+                  {gainLabel(overview)}
                 </Text>
                 <Text as="p" variant="heading2xl">
-                  ${Math.round(overview.marginAtRisk.projectedMonthlyGain)}
+                  {gainValue}
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {pricingState.projectedGainStatus === "available"
+                    ? "Based on live pricing and profit model outputs."
+                    : pricingState.projectedGainStatus === "estimated_baseline"
+                    ? "Estimated from current store data and baseline pricing logic."
+                    : "A stronger pricing or profit signal is needed before a gain estimate is shown."}
                 </Text>
               </BlockStack>
             </Card>
@@ -459,355 +351,177 @@ export function PricingProfitPage() {
         </Layout.Section>
 
         <Layout.Section>
-          {overview.summary.fullProfitEngine ? (
-            <Banner title="Pro automation posture" tone="success">
-              <p>{overview.summary.automationReadiness}</p>
-            </Banner>
-          ) : (
-            <Banner
-              title={
-                overview.moduleState?.dataStatus === "partial"
-                  ? "Pricing insights are available with partial coverage"
-                  : "Growth plan: pricing intelligence is active"
-              }
-              tone={overview.moduleState?.dataStatus === "partial" ? "info" : "warning"}
-            >
-              <p>
-                {overview.moduleState?.dataStatus === "partial"
-                  ? "Pricing insights are available. Competitor data is still being processed."
-                  : "Growth includes pricing recommendations and basic scenario guidance. Upgrade to Pro to unlock the full profit engine, advanced pricing modes, and proactive margin protection."}
-              </p>
-            </Banner>
-          )}
-        </Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingMd">
+                  Priority recommendations
+                </Text>
+                <Badge tone={topBannerTone}>
+                  {pricingState.primaryState === "READY"
+                    ? "Ready"
+                    : pricingState.primaryState === "PARTIAL_READINESS"
+                    ? "Partial readiness"
+                    : pricingState.primaryState === "EMPTY_HEALTHY"
+                    ? "No action needed"
+                    : pricingState.primaryState === "PROCESSING"
+                    ? "Processing"
+                    : pricingState.primaryState === "FAILED"
+                    ? "Needs attention"
+                    : "Setup required"}
+                </Badge>
+              </InlineStack>
 
-        {!showingProfitFocus ? (
-          <Layout.Section>
-            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Pricing mode selector
-                  </Text>
-                  {(overview.pricingModes ?? []).length === 0 ? (
-                    <EmptyState text="No pricing modes can be recommended yet because VedaSuite is still waiting for live pricing and profit signals." />
-                  ) : (
-                    (overview.pricingModes ?? []).map((mode) => (
-                      <div key={mode.key} className="vs-action-card">
-                        <InlineStack align="space-between" blockAlign="start">
-                          <BlockStack gap="100">
-                            <Text as="p" variant="headingSm">
-                              {mode.label}
-                            </Text>
-                            <Text as="p" tone="subdued">
-                              {mode.description}
-                            </Text>
-                          </BlockStack>
-                          <Badge
-                            tone={
-                              mode.available
-                                ? mode.recommended
-                                  ? "success"
-                                  : "info"
-                                : "warning"
-                            }
-                          >
-                            {mode.available
-                              ? mode.recommended
-                                ? "Recommended"
-                                : "Available"
-                              : mode.gate ?? "Pro"}
+              {(overview.prioritizedRecommendations ?? []).length === 0 ? (
+                <Text as="p" tone="subdued">
+                  {pricingState.primaryState === "EMPTY_HEALTHY"
+                    ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
+                    : pricingState.description}
+                </Text>
+              ) : (
+                (overview.prioritizedRecommendations ?? []).map((item) => (
+                  <Card key={item.id}>
+                    <BlockStack gap="200">
+                      <InlineStack align="space-between" blockAlign="start">
+                        <BlockStack gap="100">
+                          <Text as="p" variant="headingSm">
+                            {`${item.rank}. ${item.productHandle}`}
+                          </Text>
+                          <Text as="p" tone="subdued">
+                            {`$${item.currentPrice.toFixed(2)} -> $${item.recommendedPrice.toFixed(2)}`}
+                          </Text>
+                        </BlockStack>
+                        <InlineStack gap="200">
+                          <Badge tone="info">{item.recommendationType}</Badge>
+                          <Badge tone={item.confidence === "High" ? "success" : item.confidence === "Medium" ? "attention" : "info"}>
+                            {item.confidence}
                           </Badge>
                         </InlineStack>
-                      </div>
-                    ))
-                  )}
-                  {!hasAdvancedModes ? (
-                    <Banner title="Advanced pricing modes unlock on Pro" tone="warning">
-                      <p>
-                        Balanced guidance is available now. Profit-first,
-                        market-defense, inventory-clearance, and premium
-                        positioning modes become fully configurable on Pro.
-                      </p>
-                    </Banner>
-                  ) : null}
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Profit leak detector
-                  </Text>
-                  {(overview.profitLeakSummary ?? []).length === 0 ? (
-                    <EmptyState text="No profit leak has been identified yet, or the engine is still waiting for enough synced unit-economics data." />
-                  ) : (
-                    (overview.profitLeakSummary ?? []).map((item) => (
-                      <div key={item.title} className="vs-action-card">
-                        <InlineStack align="space-between" blockAlign="start">
-                          <BlockStack gap="100">
-                            <Text as="p" variant="headingSm">
-                              {item.title}
-                            </Text>
-                            <Text as="p" tone="subdued">
-                              {item.detail}
-                            </Text>
-                            {item.action ? (
-                              <Text as="p" variant="bodySm">
-                                {item.action}
-                              </Text>
-                            ) : null}
-                          </BlockStack>
-                          {item.severity ? (
-                            <Badge tone={toneForSeverity(item.severity)}>
-                              {item.severity}
-                            </Badge>
-                          ) : null}
-                        </InlineStack>
-                      </div>
-                    ))
-                  )}
-                  {!hasProfitLeakDetector ? (
-                    <Banner title="Growth plan preview" tone="info">
-                      <p>
-                        Growth can review pricing posture and basic margin pressure.
-                        Full profit leak detection becomes actionable on Pro.
-                      </p>
-                    </Banner>
-                  ) : null}
-                </BlockStack>
-              </Card>
-
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Do-nothing recommendation
-                  </Text>
-                  {overview.doNothingRecommendation ? (
-                    <>
-                      <Badge tone="info">
-                        {overview.doNothingRecommendation.headline}
-                      </Badge>
+                      </InlineStack>
+                      <Text as="p">{item.expectedImpact}</Text>
                       <Text as="p" tone="subdued">
-                        {overview.doNothingRecommendation.rationale}
+                        {item.why}
                       </Text>
-                    </>
-                  ) : (
-                    <EmptyState text="VedaSuite will explicitly tell the merchant when holding price is the smartest move." />
-                  )}
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    The engine should not force a price move when pressure is
-                    temporary or the projected lift is too weak.
-                  </Text>
-                </BlockStack>
-              </Card>
-            </InlineGrid>
-          </Layout.Section>
-        ) : null}
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {item.support}
+                      </Text>
+                      <InlineStack gap="200">
+                        <Badge tone="info">{item.dataBasis}</Badge>
+                        {item.inputsUsed.map((input) => (
+                          <Badge key={`${item.id}-${input}`} tone="subdued">
+                            {input}
+                          </Badge>
+                        ))}
+                      </InlineStack>
+                      <Text as="p" variant="bodySm">
+                        {item.merchantActionNote}
+                      </Text>
+                    </BlockStack>
+                  </Card>
+                ))
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
             <Card>
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">
-                  Explainable recommendations
+                  Why these recommendations exist
                 </Text>
-                {(overview.explainabilityHighlights ?? []).length === 0 ? (
-                    <EmptyState text="No explainable pricing recommendation is available yet because the engine does not have enough live inputs." />
-                ) : (
-                  (overview.explainabilityHighlights ?? []).map((item) => (
-                    <div key={item.id} className="vs-action-card">
+                {(overview.diagnosticSummary ?? []).map((item) => (
+                  <div key={item.title}>
+                    <InlineStack align="space-between" blockAlign="start">
                       <BlockStack gap="100">
-                        <InlineStack align="space-between" blockAlign="start">
-                          <BlockStack gap="100">
-                            <Text as="p" variant="headingSm">
-                              {item.productHandle}
-                            </Text>
-                            <Text as="p" tone="subdued">
-                              {item.why}
-                            </Text>
-                          </BlockStack>
-                          <Badge tone="success">{item.recommendation}</Badge>
-                        </InlineStack>
-                        <List type="bullet">
-                          {item.factors.map((factor) => (
-                            <List.Item key={`${item.id}-${factor}`}>
-                              {factor}
-                            </List.Item>
-                          ))}
-                        </List>
-                        <Text as="p" variant="bodySm">
-                          {item.guardrail}
+                        <Text as="p" variant="headingSm">
+                          {item.title}
+                        </Text>
+                        <Text as="p" tone="subdued">
+                          {item.detail}
                         </Text>
                       </BlockStack>
-                    </div>
-                  ))
-                )}
-                {!hasExplainableRecommendations ? (
-                  <Banner title="Explainability is limited on this plan" tone="warning">
-                    <p>
-                      Upgrade to Growth or Pro to get full pricing rationale,
-                      factor breakdowns, and merchant-ready approval context.
-                    </p>
-                  </Banner>
-                ) : null}
+                      <Badge tone={toneForDiagnostic(item.status)}>
+                        {item.status}
+                      </Badge>
+                    </InlineStack>
+                  </div>
+                ))}
               </BlockStack>
             </Card>
 
             <Card>
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">
-                  Margin-at-risk analysis
+                  Pricing modes and strategy
                 </Text>
-                <Text as="p" tone="subdued">
-                  {overview.marginAtRisk.summary}
-                </Text>
-                {(overview.marginRiskDrivers ?? []).length === 0 ? (
-                    <EmptyState text="No live margin-risk drivers are active yet." />
+                {(overview.pricingModes ?? []).length === 0 ? (
+                  <Text as="p" tone="subdued">
+                    Pricing modes will appear after pricing recommendations are available.
+                  </Text>
                 ) : (
-                  (overview.marginRiskDrivers ?? []).map((driver) => (
-                    <div key={driver.title} className="vs-action-card">
+                  (overview.pricingModes ?? []).map((mode) => (
+                    <div key={mode.key}>
                       <InlineStack align="space-between" blockAlign="start">
                         <BlockStack gap="100">
                           <Text as="p" variant="headingSm">
-                            {driver.title}
+                            {mode.label}
                           </Text>
                           <Text as="p" tone="subdued">
-                            {driver.detail}
+                            {mode.description}
                           </Text>
                         </BlockStack>
-                        <Badge tone={toneForSeverity(driver.severity)}>
-                          {driver.severity}
+                        <Badge tone={mode.available ? (mode.recommended ? "success" : "info") : "attention"}>
+                          {mode.available
+                            ? mode.recommended
+                              ? "Recommended"
+                              : "Available"
+                            : mode.gate ?? "Pro"}
                         </Badge>
                       </InlineStack>
                     </div>
                   ))
                 )}
-                {!hasMarginAtRisk ? (
-                  <Banner title="Advanced margin defense unlocks on Pro" tone="warning">
-                    <p>
-                      Growth can see baseline pricing posture. Pro unlocks full
-                      margin-at-risk diagnostics and proactive protection
-                      workflows.
-                    </p>
-                  </Banner>
-                ) : null}
               </BlockStack>
             </Card>
           </InlineGrid>
         </Layout.Section>
 
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
-            <Card>
-              <BlockStack gap="300">
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
                 <Text as="h3" variant="headingMd">
-                  {showingProfitFocus ? "Profit actions" : "Pricing recommendations"}
+                  Plan-gated advanced capabilities
                 </Text>
-                {overview.pricingRecommendations.length === 0 ? (
-                  <EmptyState text="No live pricing recommendation is available yet. Sync orders, products, and competitor data to generate actions." />
-                ) : (
-                  overview.pricingRecommendations.map((recommendation) => (
-                    <div key={recommendation.id} className="vs-action-card">
-                      <Text as="p" variant="headingSm">
-                        {recommendation.productHandle}
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        ${recommendation.currentPrice} -&gt; $
-                        {recommendation.recommendedPrice}
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        {recommendation.automationPosture}
-                      </Text>
-                      <List type="bullet">
-                        {recommendation.demandSignals.slice(0, 3).map((signal) => (
-                          <List.Item key={`${recommendation.id}-${signal}`}>
-                            {signal}
-                          </List.Item>
-                        ))}
-                      </List>
-                    </div>
-                  ))
-                )}
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">
-                  Profit engine and margin-at-risk
-                </Text>
-                {overview.profitOpportunities.length > 0 ? (
-                  overview.profitOpportunities.map((item) => (
-                    <div key={item.productHandle} className="vs-action-card">
-                      <Text as="p" variant="headingSm">
-                        {item.productHandle}
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        Projected monthly gain: $
-                        {Math.round(item.projectedMonthlyProfitGain ?? 0)}
-                      </Text>
-                      <Text as="p" variant="bodySm">
-                        {item.recommendedPrice != null
-                          ? `Suggested price ${item.recommendedPrice}`
-                          : "Waiting for a stronger pricing target."}
-                      </Text>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyState text="No live profit opportunity is available yet. Profit outputs appear after synced pricing, cost, and order data are available." />
-                )}
-                <List type="bullet">
-                  {overview.marginAtRisk.pressureProducts.map((item) => (
-                    <List.Item key={item.productHandle}>
-                      {item.productHandle}: pressure score {item.pressureScore} -{" "}
-                      {item.rationale}
-                    </List.Item>
-                  ))}
-                </List>
-              </BlockStack>
-            </Card>
-          </InlineGrid>
+                <Button variant="secondary" onClick={() => navigateEmbedded("/app/billing")}>
+                  Manage plan
+                </Button>
+              </InlineStack>
+              {(overview.planGateSummary ?? []).map((item) => (
+                <div key={item.title}>
+                  <Text as="p" variant="headingSm">
+                    {item.title}
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {item.detail}
+                  </Text>
+                </div>
+              ))}
+            </BlockStack>
+          </Card>
         </Layout.Section>
 
-        {showingProfitFocus ? (
-          <Layout.Section>
-            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Active opportunities
-                  </Text>
-                  <Text as="p" variant="heading2xl">
-                    {overview.profitOpportunities.length}
-                  </Text>
-                </BlockStack>
-              </Card>
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Projected monthly gain
-                  </Text>
-                  <Text as="p" variant="heading2xl">
-                    ${Math.round(overview.marginAtRisk.projectedMonthlyGain)}
-                  </Text>
-                </BlockStack>
-              </Card>
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Average margin lift
-                  </Text>
-                  <Text as="p" variant="heading2xl">
-                    {overview.scenarioPreset
-                      ? `${overview.scenarioPreset.expectedMarginImprovement.toFixed(1)}%`
-                      : "0.0%"}
-                  </Text>
-                </BlockStack>
-              </Card>
-            </InlineGrid>
-          </Layout.Section>
-        ) : null}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="p" variant="bodySm" tone="subdued">
+                Last successful pricing run: {formatDateTime(pricingState.lastSuccessfulRunAt)}
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
       </Layout>
     </Page>
   );

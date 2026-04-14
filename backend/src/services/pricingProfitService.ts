@@ -14,6 +14,35 @@ import {
   toIsoString,
 } from "./unifiedModuleStateService";
 
+type PricingPrimaryState =
+  | "SETUP_INCOMPLETE"
+  | "PARTIAL_READINESS"
+  | "READY"
+  | "EMPTY_HEALTHY"
+  | "PROCESSING"
+  | "FAILED";
+
+function deriveRecommendationAction(currentPrice: number, recommendedPrice: number) {
+  const delta = recommendedPrice - currentPrice;
+  if (Math.abs(delta) < 0.5) return "Hold price";
+  if (delta > 0) return "Increase price";
+  if (delta < 0) return "Reduce price";
+  return "Needs review";
+}
+
+function derivePricingConfidence(args: {
+  approvalConfidence: number;
+  competitorReady: boolean;
+  profitReady: boolean;
+}) {
+  if (!args.competitorReady || !args.profitReady) {
+    return "Baseline estimate";
+  }
+  if (args.approvalConfidence >= 70) return "High";
+  if (args.approvalConfidence >= 52) return "Medium";
+  return "Baseline estimate";
+}
+
 async function safelyResolve<T>(work: Promise<T>, fallback: T) {
   try {
     return await work;
@@ -586,18 +615,185 @@ export async function getPricingProfitOverview(shopDomain: string) {
             "VedaSuite needs synced product, order, and pricing data before it can generate pricing guidance.",
           nextAction: "Run live sync",
         });
+  const competitorReady = competitorDependencyStatus === "ready";
+  const profitReady = canUseFullProfitEngine && profitOpportunityCount > 0;
+  const projectedGainValue =
+    topProfitOpportunity?.projectedMonthlyProfitGain ??
+    topRecommendation?.expectedProfitGain ??
+    0;
+  const projectedGainStatus =
+    projectedGainValue <= 0
+      ? "not_available"
+      : profitReady
+      ? "available"
+      : "estimated_baseline";
+  const primaryState: PricingPrimaryState =
+    moduleState.dataStatus === "processing"
+      ? "PROCESSING"
+      : moduleState.dataStatus === "failed"
+      ? "FAILED"
+      : moduleState.setupStatus === "incomplete"
+      ? "SETUP_INCOMPLETE"
+      : recommendationCount === 0 && profitOpportunityCount === 0
+      ? "EMPTY_HEALTHY"
+      : moduleState.dataStatus === "partial"
+      ? "PARTIAL_READINESS"
+      : "READY";
+  const responseMode =
+    !competitorReady && !profitReady
+      ? "baseline_only"
+      : competitorReady && profitReady
+      ? "mixed"
+      : !competitorReady
+      ? "margin_protection"
+      : "competitor_informed";
+  const prioritizedRecommendations = pricingRecommendations
+    .map((item, index) => {
+      const actionLabel = deriveRecommendationAction(
+        item.currentPrice,
+        item.recommendedPrice
+      );
+      const confidence = derivePricingConfidence({
+        approvalConfidence: item.approvalConfidence,
+        competitorReady,
+        profitReady,
+      });
+      const inputsUsed = [
+        "store baseline",
+        item.demandTrend !== "insufficient history" ? "demand posture" : null,
+        competitorReady && item.competitorPressure !== "not_available"
+          ? "competitor data"
+          : null,
+        fraudDependencyStatus === "ready" ? "return pressure" : null,
+      ].filter((value): value is string => value !== null);
+      const expectedImpact =
+        item.expectedProfitGain != null && item.expectedProfitGain > 0
+          ? projectedGainStatus === "available"
+            ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
+            : `Baseline estimated gain of $${Math.round(item.expectedProfitGain)}`
+          : `Expected margin change of ${item.expectedMarginDelta.toFixed(1)}%`;
+
+      return {
+        id: item.id,
+        rank: index + 1,
+        productHandle: item.productHandle,
+        currentPrice: item.currentPrice,
+        recommendedPrice: item.recommendedPrice,
+        recommendationType: actionLabel,
+        expectedImpact,
+        confidence,
+        confidenceScore: item.approvalConfidence,
+        dataBasis: competitorReady ? "competitor-informed" : "store-baseline",
+        why:
+          item.demandSignals[0] ??
+          "Recommendation is based on synced pricing rows and current merchant pricing settings.",
+        support:
+          item.demandSignals[1] ??
+          "Review this recommendation before publishing a price change.",
+        inputsUsed,
+        merchantActionNote:
+          item.autoApprovalCandidate
+            ? "Ready for merchant review."
+            : "Review before applying in Shopify.",
+      };
+    })
+    .sort((a, b) => b.confidenceScore - a.confidenceScore)
+    .slice(0, 8);
+  const diagnosticSummary = [
+    {
+      title: "Demand posture",
+      detail:
+        topRecommendation?.demandTrend && topRecommendation.demandTrend !== "insufficient history"
+          ? `Current top recommendation is reacting to ${topRecommendation.demandTrend} demand conditions.`
+          : "Demand history is still limited, so current recommendations lean on baseline store pricing data.",
+      status:
+        topRecommendation?.demandTrend && topRecommendation.demandTrend !== "insufficient history"
+          ? "ready"
+          : "partial",
+    },
+    {
+      title: "Competitor pressure",
+      detail: competitorReady
+        ? competitorResponse.summary.automationReadiness
+        : "Competitor-informed pricing is not ready yet. Baseline recommendations are active from store and margin signals.",
+      status: competitorReady ? "ready" : "partial",
+    },
+    {
+      title: "Promotion exposure",
+      detail:
+        competitorResponse.summary.topPressureCount > 0
+          ? `${competitorResponse.summary.topPressureCount} SKU groups are under measurable competitor pressure.`
+          : "No meaningful promotion or competitor pressure is active right now.",
+      status:
+        competitorResponse.summary.topPressureCount > 0 ? "ready" : "empty",
+    },
+    {
+      title: "Profit leakage",
+      detail: profitReady
+        ? `${profitOpportunityCount} products have live profit opportunity analysis available.`
+        : "Profit model readiness is still partial, so gain estimates remain directional.",
+      status: profitReady ? "ready" : "partial",
+    },
+  ];
+  const planGateSummary = [
+    {
+      title: "Available now",
+      detail: "Baseline pricing recommendations and explainable pricing guidance are active on the current plan.",
+    },
+    {
+      title: "Advanced on Pro",
+      detail:
+        "Pro unlocks advanced modes, profit leakage workflows, scenario simulation, and deeper margin defense.",
+    },
+  ];
 
   return {
     subscription,
     moduleState,
     readiness,
+    pricingState: {
+      primaryState,
+      setupStatus: moduleState.setupStatus === "incomplete" ? "incomplete" : "ready",
+      pricingStatus:
+        moduleState.dataStatus === "processing"
+          ? "processing"
+          : moduleState.dataStatus === "failed"
+          ? "failed"
+          : primaryState === "PARTIAL_READINESS"
+          ? "partial"
+          : primaryState === "EMPTY_HEALTHY"
+          ? "empty"
+          : "ready",
+      competitorDependency: competitorReady ? "ready" : "missing",
+      profitModelStatus: profitReady ? "ready" : canUseFullProfitEngine ? "partial" : "missing",
+      recommendationCount,
+      prioritizedRecommendationCount: prioritizedRecommendations.length,
+      projectedGainStatus,
+      projectedGainValue,
+      responseMode,
+      lastSuccessfulRunAt: lastSuccessfulSyncAt,
+      title: moduleState.title,
+      description:
+        primaryState === "PARTIAL_READINESS"
+          ? "Baseline recommendations are active from store, order, and margin signals. Competitor-informed pricing will improve after competitor monitoring completes."
+          : primaryState === "READY"
+          ? "Recommendations and profit guidance are live from the latest synced store data."
+          : primaryState === "EMPTY_HEALTHY"
+          ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
+          : moduleState.description,
+      nextAction: moduleState.nextAction,
+    },
     summary: {
       recommendationCount,
       profitOpportunityCount,
       responseMode:
-        competitorDependencyStatus === "missing"
-          ? "Pricing-only"
-          : competitorResponse.summary.responseMode,
+        responseMode === "baseline_only"
+          ? "Baseline recommendations active"
+          : responseMode === "competitor_informed"
+          ? "Competitor-informed pricing active"
+          : responseMode === "margin_protection"
+          ? "Margin protection active"
+          : "Mixed pricing signals",
       automationReadiness:
         moduleState.dataStatus === "partial"
           ? "Pricing recommendations are ready. Competitor comparisons are still being prepared."
@@ -611,6 +807,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       explainableRecommendationsEnabled: canUseExplainablePricing,
     },
     pricingRecommendations: pricingRecommendations.slice(0, 8),
+    prioritizedRecommendations,
     profitOpportunities: profitOpportunities.slice(0, 8),
     dailyActionBoard,
     pricingModes,
@@ -620,6 +817,8 @@ export async function getPricingProfitOverview(shopDomain: string) {
     explainabilityHighlights,
     simulatorSnapshots,
     marginRiskDrivers,
+    diagnosticSummary,
+    planGateSummary,
     scenarioPreset,
     marginAtRisk: {
       pressureProducts: competitorResponse.responsePlans
