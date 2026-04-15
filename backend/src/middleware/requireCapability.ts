@@ -35,6 +35,7 @@ export function requireCapability(capability: Capability) {
     if (!subscription.capabilities[capability]) {
       return res.status(403).json({
         error: {
+          code: "CAPABILITY_REQUIRED",
           message: `Your current plan does not include ${capability}.`,
           requiredCapability: capability,
           currentPlan: subscription.planName,

@@ -6,6 +6,7 @@ type EmbeddedRequestOptions = {
   body?: Record<string, unknown>;
   timeoutMs?: number;
   retries?: number;
+  signal?: AbortSignal;
 };
 
 function buildUrl(path: string) {
@@ -50,28 +51,44 @@ async function doFetch(
   method: NonNullable<EmbeddedRequestOptions["method"]>,
   requestBody: ReturnType<typeof buildRequestBody>,
   timeoutMs: number,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  externalSignal?: AbortSignal
 ) {
   const abortController = new AbortController();
+  const abortFromCaller = () => abortController.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortController.abort();
+    } else {
+      externalSignal.addEventListener("abort", abortFromCaller, { once: true });
+    }
+  }
 
-  const response = await withRequestTimeout(
-    fetch(url.toString(), {
-      method,
-      credentials: "same-origin",
-      headers,
-      signal: abortController.signal,
-      body: requestBody ? JSON.stringify(requestBody) : undefined,
-    }),
-    timeoutMs,
-    `Request timed out after ${timeoutMs}ms`
-  ).catch((error) => {
+  try {
+    return await withRequestTimeout(
+      (async () => {
+        const response = await fetch(url.toString(), {
+          method,
+          credentials: "same-origin",
+          headers,
+          signal: abortController.signal,
+          body: requestBody ? JSON.stringify(requestBody) : undefined,
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        return { response, payload };
+      })(),
+      timeoutMs,
+      `Request timed out after ${timeoutMs}ms`
+    );
+  } catch (error) {
     abortController.abort();
     throw error;
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  return { response, payload };
+  } finally {
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", abortFromCaller);
+    }
+  }
 }
 
 function enrichError(
@@ -114,7 +131,7 @@ export async function embeddedShopRequest<T = unknown>(
   path: string,
   options: EmbeddedRequestOptions = {}
 ) {
-  const { method = "GET", body, timeoutMs = 30000, retries = 0 } = options;
+  const { method = "GET", body, timeoutMs = 30000, retries = 0, signal } = options;
   const url = buildUrl(path);
   const requestBody = buildRequestBody(path, method, body);
   const baseHeaders: Record<string, string> = {
@@ -130,7 +147,8 @@ export async function embeddedShopRequest<T = unknown>(
         method,
         requestBody,
         timeoutMs,
-        baseHeaders
+        baseHeaders,
+        signal
       );
 
       if (

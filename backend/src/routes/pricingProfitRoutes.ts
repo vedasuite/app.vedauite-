@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireCapability } from "../middleware/requireCapability";
 import { getPricingProfitOverview } from "../services/pricingProfitService";
+import { logEvent } from "../services/observabilityService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const pricingProfitRouter = Router();
@@ -13,6 +14,10 @@ pricingProfitRouter.get("/overview", async (req, res) => {
   }
 
   try {
+    logEvent("info", "pricing_profit.route_request_started", {
+      shop,
+      route: req.originalUrl,
+    });
     const overview = await Promise.race([
       getPricingProfitOverview(shop),
       new Promise<never>((_, reject) => {
@@ -20,13 +25,31 @@ pricingProfitRouter.get("/overview", async (req, res) => {
       }),
     ]);
 
+    logEvent("info", "pricing_profit.route_request_succeeded", {
+      shop,
+      route: req.originalUrl,
+      viewStatus: overview.viewState?.status ?? null,
+    });
     return res.json({ overview });
   } catch (error) {
-    return res.status(503).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Pricing overview could not be loaded.",
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Pricing overview could not be loaded.";
+    const timedOut = /timed out/i.test(message);
+
+    logEvent("error", "pricing_profit.route_request_failed", {
+      shop,
+      route: req.originalUrl,
+      timedOut,
+      error,
+    });
+
+    return res.status(timedOut ? 504 : 503).json({
+      error: {
+        code: timedOut ? "PRICING_TIMEOUT" : "PRICING_OVERVIEW_FAILED",
+        message,
+      },
     });
   }
 });

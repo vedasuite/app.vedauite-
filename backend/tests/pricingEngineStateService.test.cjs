@@ -58,8 +58,8 @@ test("no catalog data stays empty with explicit reason", () => {
     }),
   });
 
-  assert.equal(state.status, "initializing");
-  assert.match(state.description, /first Shopify sync/i);
+  assert.equal(state.status, "empty_no_data");
+  assert.equal(state.emptyReason, "no_catalog_data");
 });
 
 test("no sales history produces a usable empty state", () => {
@@ -68,7 +68,7 @@ test("no sales history produces a usable empty state", () => {
     recommendationCount: 0,
   });
 
-  assert.equal(state.status, "empty");
+  assert.equal(state.status, "empty_no_data");
   assert.equal(state.emptyReason, "no_sales_history");
 });
 
@@ -78,7 +78,7 @@ test("no competitor input becomes explicit empty state when no recommendations a
     recommendationCount: 0,
   });
 
-  assert.equal(state.status, "empty");
+  assert.equal(state.status, "empty_no_data");
   assert.equal(state.emptyReason, "no_competitor_input");
 });
 
@@ -93,7 +93,7 @@ test("async job still processing becomes syncing_data", () => {
     }),
   });
 
-  assert.equal(state.status, "syncing_data");
+  assert.equal(state.status, "syncing");
 });
 
 test("recommendations available resolves ready", () => {
@@ -110,7 +110,7 @@ test("backend timeout resolves failed", () => {
     timedOutSources: ["pricing_recommendations"],
   });
 
-  assert.equal(state.status, "failed");
+  assert.equal(state.status, "failed_timeout");
   assert.match(state.title, /too long/i);
 });
 
@@ -120,6 +120,6 @@ test("malformed recommendation payload resolves failed", () => {
     invalidRecommendationCount: 2,
   });
 
-  assert.equal(state.status, "failed");
+  assert.equal(state.status, "failed_error");
   assert.match(state.description, /could not be read safely/i);
 });

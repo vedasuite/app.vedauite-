@@ -596,10 +596,10 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "locked"
         : pricingViewState.status === "ready"
         ? "ready"
-        : pricingViewState.status === "failed"
+        : pricingViewState.status === "failed_timeout" ||
+          pricingViewState.status === "failed_error"
         ? "error"
-        : pricingViewState.status === "syncing_data" ||
-          pricingViewState.status === "initializing"
+        : pricingViewState.status === "syncing"
         ? "collecting_data"
         : "setup_needed",
     title:
@@ -607,9 +607,10 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "AI Pricing Engine is locked"
         : pricingViewState.status === "ready"
         ? "AI Pricing Engine is ready"
-        : pricingViewState.status === "failed"
+        : pricingViewState.status === "failed_timeout" ||
+          pricingViewState.status === "failed_error"
         ? "AI Pricing Engine needs attention"
-        : pricingViewState.status === "syncing_data"
+        : pricingViewState.status === "syncing"
         ? "AI Pricing Engine is collecting data"
         : "AI Pricing Engine needs more store data",
     description: pricingViewState.description,

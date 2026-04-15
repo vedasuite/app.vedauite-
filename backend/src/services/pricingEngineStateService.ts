@@ -1,11 +1,11 @@
 import type { UnifiedModuleState } from "./unifiedModuleStateService";
 
 export type PricingEngineViewStatus =
-  | "initializing"
-  | "syncing_data"
-  | "empty"
+  | "syncing"
+  | "empty_no_data"
   | "ready"
-  | "failed";
+  | "failed_timeout"
+  | "failed_error";
 
 export type PricingEngineViewState = {
   status: PricingEngineViewStatus;
@@ -53,23 +53,35 @@ export function derivePricingEngineViewState(input: {
   };
 
   if (
+    input.timedOutSources.length > 0
+  ) {
+    return {
+      status: "failed_timeout",
+      title: "Pricing data took too long to load",
+      description:
+        "VedaSuite could not finish loading pricing data in time. Try again in a moment.",
+      nextAction: "Retry pricing refresh",
+      emptyReason: null,
+      processingSummary,
+      timedOutSources: input.timedOutSources,
+      invalidRecommendationCount: input.invalidRecommendationCount,
+      lastSuccessfulRunAt: input.moduleState.lastSuccessfulSyncAt,
+    };
+  }
+
+  if (
     input.moduleState.syncStatus === "failed" ||
     input.moduleState.dataStatus === "failed" ||
-    input.timedOutSources.length > 0 ||
     (input.invalidRecommendationCount > 0 && input.recommendationCount === 0)
   ) {
     return {
-      status: "failed",
+      status: "failed_error",
       title:
-        input.timedOutSources.length > 0
-          ? "Pricing data took too long to load"
-          : input.invalidRecommendationCount > 0
+        input.invalidRecommendationCount > 0
           ? "Pricing recommendations need repair"
           : "Pricing data needs attention",
       description:
-        input.timedOutSources.length > 0
-          ? "VedaSuite could not finish loading pricing data in time. Try again in a moment."
-          : input.invalidRecommendationCount > 0
+        input.invalidRecommendationCount > 0
           ? "Stored pricing recommendations could not be read safely. Run a fresh sync to rebuild them."
           : input.moduleState.description,
       nextAction: "Retry pricing refresh",
@@ -88,7 +100,7 @@ export function derivePricingEngineViewState(input: {
     input.moduleState.dataStatus === "processing"
   ) {
     return {
-      status: "syncing_data",
+      status: "syncing",
       title: "Pricing data is still syncing",
       description:
         "VedaSuite is still processing store data before it can publish a usable pricing view.",
@@ -109,12 +121,12 @@ export function derivePricingEngineViewState(input: {
       input.profitRows === 0)
   ) {
     return {
-      status: "initializing",
-      title: "Pricing engine is getting ready",
+      status: "empty_no_data",
+      title: "Pricing data has not been prepared yet",
       description:
         "Run the first Shopify sync so VedaSuite can load catalog data and start building pricing recommendations.",
       nextAction: "Run live sync",
-      emptyReason: null,
+      emptyReason: "no_catalog_data",
       processingSummary,
       timedOutSources: input.timedOutSources,
       invalidRecommendationCount: input.invalidRecommendationCount,
@@ -124,7 +136,7 @@ export function derivePricingEngineViewState(input: {
 
   if (input.productsCount === 0) {
     return {
-      status: "empty",
+      status: "empty_no_data",
       title: "No catalog data is available yet",
       description:
         "VedaSuite needs synced Shopify products before it can analyze pricing opportunities.",
@@ -139,7 +151,7 @@ export function derivePricingEngineViewState(input: {
 
   if (input.ordersCount === 0 && input.recommendationCount === 0) {
     return {
-      status: "empty",
+      status: "empty_no_data",
       title: "More sales history is needed",
       description:
         "VedaSuite has product data, but it needs order history before it can make useful pricing recommendations.",
@@ -171,7 +183,7 @@ export function derivePricingEngineViewState(input: {
 
   if (input.competitorCount === 0) {
     return {
-      status: "empty",
+      status: "empty_no_data",
       title: "No competitor input is available yet",
       description:
         "Pricing baselines are loaded, but competitor-informed pricing is not available until competitor monitoring collects data.",
@@ -185,7 +197,7 @@ export function derivePricingEngineViewState(input: {
   }
 
   return {
-    status: "empty",
+    status: "empty_no_data",
     title: "No pricing recommendations yet",
     description:
       "VedaSuite processed the latest data, but the pricing engine did not find strong recommendations to publish right now.",

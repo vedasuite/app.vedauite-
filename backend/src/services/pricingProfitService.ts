@@ -108,69 +108,69 @@ function isValidPricingRecommendation(value: any) {
 export async function getPricingProfitOverview(shopDomain: string) {
   const startedAt = Date.now();
   logEvent("info", "pricing_profit.overview_started", { shop: shopDomain });
+  try {
+    const [store, operational] = await Promise.all([
+      prisma.store.findUnique({
+        where: { shop: shopDomain },
+        select: { id: true },
+      }),
+      getStoreOperationalSnapshot(shopDomain),
+    ]);
+    if (!store) {
+      throw new Error("Store not found");
+    }
 
-  const [store, operational] = await Promise.all([
-    prisma.store.findUnique({
-      where: { shop: shopDomain },
-      select: { id: true },
-    }),
-    getStoreOperationalSnapshot(shopDomain),
-  ]);
-  if (!store) {
-    throw new Error("Store not found");
-  }
+    const subscription = await getCurrentSubscription(shopDomain);
+    const syncState = deriveSyncStatus({
+      connectionStatus: operational.store.lastConnectionStatus,
+      latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
+      lastSyncStatus: operational.store.lastSyncStatus,
+      products: operational.counts.products,
+      orders: operational.counts.orders,
+      customers: operational.counts.customers,
+      priceRows: operational.counts.pricingRows,
+      profitRows: operational.counts.profitRows,
+      timelineEvents: operational.counts.timelineEvents,
+    });
+    const readiness = deriveModuleReadiness({
+      syncStatus: syncState.status,
+      rawCount: operational.counts.products + operational.counts.orders,
+      processedCount: operational.counts.pricingRows + operational.counts.profitRows,
+      lastUpdatedAt: operational.latestProcessingAt,
+      failureReason: operational.store.lastConnectionError,
+    });
 
-  const subscription = await getCurrentSubscription(shopDomain);
-  const syncState = deriveSyncStatus({
-    connectionStatus: operational.store.lastConnectionStatus,
-    latestSyncJobStatus: operational.latestSyncJob?.status ?? null,
-    lastSyncStatus: operational.store.lastSyncStatus,
-    products: operational.counts.products,
-    orders: operational.counts.orders,
-    customers: operational.counts.customers,
-    priceRows: operational.counts.pricingRows,
-    profitRows: operational.counts.profitRows,
-    timelineEvents: operational.counts.timelineEvents,
-  });
-  const readiness = deriveModuleReadiness({
-    syncStatus: syncState.status,
-    rawCount: operational.counts.products + operational.counts.orders,
-    processedCount: operational.counts.pricingRows + operational.counts.profitRows,
-    lastUpdatedAt: operational.latestProcessingAt,
-    failureReason: operational.store.lastConnectionError,
-  });
-
-  const timedOutSources: string[] = [];
-  const [pricingRecommendationResult, competitorResponseResult] = await Promise.all([
-    resolveWithTimeoutReport(getPricingRecommendations(shopDomain), [], 7000),
-    resolveWithTimeoutReport(
-      getCompetitorResponseEngine(shopDomain),
-      {
-        summary: {
-          responseMode: "Awaiting monitored competitor data",
-          topPressureCount: 0,
-          automationReadiness:
-            "Competitor response guidance appears after monitored domains are configured and live observations are collected.",
+    const timedOutSources: string[] = [];
+    const [pricingRecommendationResult, competitorResponseResult] = await Promise.all([
+      resolveWithTimeoutReport(getPricingRecommendations(shopDomain), [], 7000),
+      resolveWithTimeoutReport(
+        getCompetitorResponseEngine(shopDomain),
+        {
+          summary: {
+            responseMode: "Awaiting monitored competitor data",
+            topPressureCount: 0,
+            automationReadiness:
+              "Competitor response guidance appears after monitored domains are configured and live observations are collected.",
+          },
+          responsePlans: [],
         },
-        responsePlans: [],
-      },
-      7000
-    ),
-  ]);
-  if (pricingRecommendationResult.timedOut) {
-    timedOutSources.push("pricing_recommendations");
-  }
-  if (competitorResponseResult.timedOut) {
-    timedOutSources.push("competitor_response");
-  }
-  const rawPricingRecommendations = pricingRecommendationResult.value;
-  const competitorResponse = competitorResponseResult.value;
-  const invalidRecommendationCount = rawPricingRecommendations.filter(
-    (item) => !isValidPricingRecommendation(item)
-  ).length;
-  const pricingRecommendations = rawPricingRecommendations.filter(
-    isValidPricingRecommendation
-  );
+        7000
+      ),
+    ]);
+    if (pricingRecommendationResult.timedOut) {
+      timedOutSources.push("pricing_recommendations");
+    }
+    if (competitorResponseResult.timedOut) {
+      timedOutSources.push("competitor_response");
+    }
+    const rawPricingRecommendations = pricingRecommendationResult.value;
+    const competitorResponse = competitorResponseResult.value;
+    const invalidRecommendationCount = rawPricingRecommendations.filter(
+      (item) => !isValidPricingRecommendation(item)
+    ).length;
+    const pricingRecommendations = rawPricingRecommendations.filter(
+      isValidPricingRecommendation
+    );
   const competitorDependencyStatus =
     operational.counts.competitorRows > 0 ? "ready" : "missing";
   const pricingDependencyStatus =
@@ -816,24 +816,24 @@ export async function getPricingProfitOverview(shopDomain: string) {
     timedOutSources,
   });
 
-  logEvent("info", "pricing_profit.overview_resolved", {
-    shop: shopDomain,
-    durationMs: Date.now() - startedAt,
-    viewStatus: viewState.status,
-    recommendationCount,
-    invalidRecommendationCount,
-    timedOutSources,
-    pricingRows: operational.counts.pricingRows,
-    profitRows: operational.counts.profitRows,
-    competitorRows: operational.counts.competitorRows,
-  });
+    logEvent("info", "pricing_profit.overview_resolved", {
+      shop: shopDomain,
+      durationMs: Date.now() - startedAt,
+      viewStatus: viewState.status,
+      recommendationCount,
+      invalidRecommendationCount,
+      timedOutSources,
+      pricingRows: operational.counts.pricingRows,
+      profitRows: operational.counts.profitRows,
+      competitorRows: operational.counts.competitorRows,
+    });
 
-  return {
-    subscription,
-    moduleState,
-    viewState,
-    readiness,
-    pricingState: {
+    return {
+      subscription,
+      moduleState,
+      viewState,
+      readiness,
+      pricingState: {
       primaryState,
       setupStatus: moduleState.setupStatus === "incomplete" ? "incomplete" : "ready",
       pricingStatus:
@@ -909,7 +909,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       invalidRecommendationCount,
       processingSummary: viewState.processingSummary,
     },
-    marginAtRisk: {
+      marginAtRisk: {
       pressureProducts: competitorResponse.responsePlans
         .filter((plan) => plan.pressureScore >= 30)
         .slice(0, 5),
@@ -921,6 +921,14 @@ export async function getPricingProfitOverview(shopDomain: string) {
         competitorResponse.summary.topPressureCount > 0
           ? "Margin pressure is being inferred from live competitor movement and current pricing baselines."
           : "No live margin pressure drivers are active yet.",
-    },
-  };
+      },
+    };
+  } catch (error) {
+    logEvent("error", "pricing_profit.overview_failed", {
+      shop: shopDomain,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
+    throw error;
+  }
 }
