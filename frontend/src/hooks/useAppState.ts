@@ -9,6 +9,14 @@ export function useAppState() {
       appState: null,
       status: "loading" as const,
       error: null,
+      bootstrap: {
+        status: "initializing_embedded_context" as const,
+        shop: null,
+        host: null,
+        errorCode: null,
+        errorMessage: null,
+        reconnectUrl: null,
+      },
       refresh: async () => {
         throw new Error("App state context is not available.");
       },

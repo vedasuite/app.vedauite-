@@ -11,6 +11,42 @@ type Props = {
   children: ReactNode;
 };
 
+function ShellLoadingState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card>
+      <div
+        style={{
+          minHeight: "55vh",
+          display: "grid",
+          placeItems: "center",
+          textAlign: "center",
+          padding: "2rem",
+        }}
+      >
+        <div>
+          <Spinner accessibilityLabel={title} size="large" />
+          <div style={{ marginTop: "1rem" }}>
+            <Text as="h2" variant="headingLg">
+              {title}
+            </Text>
+          </div>
+          <div style={{ marginTop: "0.5rem" }}>
+            <Text as="p" tone="subdued">
+              {description}
+            </Text>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function starterModuleLabel(value: string | null | undefined) {
   if (value === "trustAbuse") {
     return "Trust & Abuse";
@@ -24,7 +60,7 @@ function starterModuleLabel(value: string | null | undefined) {
 export function AppFrame({ children }: Props) {
   const location = useLocation();
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const { appState, status: appStateStatus } = useAppState();
+  const { appState, status: appStateStatus, bootstrap, refresh } = useAppState();
   const {
     subscription,
     billingState,
@@ -37,6 +73,7 @@ export function AppFrame({ children }: Props) {
   } = useSubscriptionPlan();
   const [toast, setToast] = useState<string | null>(null);
 
+  const installState = appState?.install ?? null;
   const activePlan =
     entitlements?.planName ?? appState?.billing.planName ?? subscription?.planName ?? "NONE";
   const moduleStatus = {
@@ -138,38 +175,109 @@ export function AppFrame({ children }: Props) {
     </Navigation>
   );
 
+  const bootstrapGate = useMemo(() => {
+    switch (bootstrap.status) {
+      case "initializing_embedded_context":
+        return (
+          <ShellLoadingState
+            title="Starting VedaSuite..."
+            description="Opening the embedded app shell inside Shopify Admin."
+          />
+        );
+      case "validating_shopify_params":
+        return (
+          <ShellLoadingState
+            title="Validating your Shopify launch..."
+            description="Checking the store and host details needed to restore your app session."
+          />
+        );
+      case "loading_session":
+        return (
+          <ShellLoadingState
+            title="Restoring your store session..."
+            description="Confirming the current Shopify session before loading app data."
+          />
+        );
+      case "loading_installation_record":
+        return (
+          <ShellLoadingState
+            title="Loading VedaSuite..."
+            description="Preparing your store connection, installation record, and module readiness."
+          />
+        );
+      case "needs_reconnect":
+        return (
+          <Card>
+            <div style={{ padding: "1.5rem" }}>
+              <Banner
+                title={installState?.title ?? "VedaSuite needs to reconnect to Shopify"}
+                tone="critical"
+                action={
+                  bootstrap.reconnectUrl
+                    ? {
+                        content: "Reconnect app",
+                        onAction: () => {
+                          window.location.assign(bootstrap.reconnectUrl as string);
+                        },
+                      }
+                    : undefined
+                }
+              >
+                <p>
+                  {installState?.description ??
+                    bootstrap.errorMessage ??
+                    "Open VedaSuite again from Shopify Admin so the store session can be restored."}
+                </p>
+              </Banner>
+            </div>
+          </Card>
+        );
+      case "failed":
+        return (
+          <Card>
+            <div style={{ padding: "1.5rem" }}>
+              <Banner
+                title="VedaSuite could not finish loading"
+                tone="critical"
+                action={{
+                  content: "Retry",
+                  onAction: () => {
+                    void refresh().catch(() => undefined);
+                  },
+                }}
+              >
+                <p>
+                  {bootstrap.errorMessage ??
+                    "The app shell could not confirm your current installation and store state."}
+                </p>
+              </Banner>
+            </div>
+          </Card>
+        );
+      default:
+        return null;
+    }
+  }, [bootstrap, installState?.description, installState?.title, refresh]);
+
+  const billingFlowGate =
+    billingFlowState === "RETURNED_FROM_SHOPIFY" ||
+    billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
+      <ShellLoadingState
+        title="Confirming your subscription..."
+        description="VedaSuite is waiting for Shopify billing confirmation before showing the updated plan."
+      />
+    ) : billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
+      <ShellLoadingState
+        title="Redirecting to Shopify billing..."
+        description="Approve the selected plan in Shopify to continue."
+      />
+    ) : null;
+
   return (
     <Frame navigation={navigation} showMobileNavigation={false}>
       <div className="vs-app-frame">
         <div className="vs-content">
-          {appStateStatus === "loading" && !appState ? (
-            <Card>
-              <div
-                style={{
-                  minHeight: "55vh",
-                  display: "grid",
-                  placeItems: "center",
-                  textAlign: "center",
-                  padding: "2rem",
-                }}
-              >
-                <div>
-                  <Spinner accessibilityLabel="Loading VedaSuite shell" size="large" />
-                  <div style={{ marginTop: "1rem" }}>
-                    <Text as="h2" variant="headingLg">
-                      Loading VedaSuite...
-                    </Text>
-                  </div>
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <Text as="p" tone="subdued">
-                      Preparing your store connection, plan access, and module readiness.
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ) : null}
-          {appStateStatus === "error" ? (
+          {!bootstrapGate && appStateStatus === "error" ? (
             <Banner title="VedaSuite needs a fresh reload" tone="critical">
               <p>
                 The app shell could not confirm the latest store state. Refresh once and
@@ -177,78 +285,22 @@ export function AppFrame({ children }: Props) {
               </p>
             </Banner>
           ) : null}
-          {appState?.install.status !== "installed" ? (
-            <Banner title={appState.install.title} tone="critical">
-              <p>{appState.install.description}</p>
+          {!bootstrapGate && installState && installState.status !== "installed" ? (
+            <Banner title={installState.title} tone="critical">
+              <p>{installState.description}</p>
             </Banner>
           ) : null}
-          {billingState?.lifecycle === "pending_approval" ? (
+          {!bootstrapGate && billingState?.lifecycle === "pending_approval" ? (
             <Banner title={billingState.merchantTitle} tone="warning">
               <p>{billingState.merchantDescription}</p>
             </Banner>
           ) : null}
-          {appState?.connection.status === "attention" ? (
+          {!bootstrapGate && appState?.connection.status === "attention" ? (
             <Banner title={appState.connection.title} tone="warning">
               <p>{appState.connection.description}</p>
             </Banner>
           ) : null}
-          {billingFlowState === "RETURNED_FROM_SHOPIFY" ||
-          billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
-            <Card>
-              <div
-                style={{
-                  minHeight: "55vh",
-                  display: "grid",
-                  placeItems: "center",
-                  textAlign: "center",
-                  padding: "2rem",
-                }}
-              >
-                <div>
-                  <Spinner accessibilityLabel="Confirming subscription" size="large" />
-                  <div style={{ marginTop: "1rem" }}>
-                    <Text as="h2" variant="headingLg">
-                      Confirming your subscription...
-                    </Text>
-                  </div>
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <Text as="p" tone="subdued">
-                      VedaSuite is waiting for Shopify billing confirmation
-                      before showing the updated plan.
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ) : billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
-            <Card>
-              <div
-                style={{
-                  minHeight: "55vh",
-                  display: "grid",
-                  placeItems: "center",
-                  textAlign: "center",
-                  padding: "2rem",
-                }}
-              >
-                <div>
-                  <Spinner accessibilityLabel="Redirecting to Shopify billing" size="large" />
-                  <div style={{ marginTop: "1rem" }}>
-                    <Text as="h2" variant="headingLg">
-                      Redirecting to Shopify billing...
-                    </Text>
-                  </div>
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <Text as="p" tone="subdued">
-                      Approve the selected plan in Shopify to continue.
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ) : appStateStatus === "loading" && !appState ? null : (
-            children
-          )}
+          {bootstrapGate ?? billingFlowGate ?? children}
         </div>
       </div>
       {toast ? <Toast content={toast} onDismiss={dismissToast} /> : null}

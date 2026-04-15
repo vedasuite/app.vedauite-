@@ -36,9 +36,9 @@ function FullPageLoader({ title }: { title: string }) {
 }
 
 function EntryRoute() {
-  const { appState, status } = useAppState();
+  const { appState, status, bootstrap } = useAppState();
 
-  if (status === "loading" || !appState) {
+  if (bootstrap.status !== "ready" || status === "loading" || !appState) {
     return <FullPageLoader title="Loading VedaSuite..." />;
   }
 

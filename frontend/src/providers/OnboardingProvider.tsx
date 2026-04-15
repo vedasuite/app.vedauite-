@@ -153,7 +153,7 @@ type OnboardingResponse = {
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const { subscription } = useSubscriptionPlan();
-  const { appState } = useAppState();
+  const { appState, bootstrap } = useAppState();
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(
     (appState?.onboarding as OnboardingState | undefined) ?? null
   );
@@ -178,6 +178,14 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+
+    if (bootstrap.status !== "ready") {
+      setLoading(true);
+      return () => {
+        mounted = false;
+      };
+    }
+
     setLoading(true);
     refresh()
       .catch((nextError) => {
@@ -196,7 +204,12 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [refresh, subscription?.planName, subscription?.starterModule]);
+  }, [
+    bootstrap.status,
+    refresh,
+    subscription?.planName,
+    subscription?.starterModule,
+  ]);
 
   const mutate = useCallback(
     async (path: string, body?: Record<string, unknown>) => {
