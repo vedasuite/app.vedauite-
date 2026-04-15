@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import type { SubscriptionInfo } from "../hooks/useSubscriptionPlan";
+import type { BillingState, EntitlementState, SubscriptionInfo } from "../hooks/useSubscriptionPlan";
 import {
   clearModuleCache,
   readModuleCache,
@@ -9,9 +9,11 @@ import {
 import { embeddedShopRequest } from "../lib/embeddedShopRequest";
 import {
   fallbackSubscription,
+  normalizeBillingState,
+  normalizeEntitlementState,
   normalizeStarterModule,
   normalizeSubscriptionInfo,
-} from "../lib/subscriptionState";
+} from "../lib/billingCapabilities";
 
 const SUBSCRIPTION_CACHE_KEY = "subscription-plan";
 const BILLING_CONFIRMATION_TIMEOUT_MS = 45000;
@@ -27,6 +29,8 @@ export type BillingFlowState =
 
 type SubscriptionContextValue = {
   subscription: SubscriptionInfo | null;
+  billingState: BillingState | null;
+  entitlements: EntitlementState | null;
   loading: boolean;
   refresh: (options?: { clearCache?: boolean }) => Promise<SubscriptionInfo>;
   billingFlowState: BillingFlowState;
@@ -80,6 +84,8 @@ export function SubscriptionProvider({ children }: Props) {
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(
     initialCachedSubscription ?? fallbackSubscription
   );
+  const [billingState, setBillingState] = useState<BillingState | null>(null);
+  const [entitlements, setEntitlements] = useState<EntitlementState | null>(null);
   const [loading, setLoading] = useState(true);
   const [billingFlowState, setBillingFlowState] =
     useState<BillingFlowState>("IDLE");
@@ -99,11 +105,18 @@ export function SubscriptionProvider({ children }: Props) {
   );
 
   const fetchSubscription = useCallback(async () => {
-    const response = await embeddedShopRequest<{ subscription: SubscriptionInfo }>(
+    const response = await embeddedShopRequest<{
+      subscription: SubscriptionInfo;
+      billingState?: BillingState | null;
+      entitlements?: EntitlementState | null;
+    }>(
       "/api/subscription/plan",
       { timeoutMs: 45000 }
     );
-    return normalizeSubscriptionInfo(response.subscription);
+    const nextSubscription = normalizeSubscriptionInfo(response.subscription);
+    setBillingState(normalizeBillingState(response.billingState));
+    setEntitlements(normalizeEntitlementState(response.entitlements));
+    return nextSubscription;
   }, []);
 
   const confirmBillingReturn = useCallback(async () => {
@@ -287,6 +300,8 @@ export function SubscriptionProvider({ children }: Props) {
   const value = useMemo(
     () => ({
       subscription,
+      billingState,
+      entitlements,
       loading,
       refresh,
       billingFlowState,
@@ -299,10 +314,12 @@ export function SubscriptionProvider({ children }: Props) {
     }),
     [
       billingError,
+      billingState,
       billingFlowState,
       billingMessage,
       clearBillingError,
       dismissBillingMessage,
+      entitlements,
       loading,
       refresh,
       retryBillingConfirmation,

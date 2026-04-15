@@ -1,4 +1,5 @@
 import { prisma } from "../db/prismaClient";
+import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
 
 function classifyCredit(score: number): string {
   if (score >= 80) return "Trusted Buyer";
@@ -48,7 +49,7 @@ function mapCustomer(customer: {
 
   return {
     id: customer.id,
-    email: customer.email,
+    email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
     shopifyCustomerId: customer.shopifyCustomerId ?? null,
     totalOrders: customer.totalOrders,
     totalRefunds: customer.totalRefunds,
@@ -187,7 +188,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
 
   const priorityProfiles = mappedCustomers.slice(0, 5).map((customer) => ({
     id: customer.id,
-    email: customer.email,
+    email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
     shopifyCustomerId: customer.shopifyCustomerId,
     creditScore: customer.creditScore,
     creditCategory: customer.creditCategory,

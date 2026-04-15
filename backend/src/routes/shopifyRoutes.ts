@@ -184,10 +184,7 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
       webhookCoverageReady: health.webhookCoverageReady,
       reconnectRequired: health.reauthRequired,
       uninstallState: !!store?.uninstalledAt,
-      billingStatus:
-        billingState?.normalizedBillingStatus ??
-        subscription?.billingStatus ??
-        null,
+      billingStatus: billingState?.lifecycle ?? null,
     },
     webhooks: {
       registeredAt: store?.webhooksRegisteredAt?.toISOString() ?? null,
@@ -204,15 +201,25 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
     billing: subscription
       ? {
           planName: billingState?.planName ?? subscription.planName,
+          lifecycle: billingState?.lifecycle ?? "unknown_error",
           status: billingState?.status ?? subscription.status,
           billingStatus:
             billingState?.normalizedBillingStatus ?? subscription.billingStatus ?? null,
           active: billingState?.active ?? subscription.active,
+          accessActive: billingState?.accessActive ?? subscription.active,
+          verified: billingState?.verified ?? false,
           starterModule:
             billingState?.starterModule ?? subscription.starterModule ?? null,
-          endsAt: billingState?.endsAt ?? subscription.endsAt,
-          trialEndsAt: subscription.trialEndsAt,
+          endsAt:
+            billingState?.showRenewalDate
+              ? billingState.renewalAt
+              : billingState?.endsAt ?? subscription.endsAt,
+          trialEndsAt: billingState?.showTrialDate ? subscription.trialEndsAt : null,
           planSource: billingState?.planSource ?? null,
+          merchantTitle: billingState?.merchantTitle ?? null,
+          merchantDescription: billingState?.merchantDescription ?? null,
+          pendingIntentStatus: billingState?.pendingIntentStatus ?? null,
+          pendingRequestedPlanName: billingState?.pendingRequestedPlanName ?? null,
           mismatchWarnings: billingState?.mismatchWarnings ?? [],
           pendingIntent: billingManagement?.pendingIntent ?? null,
         }
@@ -320,6 +327,7 @@ async function handleBillingHealth(req: Request, res: Response) {
 
   return res.json({
     shop,
+    lifecycle: billingState.lifecycle,
     dbPlan: billingState.dbPlanName,
     dbBillingStatus: billingState.dbBillingStatus,
     activeSubscriptionId: billingState.shopifyChargeId,
@@ -329,7 +337,13 @@ async function handleBillingHealth(req: Request, res: Response) {
     billingResolutionSource: billingState.lastBillingResolutionSource,
     planSource: billingState.planSource,
     effectivePlanUsedByFeatureGating: subscription.planName,
-    effectiveBillingStatus: billingState.normalizedBillingStatus,
+    effectiveBillingStatus: billingState.lifecycle,
+    accessActive: billingState.accessActive,
+    verified: billingState.verified,
+    merchantTitle: billingState.merchantTitle,
+    merchantDescription: billingState.merchantDescription,
+    renewalAt: billingState.renewalAt,
+    trialEndsAt: billingState.showTrialDate ? subscription.trialEndsAt : null,
     pendingIntent: billingManagement.pendingIntent,
     mismatchWarnings: billingState.mismatchWarnings,
   });

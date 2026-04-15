@@ -5,6 +5,7 @@ type EmbeddedRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   body?: Record<string, unknown>;
   timeoutMs?: number;
+  retries?: number;
 };
 
 function buildUrl(path: string) {
@@ -99,33 +100,64 @@ function enrichError(
   return enrichedError;
 }
 
+function isRetriableError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /timed out|network|failed to fetch|load the current app state/i.test(
+    error.message.toLowerCase()
+  );
+}
+
 export async function embeddedShopRequest<T = unknown>(
   path: string,
   options: EmbeddedRequestOptions = {}
 ) {
-  const { method = "GET", body, timeoutMs = 30000 } = options;
+  const { method = "GET", body, timeoutMs = 30000, retries = 0 } = options;
   const url = buildUrl(path);
   const requestBody = buildRequestBody(path, method, body);
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Requested-With": "XMLHttpRequest",
   };
+  let attempt = 0;
 
-  const firstAttempt = await doFetch(url, method, requestBody, timeoutMs, baseHeaders);
+  while (attempt <= retries) {
+    try {
+      const responseResult = await doFetch(
+        url,
+        method,
+        requestBody,
+        timeoutMs,
+        baseHeaders
+      );
 
-  if (firstAttempt.response.status === 401 || firstAttempt.response.status === 403) {
-    throw enrichError(
-      firstAttempt.payload,
-      "Shopify authorization expired. Reconnect the app and retry."
-    );
+      if (
+        responseResult.response.status === 401 ||
+        responseResult.response.status === 403
+      ) {
+        throw enrichError(
+          responseResult.payload,
+          "Shopify authorization expired. Reconnect the app and retry."
+        );
+      }
+
+      if (!responseResult.response.ok) {
+        throw enrichError(
+          responseResult.payload,
+          `Request failed with status ${responseResult.response.status}`
+        );
+      }
+
+      return responseResult.payload as T;
+    } catch (error) {
+      if (attempt >= retries || !isRetriableError(error) || method !== "GET") {
+        throw error;
+      }
+      attempt += 1;
+    }
   }
 
-  if (!firstAttempt.response.ok) {
-    throw enrichError(
-      firstAttempt.payload,
-      `Request failed with status ${firstAttempt.response.status}`
-    );
-  }
-
-  return firstAttempt.payload as T;
+  throw new Error("VedaSuite request failed.");
 }

@@ -103,7 +103,7 @@ Confirm Render environment values:
 - `SHOPIFY_API_KEY`
 - `SHOPIFY_API_SECRET`
 - `SHOPIFY_APP_URL=https://app.vedasuite.in`
-- `SHOPIFY_SCOPES=read_products,write_products,read_orders,write_orders,read_customers`
+- `SHOPIFY_SCOPES=read_products,read_orders,write_orders,read_customers`
 - `SHOPIFY_ADMIN_API_VERSION=2026-01`
 - `DATABASE_URL`
 - `VITE_SHOPIFY_API_KEY`

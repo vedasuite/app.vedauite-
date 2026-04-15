@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { prisma } from "../db/prismaClient";
+import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
 import { tagShopifyOrder } from "./shopifyAdminService";
 
 export type FraudSignalInput = {
@@ -332,7 +333,10 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
         customerId: signal.customerId,
         riskLevel: signal.riskLevel,
         repeatSignals,
-        email: signal.email,
+        email: maskCustomerIdentity(
+          signal.email,
+          `shopper-${(signal.customerId ?? signal.id).slice(-4)}`
+        ),
         confidence,
         recommendedAction:
           signal.riskLevel === "High" ? "Manual review" : "Flag for repeat watch",
@@ -361,7 +365,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
 
       return {
         id: customer.id,
-        email: customer.email,
+        email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
         wardrobingScore: score,
         refundRate: Number((customer.refundRate * 100).toFixed(1)),
         totalRefunds: customer.totalRefunds,
@@ -414,7 +418,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
     .slice(0, 5)
     .map((customer) => ({
       id: customer.id,
-      email: customer.email,
+      email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
       abuseScore: Math.min(
         100,
         Math.round(customer.refundRate * 75 + customer.totalRefunds * 6)

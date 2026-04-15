@@ -83,6 +83,66 @@ export type SubscriptionLifecycleStatus =
   | "cancelled"
   | "inactive";
 
+export type CanonicalBillingLifecycle =
+  | "no_subscription"
+  | "pending_approval"
+  | "active"
+  | "cancelled"
+  | "frozen"
+  | "test_charge"
+  | "uninstalled"
+  | "unknown_error";
+
+export type CanonicalEntitlementTier =
+  | "none"
+  | "trial"
+  | "starter"
+  | "growth"
+  | "pro";
+
+export type BillingState = {
+  lifecycle: CanonicalBillingLifecycle;
+  planName: BillingPlanName;
+  planTier: CanonicalEntitlementTier;
+  normalizedBillingStatus: string | null;
+  active: boolean;
+  accessActive: boolean;
+  verified: boolean;
+  status: SubscriptionLifecycleStatus;
+  starterModule: StarterModule;
+  endsAt: string | null;
+  renewalAt: string | null;
+  showRenewalDate: boolean;
+  showTrialDate: boolean;
+  subscriptionId: string | null;
+  shopifyChargeId: string | null;
+  planSource: "database" | "shopify_reconciled" | "trial" | "none";
+  dbPlanName: BillingPlanName;
+  dbBillingStatus: string | null;
+  lastBillingSyncAt: string | null;
+  lastBillingWebhookProcessedAt: string | null;
+  lastBillingResolutionSource: string | null;
+  pendingIntentStatus: string | null;
+  pendingRequestedPlanName: BillingPlanName | null;
+  pendingRequestedStarterModule: StarterModule;
+  merchantTitle: string;
+  merchantDescription: string;
+  mismatchWarnings: string[];
+};
+
+export type EntitlementState = {
+  tier: CanonicalEntitlementTier;
+  planName: BillingPlanName;
+  starterModule: StarterModule;
+  accessActive: boolean;
+  verified: boolean;
+  modules: ModuleAccess;
+  featureAccess: FeatureAccess;
+  capabilities: CapabilityMap;
+  title: string;
+  description: string;
+};
+
 export type SubscriptionInfo = {
   planName: BillingPlanName;
   price: number;
@@ -99,6 +159,37 @@ export type SubscriptionInfo = {
   featureAccess: FeatureAccess;
   capabilities: CapabilityMap;
 };
+
+export function normalizeBillingLifecycle(
+  value?: string | null
+): CanonicalBillingLifecycle {
+  switch (value) {
+    case "pending_approval":
+    case "active":
+    case "cancelled":
+    case "frozen":
+    case "test_charge":
+    case "uninstalled":
+    case "unknown_error":
+      return value;
+    default:
+      return "no_subscription";
+  }
+}
+
+export function normalizeEntitlementTier(
+  value?: string | null
+): CanonicalEntitlementTier {
+  switch (value) {
+    case "trial":
+    case "starter":
+    case "growth":
+    case "pro":
+      return value;
+    default:
+      return "none";
+  }
+}
 
 function normalizeBillingPlanName(value?: string | null): BillingPlanName {
   if (!value) {
@@ -320,5 +411,89 @@ export function normalizeSubscriptionInfo(
     enabledModules,
     featureAccess,
     capabilities,
+  };
+}
+
+export function normalizeEntitlementState(
+  value: Partial<EntitlementState> | null | undefined
+): EntitlementState {
+  if (!value) {
+    return {
+      tier: "none",
+      planName: "NONE",
+      starterModule: null,
+      accessActive: false,
+      verified: false,
+      modules: buildModuleAccess("NONE", null),
+      featureAccess: buildFeatureAccess("NONE", null),
+      capabilities: buildCapabilities("NONE", null),
+      title: "Limited access",
+      description: "Paid modules are locked until a verified plan is active.",
+    };
+  }
+
+  const planName = normalizeBillingPlanName(value.planName);
+  const starterModule = normalizeStarterModule(value.starterModule);
+  const capabilities =
+    value.capabilities ?? buildCapabilities(planName, starterModule);
+  const modules = value.modules ?? buildModuleAccess(planName, starterModule);
+  const featureAccess =
+    value.featureAccess ?? buildFeatureAccess(planName, starterModule);
+
+  return {
+    tier: normalizeEntitlementTier(value.tier),
+    planName,
+    starterModule,
+    accessActive: !!value.accessActive,
+    verified: !!value.verified,
+    modules,
+    featureAccess,
+    capabilities,
+    title: value.title ?? "Access",
+    description: value.description ?? "Module access follows the verified current plan.",
+  };
+}
+
+export function normalizeBillingState(
+  value: Partial<BillingState> | null | undefined
+): BillingState {
+  const subscription = normalizeSubscriptionInfo(value as Partial<SubscriptionInfo>);
+
+  return {
+    lifecycle: normalizeBillingLifecycle(value?.lifecycle),
+    planName: subscription.planName,
+    planTier: normalizeEntitlementTier(value?.planTier),
+    normalizedBillingStatus: value?.normalizedBillingStatus ?? subscription.billingStatus ?? null,
+    active: !!value?.active,
+    accessActive:
+      typeof value?.accessActive === "boolean" ? value.accessActive : !!subscription.active,
+    verified: !!value?.verified,
+    status: value?.status ?? subscription.status ?? "inactive",
+    starterModule: normalizeStarterModule(value?.starterModule ?? subscription.starterModule),
+    endsAt: value?.endsAt ?? subscription.endsAt ?? null,
+    renewalAt: value?.renewalAt ?? null,
+    showRenewalDate: !!value?.showRenewalDate,
+    showTrialDate: !!value?.showTrialDate,
+    subscriptionId: value?.subscriptionId ?? null,
+    shopifyChargeId: value?.shopifyChargeId ?? null,
+    planSource: value?.planSource ?? "none",
+    dbPlanName: normalizeBillingPlanName(value?.dbPlanName),
+    dbBillingStatus: value?.dbBillingStatus ?? null,
+    lastBillingSyncAt: value?.lastBillingSyncAt ?? null,
+    lastBillingWebhookProcessedAt: value?.lastBillingWebhookProcessedAt ?? null,
+    lastBillingResolutionSource: value?.lastBillingResolutionSource ?? null,
+    pendingIntentStatus: value?.pendingIntentStatus ?? null,
+    pendingRequestedPlanName:
+      normalizeBillingPlanName(value?.pendingRequestedPlanName),
+    pendingRequestedStarterModule: normalizeStarterModule(
+      value?.pendingRequestedStarterModule
+    ),
+    merchantTitle: value?.merchantTitle ?? "Billing status unavailable",
+    merchantDescription:
+      value?.merchantDescription ??
+      "VedaSuite could not confirm the latest Shopify billing state yet.",
+    mismatchWarnings: Array.isArray(value?.mismatchWarnings)
+      ? value.mismatchWarnings.filter((item): item is string => typeof item === "string")
+      : [],
   };
 }

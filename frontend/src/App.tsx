@@ -1,6 +1,8 @@
 import { Card, InlineStack, Page, Spinner, Text } from "@shopify/polaris";
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { useAppState } from "./hooks/useAppState";
 import { AppFrame } from "./layout/AppFrame";
 import { DashboardPage } from "./modules/Dashboard/DashboardPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
@@ -34,15 +36,15 @@ function FullPageLoader({ title }: { title: string }) {
 }
 
 function EntryRoute() {
-  const { onboarding, loading } = useOnboardingState();
+  const { appState, status } = useAppState();
 
-  if (loading || !onboarding) {
+  if (status === "loading" || !appState) {
     return <FullPageLoader title="Loading VedaSuite..." />;
   }
 
   return (
     <Navigate
-      to={onboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding"}
+      to={appState.onboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding"}
       replace
     />
   );
@@ -54,6 +56,7 @@ function InsightRoute({
 }: {
   moduleKey: OnboardingModuleKey;
   children: JSX.Element;
+  title?: string;
 }) {
   const { onboarding, markInsightViewed } = useOnboardingState();
 
@@ -70,6 +73,10 @@ function InsightRoute({
   return children;
 }
 
+function withRouteBoundary(title: string, element: JSX.Element) {
+  return <RouteErrorBoundary title={title}>{element}</RouteErrorBoundary>;
+}
+
 export default function App() {
   useEffect(() => {
     warmModuleChunks();
@@ -80,34 +87,43 @@ export default function App() {
       <Routes>
         <Route path="/" element={<EntryRoute />} />
         <Route path="/app" element={<EntryRoute />} />
-        <Route path="/app/onboarding" element={<OnboardingPage />} />
-        <Route path="/app/dashboard" element={<DashboardPage />} />
+        <Route path="/app/onboarding" element={withRouteBoundary("Onboarding", <OnboardingPage />)} />
+        <Route path="/app/dashboard" element={withRouteBoundary("Dashboard", <DashboardPage />)} />
         <Route
           path="/app/fraud-intelligence"
           element={
-            <InsightRoute moduleKey="trustAbuse">
-              <TrustAbusePage />
-            </InsightRoute>
+            withRouteBoundary(
+              "Fraud Intelligence",
+              <InsightRoute moduleKey="trustAbuse">
+                <TrustAbusePage />
+              </InsightRoute>
+            )
           }
         />
         <Route
           path="/app/competitor-intelligence"
           element={
-            <InsightRoute moduleKey="competitor">
-              <CompetitorPage />
-            </InsightRoute>
+            withRouteBoundary(
+              "Competitor Intelligence",
+              <InsightRoute moduleKey="competitor">
+                <CompetitorPage />
+              </InsightRoute>
+            )
           }
         />
         <Route
           path="/app/ai-pricing-engine"
           element={
-            <InsightRoute moduleKey="pricingProfit">
-              <PricingProfitPage />
-            </InsightRoute>
+            withRouteBoundary(
+              "AI Pricing Engine",
+              <InsightRoute moduleKey="pricingProfit">
+                <PricingProfitPage />
+              </InsightRoute>
+            )
           }
         />
-        <Route path="/app/billing" element={<PricingPage />} />
-        <Route path="/app/settings" element={<SettingsPage />} />
+        <Route path="/app/billing" element={withRouteBoundary("Billing", <PricingPage />)} />
+        <Route path="/app/settings" element={withRouteBoundary("Settings", <SettingsPage />)} />
 
         <Route path="/onboarding" element={<Navigate to="/app/onboarding" replace />} />
         <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />

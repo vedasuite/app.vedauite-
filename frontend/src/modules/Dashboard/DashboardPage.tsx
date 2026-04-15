@@ -77,6 +77,9 @@ type Metrics = {
 };
 
 type DashboardQuickAccessStatus =
+  | "Locked"
+  | "Setup needed"
+  | "Collecting data"
   | "Ready"
   | "Partial"
   | "Needs setup"
@@ -306,9 +309,12 @@ function toneForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | 
     case "Updated":
     case "Ready (no changes)":
       return "success";
+    case "Collecting data":
     case "Partial":
     case "Stale":
       return "attention";
+    case "Locked":
+    case "Setup needed":
     case "Needs setup":
     case "Not refreshed":
       return "info";

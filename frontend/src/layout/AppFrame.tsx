@@ -1,7 +1,8 @@
-import { Card, Frame, Navigation, Spinner, Text, Toast } from "@shopify/polaris";
+import { Banner, Card, Frame, Navigation, Spinner, Text, Toast } from "@shopify/polaris";
 import { ReactNode, useCallback, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VedaLogo } from "../brand/VedaLogo";
+import { useAppState } from "../hooks/useAppState";
 import { useEmbeddedNavigation } from "../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
 import "./app-frame.css";
@@ -23,8 +24,11 @@ function starterModuleLabel(value: string | null | undefined) {
 export function AppFrame({ children }: Props) {
   const location = useLocation();
   const { navigateEmbedded } = useEmbeddedNavigation();
+  const { appState, status: appStateStatus } = useAppState();
   const {
     subscription,
+    billingState,
+    entitlements,
     billingFlowState,
     billingMessage,
     billingError,
@@ -33,13 +37,34 @@ export function AppFrame({ children }: Props) {
   } = useSubscriptionPlan();
   const [toast, setToast] = useState<string | null>(null);
 
-  const activePlan = subscription?.planName ?? "NONE";
+  const activePlan =
+    entitlements?.planName ?? appState?.billing.planName ?? subscription?.planName ?? "NONE";
   const moduleStatus = {
-    trustAbuse: subscription?.enabledModules?.trustAbuse ?? false,
-    competitor: subscription?.enabledModules?.competitor ?? false,
-    pricingProfit: subscription?.enabledModules?.pricingProfit ?? false,
-    reports: subscription?.enabledModules?.reports ?? false,
-    settings: subscription?.enabledModules?.settings ?? false,
+    trustAbuse:
+      entitlements?.modules.trustAbuse ??
+      appState?.entitlements.trustAbuse ??
+      subscription?.enabledModules?.trustAbuse ??
+      false,
+    competitor:
+      entitlements?.modules.competitor ??
+      appState?.entitlements.competitor ??
+      subscription?.enabledModules?.competitor ??
+      false,
+    pricingProfit:
+      entitlements?.modules.pricingProfit ??
+      appState?.entitlements.pricingProfit ??
+      subscription?.enabledModules?.pricingProfit ??
+      false,
+    reports:
+      entitlements?.modules.reports ??
+      appState?.entitlements.reports ??
+      subscription?.enabledModules?.reports ??
+      false,
+    settings:
+      entitlements?.modules.settings ??
+      appState?.entitlements.settings ??
+      subscription?.enabledModules?.settings ??
+      false,
   };
 
   const dismissToast = useCallback(() => setToast(null), []);
@@ -95,9 +120,13 @@ export function AppFrame({ children }: Props) {
                 Commerce intelligence operating system for Shopify
               </p>
               <div className="vs-plan-pill">{activePlan} PLAN</div>
-              {activePlan === "STARTER" && subscription?.starterModule ? (
+              {activePlan === "STARTER" &&
+              (entitlements?.starterModule ?? subscription?.starterModule) ? (
                 <p className="vs-brand__subtitle">
-                  {starterModuleLabel(subscription.starterModule)} ACTIVE
+                  {starterModuleLabel(
+                    entitlements?.starterModule ?? subscription?.starterModule
+                  )}{" "}
+                  ACTIVE
                 </p>
               ) : null}
             </div>
@@ -113,6 +142,56 @@ export function AppFrame({ children }: Props) {
     <Frame navigation={navigation} showMobileNavigation={false}>
       <div className="vs-app-frame">
         <div className="vs-content">
+          {appStateStatus === "loading" && !appState ? (
+            <Card>
+              <div
+                style={{
+                  minHeight: "55vh",
+                  display: "grid",
+                  placeItems: "center",
+                  textAlign: "center",
+                  padding: "2rem",
+                }}
+              >
+                <div>
+                  <Spinner accessibilityLabel="Loading VedaSuite shell" size="large" />
+                  <div style={{ marginTop: "1rem" }}>
+                    <Text as="h2" variant="headingLg">
+                      Loading VedaSuite...
+                    </Text>
+                  </div>
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <Text as="p" tone="subdued">
+                      Preparing your store connection, plan access, and module readiness.
+                    </Text>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ) : null}
+          {appStateStatus === "error" ? (
+            <Banner title="VedaSuite needs a fresh reload" tone="critical">
+              <p>
+                The app shell could not confirm the latest store state. Refresh once and
+                try again.
+              </p>
+            </Banner>
+          ) : null}
+          {appState?.install.status !== "installed" ? (
+            <Banner title={appState.install.title} tone="critical">
+              <p>{appState.install.description}</p>
+            </Banner>
+          ) : null}
+          {billingState?.lifecycle === "pending_approval" ? (
+            <Banner title={billingState.merchantTitle} tone="warning">
+              <p>{billingState.merchantDescription}</p>
+            </Banner>
+          ) : null}
+          {appState?.connection.status === "attention" ? (
+            <Banner title={appState.connection.title} tone="warning">
+              <p>{appState.connection.description}</p>
+            </Banner>
+          ) : null}
           {billingFlowState === "RETURNED_FROM_SHOPIFY" ||
           billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
             <Card>
@@ -134,7 +213,7 @@ export function AppFrame({ children }: Props) {
                   </div>
                   <div style={{ marginTop: "0.5rem" }}>
                     <Text as="p" tone="subdued">
-                      VedaSuite is waiting for backend confirmation from Shopify
+                      VedaSuite is waiting for Shopify billing confirmation
                       before showing the updated plan.
                     </Text>
                   </div>
@@ -167,7 +246,7 @@ export function AppFrame({ children }: Props) {
                 </div>
               </div>
             </Card>
-          ) : (
+          ) : appStateStatus === "loading" && !appState ? null : (
             children
           )}
         </div>

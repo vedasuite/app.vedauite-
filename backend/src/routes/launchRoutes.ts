@@ -11,6 +11,19 @@ function routeUrl(route: string) {
   return new URL(route, env.shopifyAppUrl).toString();
 }
 
+function extractConfiguredScopes(appTomlContents: string) {
+  const match = appTomlContents.match(/scopes\s*=\s*"([^"]+)"/i);
+  if (!match?.[1]) {
+    return [];
+  }
+
+  return match[1]
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .sort();
+}
+
 function findAppTomlPath() {
   const candidates = [
     path.resolve(process.cwd(), "shopify.app.toml"),
@@ -38,6 +51,7 @@ function buildSanityChecks(options: {
   requestedShop: string | null;
 }) {
   const { appTomlContents, appTomlPath, requestedShop, store } = options;
+  const configuredScopes = extractConfiguredScopes(appTomlContents);
 
   return [
     {
@@ -106,6 +120,19 @@ function buildSanityChecks(options: {
           : requestedShop
           ? "Mandatory webhooks are not registered yet."
           : "No shop selected for webhook status.",
+    },
+    {
+      key: "requested_scopes_minimized",
+      ok:
+        configuredScopes.includes("read_products") &&
+        configuredScopes.includes("read_orders") &&
+        configuredScopes.includes("read_customers") &&
+        configuredScopes.includes("write_orders") &&
+        !configuredScopes.includes("write_products"),
+      detail:
+        configuredScopes.length > 0
+          ? configuredScopes.join(", ")
+          : "Could not parse access scopes from shopify.app.toml",
     },
     {
       key: "privacy_url_available",

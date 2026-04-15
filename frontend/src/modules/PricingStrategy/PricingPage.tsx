@@ -132,7 +132,7 @@ export function PricingPage() {
       setToast(
         publishResult?.updated
           ? `Approved ${activeRecommendation.productHandle} and published the price to Shopify across ${publishResult.variantCount ?? 1} variants.`
-          : `Approved ${activeRecommendation.productHandle}. Shopify publish is pending${
+          : `Approved ${activeRecommendation.productHandle}. This recommendation remains in VedaSuite for merchant review${
               publishResult?.reason ? `: ${publishResult.reason}` : "."
             }`
       );

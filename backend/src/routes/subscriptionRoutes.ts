@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { requireCapability } from "../middleware/requireCapability";
 import {
+  buildCanonicalEntitlements,
   cancelSubscription,
   downgradeToTrial,
   getCurrentSubscription,
+  resolveBillingState,
   updateStarterModuleSelection,
 } from "../services/subscriptionService";
 import { getBillingManagementState } from "../services/billingManagementService";
@@ -17,8 +19,16 @@ subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), asy
     return res.status(400).json({ error: "Missing shop." });
   }
   const plan = await getCurrentSubscription(shop);
+  const billingState = await resolveBillingState(shop);
+  const entitlements = buildCanonicalEntitlements({
+    planName: billingState.planName,
+    starterModule: billingState.starterModule,
+    accessActive: billingState.accessActive,
+    verified: billingState.verified,
+    trialActive: billingState.planName === "TRIAL" && billingState.accessActive,
+  });
   const billing = await getBillingManagementState(shop).catch(() => null);
-  return res.json({ subscription: plan, billing });
+  return res.json({ subscription: plan, billingState, entitlements, billing });
 });
 
 subscriptionRouter.post("/cancel", requireCapability("billing.downgrade"), async (req, res) => {

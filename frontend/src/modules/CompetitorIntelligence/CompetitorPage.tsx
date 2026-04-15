@@ -28,6 +28,7 @@ type CompetitorPrimaryState =
   | "SETUP_INCOMPLETE"
   | "AWAITING_FIRST_RUN"
   | "NO_MATCHES"
+  | "LOW_CONFIDENCE"
   | "NO_CHANGES"
   | "CHANGES_DETECTED"
   | "STALE"
@@ -42,6 +43,9 @@ type CompetitorRow = {
   promotion?: string | null;
   stockStatus?: string | null;
   source?: string;
+  confidenceScore?: number;
+  confidenceLabel?: string;
+  matchReason?: string;
 };
 
 type CompetitorOverview = {
@@ -51,12 +55,28 @@ type CompetitorOverview = {
     lastSuccessfulRunAt?: string | null;
     lastAttemptAt?: string | null;
     checkedDomainsCount: number;
+    monitoredProductsCount?: number;
     matchedProductsCount: number;
+    validMatchedProductsCount?: number;
+    lowConfidenceMatchesCount?: number;
+    excludedProductsCount?: number;
+    excludedProducts?: {
+      archived: number;
+      draft: number;
+      giftCardLike: number;
+      missingPrice: number;
+    };
     activePromotionsCount: number;
     stockAlertsCount: number;
     coverageStatus: string;
     title: string;
     description: string;
+    confidenceExplanation?: string;
+    actionPanel?: {
+      headline: string;
+      explanation: string;
+      actions: string[];
+    };
     nextAction?: string | null;
     toastMessage?: string | null;
   };
@@ -80,6 +100,25 @@ type CompetitorOverview = {
     whyItMatters: string;
     merchantBrief?: string;
     nextBestAction?: string;
+  };
+  lowConfidenceRows?: Array<{
+    id: string;
+    productHandle: string;
+    competitorName: string;
+    confidenceLabel: string;
+    confidenceScore: number;
+    matchReason: string;
+  }>;
+  productCoverage?: {
+    eligibleProductsCount: number;
+    excludedProductsCount: number;
+    excludedProducts: {
+      archived: number;
+      draft: number;
+      giftCardLike: number;
+      missingPrice: number;
+    };
+    explanation: string;
   };
 };
 
@@ -125,6 +164,14 @@ function createEmptyOverview(): CompetitorOverview {
       title: "Competitor setup is incomplete",
       description:
         "Add competitor domains before VedaSuite can monitor comparable competitor products.",
+      confidenceExplanation:
+        "VedaSuite only shows comparable products after it finds strong live product evidence on the monitored competitor domains.",
+      actionPanel: {
+        headline: "Complete monitoring setup",
+        explanation:
+          "Add domains, then run the first refresh so VedaSuite can look for real comparable products.",
+        actions: ["Add competitor domains", "Run the first refresh"],
+      },
       nextAction: "Add competitor domains",
       toastMessage: "Add competitor domains before refreshing competitor monitoring.",
     },
@@ -138,6 +185,19 @@ function createEmptyOverview(): CompetitorOverview {
       merchantBrief:
         "VedaSuite will build a weekly competitor brief after the first successful matched refresh.",
       nextBestAction: "Add competitor domains and run your first refresh.",
+    },
+    lowConfidenceRows: [],
+    productCoverage: {
+      eligibleProductsCount: 0,
+      excludedProductsCount: 0,
+      excludedProducts: {
+        archived: 0,
+        draft: 0,
+        giftCardLike: 0,
+        missingPrice: 0,
+      },
+      explanation:
+        "Only active priced products are monitored for competitor overlap.",
     },
   };
 }
@@ -195,6 +255,7 @@ function getBannerTone(state: CompetitorPrimaryState) {
       return "success" as const;
     case "FAILURE":
       return "critical" as const;
+    case "LOW_CONFIDENCE":
     case "STALE":
     case "NO_MATCHES":
       return "warning" as const;
@@ -211,6 +272,8 @@ function getPageSubtitle(state: CompetitorPrimaryState) {
       return "Domains are configured. Run the first refresh to begin competitor monitoring.";
     case "NO_MATCHES":
       return "Monitoring ran successfully, but VedaSuite has not found comparable competitor products yet.";
+    case "LOW_CONFIDENCE":
+      return "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable matches yet.";
     case "NO_CHANGES":
       return "Monitoring is active and ready to surface competitor changes when they appear.";
     case "CHANGES_DETECTED":
@@ -225,6 +288,7 @@ function getPageSubtitle(state: CompetitorPrimaryState) {
 function getPrimaryActionLabel(state: CompetitorPrimaryState) {
   if (state === "SETUP_INCOMPLETE") return "Add competitor domains";
   if (state === "CHANGES_DETECTED") return "View changes";
+  if (state === "LOW_CONFIDENCE") return "Review coverage";
   return "Refresh monitoring";
 }
 
@@ -233,12 +297,17 @@ function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" 
     if (state === "SETUP_INCOMPLETE") return "Add competitor domains to build the tracked products table.";
     if (state === "AWAITING_FIRST_RUN") return "Run the first refresh to build the tracked products table.";
     if (state === "NO_MATCHES") return "Monitoring ran successfully, but no comparable competitor products were found.";
+    if (state === "LOW_CONFIDENCE") return "Possible competitor pages were found, but they were excluded because the match confidence was too low.";
     return "Tracked products will appear here after competitor data becomes available.";
   }
   if (tab === "feed") {
     if (state === "NO_MATCHES") return "No move feed is available yet because VedaSuite has not found comparable competitor products.";
+    if (state === "LOW_CONFIDENCE") return "No move feed is available yet because the latest possible matches were too weak to trust.";
     if (state === "NO_CHANGES") return "Monitoring is active. No price, stock, or promotion changes were detected in the latest refresh.";
     return "The move feed will populate as competitor changes are detected.";
+  }
+  if (state === "LOW_CONFIDENCE") {
+    return "Response recommendations appear after VedaSuite confirms stronger comparable matches.";
   }
   if (state === "NO_MATCHES") {
     return "Response recommendations appear after VedaSuite finds comparable competitor products.";
@@ -419,11 +488,16 @@ export function CompetitorPage() {
       setSelectedTab(1);
       return;
     }
+    if (primaryState === "LOW_CONFIDENCE") {
+      setSelectedTab(0);
+      return;
+    }
     void ingestCompetitorData();
   };
 
   const summaryCards = [
-    ["Matched products", overview.competitorState?.matchedProductsCount ?? 0],
+    ["Comparable matches", overview.competitorState?.validMatchedProductsCount ?? overview.competitorState?.matchedProductsCount ?? 0],
+    ["Low-confidence matches", overview.competitorState?.lowConfidenceMatchesCount ?? 0],
     ["Active promotions", overview.competitorState?.activePromotionsCount ?? 0],
     ["Stock alerts", overview.competitorState?.stockAlertsCount ?? 0],
     ["Domains checked", overview.competitorState?.checkedDomainsCount ?? 0],
@@ -439,7 +513,9 @@ export function CompetitorPage() {
     ],
     ["Last refresh attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
     ["Domains checked", String(overview.competitorState?.checkedDomainsCount ?? 0)],
-    ["Matched products", String(overview.competitorState?.matchedProductsCount ?? 0)],
+    ["Eligible products monitored", String(overview.competitorState?.monitoredProductsCount ?? overview.productCoverage?.eligibleProductsCount ?? 0)],
+    ["Comparable matches", String(overview.competitorState?.validMatchedProductsCount ?? overview.competitorState?.matchedProductsCount ?? 0)],
+    ["Low-confidence matches", String(overview.competitorState?.lowConfidenceMatchesCount ?? 0)],
     ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
   ];
 
@@ -526,10 +602,19 @@ export function CompetitorPage() {
                       {overview.competitorState?.coverageStatus}
                     </Badge>
                   </InlineStack>
+                  <Text as="p" tone="subdued">
+                    {overview.competitorState?.actionPanel?.explanation ??
+                      overview.competitorState?.confidenceExplanation ??
+                      overview.competitorState?.description}
+                  </Text>
                   <BlockStack gap="150">
-                    {(overview.actionSuggestions?.length
-                      ? overview.actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
-                      : [overview.competitorState?.nextAction ?? "Review competitor monitoring state."]).map((item) => (
+                    {(
+                      overview.competitorState?.actionPanel?.actions?.length
+                        ? overview.competitorState.actionPanel.actions
+                        : overview.actionSuggestions?.length
+                        ? overview.actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+                        : [overview.competitorState?.nextAction ?? "Review competitor monitoring state."]
+                    ).map((item) => (
                       <Text key={item} as="p">
                         - {item}
                       </Text>
@@ -555,6 +640,70 @@ export function CompetitorPage() {
                       </InlineStack>
                     ))}
                   </BlockStack>
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </Layout.Section>
+
+          <Layout.Section>
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+              <Card>
+                <BlockStack gap="250">
+                  <Text as="h3" variant="headingMd">
+                    Match quality and catalog coverage
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {overview.productCoverage?.explanation ??
+                      "Only strong, comparable competitor matches are shown in the main tables."}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Eligible active products: {overview.productCoverage?.eligibleProductsCount ?? 0}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Excluded products: {overview.productCoverage?.excludedProductsCount ?? 0}
+                  </Text>
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Excluded from monitoring
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Archived: {overview.productCoverage?.excludedProducts.archived ?? 0}
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Draft: {overview.productCoverage?.excludedProducts.draft ?? 0}
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Gift-card-like: {overview.productCoverage?.excludedProducts.giftCardLike ?? 0}
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Missing price: {overview.productCoverage?.excludedProducts.missingPrice ?? 0}
+                    </Text>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+
+              <Card>
+                <BlockStack gap="250">
+                  <Text as="h3" variant="headingMd">
+                    Why products did or did not match
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    {overview.competitorState?.confidenceExplanation ??
+                      "VedaSuite only shows comparable matches after it confirms strong live product evidence."}
+                  </Text>
+                  {(overview.lowConfidenceRows ?? []).length > 0 ? (
+                    <BlockStack gap="150">
+                      {(overview.lowConfidenceRows ?? []).map((row) => (
+                        <Text key={row.id} as="p" variant="bodySm">
+                          - {row.productHandle} on {row.competitorName}: {row.matchReason} ({row.confidenceLabel} confidence)
+                        </Text>
+                      ))}
+                    </BlockStack>
+                  ) : (
+                    <Text as="p" variant="bodySm">
+                      No low-confidence matches are being shown right now.
+                    </Text>
+                  )}
                 </BlockStack>
               </Card>
             </InlineGrid>
@@ -593,6 +742,7 @@ export function CompetitorPage() {
                           { title: "Product" },
                           { title: "Competitor" },
                           { title: "Price" },
+                          { title: "Confidence" },
                           { title: "Promotion" },
                           { title: "Stock" },
                           { title: "Shopify" },
@@ -604,6 +754,30 @@ export function CompetitorPage() {
                             <IndexTable.Cell>{row.competitorName}</IndexTable.Cell>
                             <IndexTable.Cell>
                               {row.price != null ? `$${row.price.toFixed(2)}` : "-"}
+                            </IndexTable.Cell>
+                            <IndexTable.Cell>
+                              {row.confidenceLabel ? (
+                                <BlockStack gap="100">
+                                  <Badge
+                                    tone={
+                                      row.confidenceLabel === "high"
+                                        ? "success"
+                                        : row.confidenceLabel === "medium"
+                                        ? "attention"
+                                        : "info"
+                                    }
+                                  >
+                                    {row.confidenceLabel}
+                                  </Badge>
+                                  {row.matchReason ? (
+                                    <Text as="p" variant="bodySm" tone="subdued">
+                                      {row.matchReason}
+                                    </Text>
+                                  ) : null}
+                                </BlockStack>
+                              ) : (
+                                "-"
+                              )}
                             </IndexTable.Cell>
                             <IndexTable.Cell>
                               {row.promotion ? <Badge tone="info">{row.promotion}</Badge> : "-"}

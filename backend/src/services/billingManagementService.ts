@@ -278,10 +278,12 @@ export async function getBillingManagementState(
     availableActions: {
       canManagePlans: subscription.capabilities["billing.planManagement"],
       canCancelSubscription:
-        subscription.planName !== "NONE" &&
-        subscription.planName !== "TRIAL" &&
+        ["active", "test_charge"].includes(billing.lifecycle) &&
         !!billing.shopifyChargeId,
-      canChangeStarterModule: subscription.planName === "STARTER" && subscription.active,
+      canChangeStarterModule:
+        subscription.planName === "STARTER" &&
+        subscription.active &&
+        ["active", "test_charge", "cancelled"].includes(billing.lifecycle),
       awaitingApproval:
         !!latestIntent &&
         ["CREATING", "PENDING_APPROVAL"].includes(latestIntent.status),

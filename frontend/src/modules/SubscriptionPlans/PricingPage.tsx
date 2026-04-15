@@ -36,17 +36,37 @@ type BillingPlanCard = {
 type BillingManagementState = {
   subscription: SubscriptionInfo;
   billing: {
+    lifecycle:
+      | "no_subscription"
+      | "pending_approval"
+      | "active"
+      | "cancelled"
+      | "frozen"
+      | "test_charge"
+      | "uninstalled"
+      | "unknown_error";
     planName: BillingPlanName;
+    planTier: "none" | "trial" | "starter" | "growth" | "pro";
     normalizedBillingStatus: string | null;
     active: boolean;
+    accessActive: boolean;
+    verified: boolean;
     status: string;
     starterModule: StarterModule | null;
     endsAt: string | null;
+    renewalAt: string | null;
+    showRenewalDate: boolean;
+    showTrialDate: boolean;
     subscriptionId: string | null;
     shopifyChargeId: string | null;
     planSource: string;
     dbPlanName: BillingPlanName;
     dbBillingStatus: string | null;
+    pendingIntentStatus: string | null;
+    pendingRequestedPlanName: BillingPlanName | null;
+    pendingRequestedStarterModule: StarterModule | null;
+    merchantTitle: string;
+    merchantDescription: string;
     mismatchWarnings: string[];
   };
   pendingIntent: {
@@ -340,14 +360,20 @@ export function PricingPage() {
 
     const { subscription, billing } = management;
     return {
-      planName: subscription.planName,
-      billingStatus:
-        billing.normalizedBillingStatus ?? subscription.billingStatus ?? "INACTIVE",
+      planName: billing.planName,
+      billingStatus: billing.lifecycle,
       active: billing.active,
-      endsAt: billing.endsAt ?? subscription.endsAt,
-      trialEndsAt: subscription.trialEndsAt,
+      accessActive: billing.accessActive,
+      verified: billing.verified,
+      endsAt:
+        billing.showRenewalDate
+          ? billing.renewalAt ?? billing.endsAt
+          : null,
+      trialEndsAt: billing.showTrialDate ? subscription.trialEndsAt : null,
       starterModule: billing.starterModule ?? subscription.starterModule,
       status: billing.status ?? subscription.status,
+      merchantTitle: billing.merchantTitle,
+      merchantDescription: billing.merchantDescription,
     };
   }, [management]);
 
@@ -484,9 +510,13 @@ export function PricingPage() {
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Current billing truth
+                    Plan state
                   </Text>
-                  <Text as="p">{management.billing.planSource}</Text>
+                  <Text as="p">
+                    {currentSummary?.active
+                      ? "Shopify plan active"
+                      : "No active paid subscription"}
+                  </Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
@@ -510,11 +540,15 @@ export function PricingPage() {
                     Current subscription
                   </Text>
                   <Text as="p" tone="subdued">
-                    This section only reflects backend-confirmed billing state.
+                    This section reflects the current plan VedaSuite can use right now.
                   </Text>
                 </BlockStack>
                 <Badge tone={currentSummary.active ? "success" : "attention"}>
-                  {currentSummary.active ? "Active" : "Inactive"}
+                  {currentSummary.active
+                    ? "Active"
+                    : currentSummary.accessActive
+                    ? "Access active"
+                    : "Inactive"}
                 </Badge>
               </InlineStack>
               <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
@@ -528,19 +562,19 @@ export function PricingPage() {
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Billing status
+                    Billing lifecycle
                   </Text>
                   <Text as="p">{currentSummary.billingStatus}</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Lifecycle
+                    Verified state
                   </Text>
-                  <Text as="p">{currentSummary.status}</Text>
+                  <Text as="p">{currentSummary.verified ? "Verified" : "Resolving"}</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Renewal / end date
+                    Renewal / access end
                   </Text>
                   <Text as="p">{formatDate(currentSummary.endsAt)}</Text>
                 </div>
@@ -557,6 +591,25 @@ export function PricingPage() {
                   <Text as="p">{starterLabel(currentSummary.starterModule)}</Text>
                 </div>
               </InlineGrid>
+              <Banner
+                title={currentSummary.merchantTitle}
+                tone={
+                  management.billing.lifecycle === "active" ||
+                  management.billing.lifecycle === "test_charge"
+                    ? "success"
+                    : management.billing.lifecycle === "pending_approval"
+                    ? "warning"
+                    : management.billing.lifecycle === "cancelled"
+                    ? "attention"
+                    : management.billing.lifecycle === "frozen" ||
+                      management.billing.lifecycle === "unknown_error" ||
+                      management.billing.lifecycle === "uninstalled"
+                    ? "critical"
+                    : "info"
+                }
+              >
+                <p>{currentSummary.merchantDescription}</p>
+              </Banner>
               {management.availableActions.canCancelSubscription ? (
                 <InlineStack gap="300">
                   <Button
@@ -747,7 +800,7 @@ export function PricingPage() {
                   Some dashboards stay limited until VedaSuite syncs and processes enough Shopify history.
                 </List.Item>
                 <List.Item>
-                  VedaSuite only marks the plan as updated after backend confirmation from Shopify, not just after redirect return.
+                  VedaSuite only marks the plan as updated after Shopify confirms the subscription, not just after redirect return.
                 </List.Item>
               </List>
             </BlockStack>

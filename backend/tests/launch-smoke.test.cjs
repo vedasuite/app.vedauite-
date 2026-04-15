@@ -71,6 +71,7 @@ test("launch endpoints expose factual production checks and public policy routes
     assert.equal(audit.statusCode, 200);
     assert.match(audit.body, /application_url_matches_production/);
     assert.match(audit.body, /webhook_routes_match_backend/);
+    assert.match(audit.body, /requested_scopes_minimized/);
 
     const sanity = await request(server, "/launch/sanity");
     assert.equal(sanity.statusCode, 200);

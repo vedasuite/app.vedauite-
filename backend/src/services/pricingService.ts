@@ -1,5 +1,4 @@
 import { prisma } from "../db/prismaClient";
-import { publishProductPrice } from "./shopifyAdminService";
 
 function parseRationaleJson(value?: string | null) {
   if (!value) return {};
@@ -155,12 +154,6 @@ export async function approvePricingRecommendation(
     recommendation.expectedMarginDelta
   );
 
-  const shopifyPublishResult = await publishProductPrice(
-    shopDomain,
-    recommendation.productHandle,
-    recommendation.recommendedPrice
-  );
-
   const updated = await prisma.priceHistory.update({
     where: { id: recommendation.id },
     data: {
@@ -168,9 +161,9 @@ export async function approvePricingRecommendation(
         ...rationale,
         status: "approved",
         approvedAt: new Date().toISOString(),
-        publishedToShopify: shopifyPublishResult.updated,
+        publishedToShopify: false,
         shopifyPublishReason:
-          shopifyPublishResult.updated ? null : shopifyPublishResult.reason,
+          "Direct Shopify product writes are disabled in the current approval-safe configuration.",
         automationPosture,
       }),
     },
@@ -178,7 +171,11 @@ export async function approvePricingRecommendation(
 
   return {
     ...updated,
-    shopifyPublishResult,
+    shopifyPublishResult: {
+      updated: false,
+      reason:
+        "Direct Shopify price publishing is disabled. Review and apply product price changes manually in Shopify Admin if needed.",
+    },
     automationPosture,
   };
 }

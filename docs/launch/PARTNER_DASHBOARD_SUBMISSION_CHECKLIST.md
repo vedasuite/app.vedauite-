@@ -21,13 +21,14 @@ Use this checklist while filling the Shopify Partner Dashboard for VedaSuite AI.
 Current repo scopes:
 
 - `read_products`
-- `write_products`
 - `read_orders`
 - `write_orders`
 - `read_customers`
-- `write_own_subscription`
 
-Review whether any scope can be removed before production submission.
+Scope note:
+
+- `write_orders` is retained because VedaSuite can add review-oriented order tags from the fraud workflow.
+- `write_products` has been removed from the app config because product price writes are not part of the reviewer-facing flow.
 
 ## Billing
 

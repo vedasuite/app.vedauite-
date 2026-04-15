@@ -38,6 +38,7 @@ export async function getStoreOperationalSnapshot(shopDomain: string) {
     select: {
       id: true,
       shop: true,
+      onboardingSelectedModule: true,
       lastSyncAt: true,
       lastSyncStatus: true,
       lastConnectionStatus: true,

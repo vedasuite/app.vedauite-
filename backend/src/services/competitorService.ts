@@ -42,11 +42,143 @@ type CompetitorPrimaryState =
   | "SETUP_INCOMPLETE"
   | "AWAITING_FIRST_RUN"
   | "NO_MATCHES"
+  | "LOW_CONFIDENCE"
   | "NO_CHANGES"
   | "CHANGES_DETECTED"
   | "STALE"
   | "FAILURE";
 type CompetitorChannelAvailability = "Live" | "Configured" | "Preview" | "Not enabled";
+
+type SourceProductCandidate = {
+  productHandle: string;
+  title: string;
+  status: string;
+  currentPrice: number | null;
+};
+
+type CompetitorMatchMetadata = {
+  confidenceScore: number;
+  confidenceLabel: "high" | "medium" | "low";
+  matchReason: string;
+  usedFallbackPrice: boolean;
+  externalFetch?: boolean;
+  sourceProductTitle?: string;
+  sourceProductStatus?: string;
+};
+
+const GIFT_CARD_PATTERN =
+  /\bgift\s*card\b|\bgiftcard\b|\bgift[-\s]?voucher\b|\be[-\s]?gift\b/i;
+
+function parseCompetitorMetadata(value?: string | null): CompetitorMatchMetadata | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as CompetitorMatchMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCompetitorMetadata(
+  row: Pick<
+    OverviewRow,
+    "insightsJson" | "productHandle" | "price" | "promotion" | "stockStatus"
+  >
+): CompetitorMatchMetadata {
+  const parsed = parseCompetitorMetadata(row.insightsJson);
+  if (parsed) {
+    return parsed;
+  }
+
+  const confidenceScore =
+    row.price != null
+      ? 82
+      : row.promotion || row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock"
+      ? 58
+      : 42;
+
+  return {
+    confidenceScore,
+    confidenceLabel:
+      confidenceScore >= 80 ? "high" : confidenceScore >= 60 ? "medium" : "low",
+    matchReason:
+      confidenceScore >= 80
+        ? "Live competitor pricing was captured for this product."
+        : confidenceScore >= 60
+        ? "The product page matched, but only part of the live pricing signal could be confirmed."
+        : "The match relied on weak page signals and is excluded from comparable-product reporting.",
+    usedFallbackPrice: confidenceScore < 80,
+  };
+}
+
+export function filterCompetitorSourceProducts(products: SourceProductCandidate[]) {
+  const excluded = {
+    archived: 0,
+    draft: 0,
+    giftCardLike: 0,
+    missingPrice: 0,
+  };
+
+  const eligible = products.filter((product) => {
+    const status = (product.status ?? "").toLowerCase();
+    if (status === "archived") {
+      excluded.archived += 1;
+      return false;
+    }
+    if (status === "draft") {
+      excluded.draft += 1;
+      return false;
+    }
+    if (GIFT_CARD_PATTERN.test(product.title)) {
+      excluded.giftCardLike += 1;
+      return false;
+    }
+    if (product.currentPrice == null || product.currentPrice <= 0) {
+      excluded.missingPrice += 1;
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    eligible,
+    excluded,
+    excludedCount:
+      excluded.archived + excluded.draft + excluded.giftCardLike + excluded.missingPrice,
+  };
+}
+
+function filterComparableRows(rows: OverviewRow[]) {
+  const deduped = new Map<string, OverviewRow>();
+  const lowConfidenceRows: OverviewRow[] = [];
+  const excludedDuplicates: OverviewRow[] = [];
+
+  for (const row of rows) {
+    const metadata = normalizeCompetitorMetadata(row);
+    if (metadata.confidenceScore < 60) {
+      lowConfidenceRows.push(row);
+      continue;
+    }
+
+    const key = `${row.productHandle}::${row.competitorName}::${row.source}`;
+    if (deduped.has(key)) {
+      excludedDuplicates.push(row);
+      continue;
+    }
+    deduped.set(key, row);
+  }
+
+  const comparableRows = Array.from(deduped.values());
+  return {
+    comparableRows,
+    lowConfidenceRows,
+    excludedDuplicates,
+    validMatchedProductsCount: new Set(comparableRows.map((row) => row.productHandle)).size,
+    lowConfidenceProductsCount: new Set(lowConfidenceRows.map((row) => row.productHandle)).size,
+  };
+}
 
 function getCompetitorFreshnessLabel(
   freshnessHours: number | null,
@@ -67,12 +199,13 @@ function getCompetitorFreshnessLabel(
   return `Last refreshed ${freshnessHours} hours ago`;
 }
 
-function getCompetitorPrimaryState(args: {
+export function deriveCompetitorPrimaryState(args: {
   hasDomains: boolean;
   syncStatusLabel: CompetitorSyncStatus;
   lastSuccessfulRunAt: Date | null;
   freshnessHours: number | null;
-  matchedProductsCount: number;
+  validMatchedProductsCount: number;
+  lowConfidenceProductsCount: number;
   changesDetected: boolean;
 }) {
   if (!args.hasDomains) {
@@ -87,7 +220,10 @@ function getCompetitorPrimaryState(args: {
   if (args.freshnessHours != null && args.freshnessHours > 24) {
     return "STALE" as const;
   }
-  if (args.matchedProductsCount === 0) {
+  if (args.validMatchedProductsCount === 0 && args.lowConfidenceProductsCount > 0) {
+    return "LOW_CONFIDENCE" as const;
+  }
+  if (args.validMatchedProductsCount === 0) {
     return "NO_MATCHES" as const;
   }
   if (!args.changesDetected) {
@@ -99,7 +235,8 @@ function getCompetitorPrimaryState(args: {
 function getCompetitorPrimaryStateCopy(args: {
   primaryState: CompetitorPrimaryState;
   freshnessLabel: string;
-  matchedProductsCount: number;
+  validMatchedProductsCount: number;
+  lowConfidenceProductsCount: number;
   checkedDomainsCount: number;
   changesDetected: number;
   latestError: string | null;
@@ -133,6 +270,16 @@ function getCompetitorPrimaryStateCopy(args: {
         coverageStatus: "No comparable matches found",
         toastMessage: "Refresh completed. No comparable competitor products were found.",
       };
+    case "LOW_CONFIDENCE":
+      return {
+        title: "Monitoring ran, but only low-confidence matches were found",
+        description:
+          "VedaSuite found possible competitor pages, but the captured signals were too weak to treat them as reliable comparable products.",
+        nextAction: "Review domains, product overlap, or run another refresh",
+        coverageStatus: "Low-confidence matches only",
+        toastMessage:
+          "Refresh completed. Possible competitor matches were found, but they were not reliable enough to use yet.",
+      };
     case "NO_CHANGES":
       return {
         title: "Monitoring is active. No competitor changes detected",
@@ -145,7 +292,7 @@ function getCompetitorPrimaryStateCopy(args: {
     case "CHANGES_DETECTED":
       return {
         title: "Competitor changes were detected across matched products",
-        description: `The latest refresh checked ${args.checkedDomainsCount} domains, matched ${args.matchedProductsCount} products, and found ${args.changesDetected} live competitor changes.`,
+        description: `The latest refresh checked ${args.checkedDomainsCount} domains, matched ${args.validMatchedProductsCount} comparable products, and found ${args.changesDetected} live competitor changes.`,
         nextAction: "View changes",
         coverageStatus: "Changes detected",
         toastMessage: "Refresh completed. New competitor changes detected.",
@@ -231,6 +378,14 @@ async function getStore(shopDomain: string) {
     where: { shop: shopDomain },
     include: {
       competitorDomains: true,
+      productSnapshots: {
+        select: {
+          handle: true,
+          title: true,
+          status: true,
+          currentPrice: true,
+        },
+      },
     },
   });
   if (!store) {
@@ -391,19 +546,29 @@ export async function getCompetitorOverview(shopDomain: string) {
     timelineEvents: operational.counts.timelineEvents,
   });
 
+  const eligibleProducts = filterCompetitorSourceProducts(
+    store.productSnapshots.map((product) => ({
+      productHandle: product.handle,
+      title: product.title,
+      status: product.status,
+      currentPrice: product.currentPrice ?? null,
+    }))
+  );
+  const comparableRecentRows = filterComparableRows(recentRows);
+  const comparableAllRows = filterComparableRows(allRows);
   const sourceBreakdown = {
-    website: recentRows.filter((row) => row.source.startsWith("website")).length,
-    googleShopping: recentRows.filter((row) => row.source === "google_shopping").length,
-    metaAds: recentRows.filter((row) => row.source === "meta_ads").length,
+    website: comparableRecentRows.comparableRows.filter((row) => row.source.startsWith("website")).length,
+    googleShopping: comparableRecentRows.comparableRows.filter((row) => row.source === "google_shopping").length,
+    metaAds: comparableRecentRows.comparableRows.filter((row) => row.source === "meta_ads").length,
   };
 
-  const promoCount = recentRows.filter((row) => !!row.promotion).length;
-  const stockAlerts = recentRows.filter(
+  const promoCount = comparableRecentRows.comparableRows.filter((row) => !!row.promotion).length;
+  const stockAlerts = comparableRecentRows.comparableRows.filter(
     (row) => row.stockStatus === "low_stock" || row.stockStatus === "out_of_stock"
   ).length;
-  const recentChanges = recentRows.filter((row) => row.collectedAt >= last24h).length;
+  const recentChanges = comparableRecentRows.comparableRows.filter((row) => row.collectedAt >= last24h).length;
 
-  const productSignals = buildProductSignals(recentRows);
+  const productSignals = buildProductSignals(comparableRecentRows.comparableRows);
   const topMovers = Array.from(productSignals.entries())
     .map(([productHandle, bucket]) => ({
       productHandle,
@@ -421,7 +586,7 @@ export async function getCompetitorOverview(shopDomain: string) {
     )
     .slice(0, 5);
 
-  const moveFeed = recentRows.slice(0, 10).map((row) => {
+  const moveFeed = comparableRecentRows.comparableRows.slice(0, 10).map((row) => {
     const bucket = productSignals.get(row.productHandle);
     const priceDelta =
       bucket?.latest != null && bucket?.earliest != null
@@ -509,8 +674,8 @@ export async function getCompetitorOverview(shopDomain: string) {
         : "Avoid unnecessary reactions and preserve pricing discipline.",
   }));
 
-  const strategyDetections = buildStrategyDetections(recentRows);
-  const lastIngestedAt = allRows[0]?.collectedAt ?? null;
+  const strategyDetections = buildStrategyDetections(comparableRecentRows.comparableRows);
+  const lastIngestedAt = comparableAllRows.comparableRows[0]?.collectedAt ?? allRows[0]?.collectedAt ?? null;
   const lastSuccessAt =
     latestCompetitorJob &&
     (latestCompetitorJob.status === "SUCCEEDED" ||
@@ -527,9 +692,9 @@ export async function getCompetitorOverview(shopDomain: string) {
   const checkedDomainsCount =
     latestCompetitorSummary?.domains ?? store.competitorDomains.length;
   const monitoredProductsCount =
-    latestCompetitorSummary?.products ??
-    new Set(allRows.map((row) => row.productHandle)).size;
-  const matchedProductsCount = new Set(recentRows.map((row) => row.productHandle)).size;
+    latestCompetitorSummary?.products ?? eligibleProducts.eligible.length;
+  const matchedProductsCount = comparableRecentRows.validMatchedProductsCount;
+  const lowConfidenceMatchesCount = comparableRecentRows.lowConfidenceProductsCount;
   const detectedPriceChangesCount = topMovers.filter(
     (item) => item.priceDelta !== 0
   ).length;
@@ -537,7 +702,7 @@ export async function getCompetitorOverview(shopDomain: string) {
   const setupStatus: CompetitorSetupStatus =
     store.competitorDomains.length === 0
       ? "NO_DOMAINS"
-      : (latestCompetitorSummary?.products ?? monitoredProductsCount) === 0
+      : monitoredProductsCount === 0
       ? "NO_MONITORED_PRODUCTS"
       : "READY";
   const syncStatusLabel: CompetitorSyncStatus =
@@ -573,8 +738,10 @@ export async function getCompetitorOverview(shopDomain: string) {
       ? "NOT_STARTED"
       : monitoredProductsCount === 0
       ? "NOT_STARTED"
-      : matchedProductsCount === 0
+      : matchedProductsCount === 0 && lowConfidenceMatchesCount === 0
       ? "NO_MATCHES"
+      : matchedProductsCount === 0 && lowConfidenceMatchesCount > 0
+      ? "PARTIAL"
       : detectedPriceChangesCount === 0 && detectedPromotionChangesCount === 0
       ? "NO_CHANGES"
       : crawlStatus === "PARTIAL"
@@ -613,18 +780,20 @@ export async function getCompetitorOverview(shopDomain: string) {
     freshnessHours,
     lastSuccessAt
   );
-  const primaryState = getCompetitorPrimaryState({
+  const primaryState = deriveCompetitorPrimaryState({
     hasDomains: store.competitorDomains.length > 0,
     syncStatusLabel,
     lastSuccessfulRunAt: lastSuccessAt,
     freshnessHours,
-    matchedProductsCount,
+    validMatchedProductsCount: matchedProductsCount,
+    lowConfidenceProductsCount: lowConfidenceMatchesCount,
     changesDetected: changesDetected > 0,
   });
   const primaryStateCopy = getCompetitorPrimaryStateCopy({
     primaryState,
     freshnessLabel,
-    matchedProductsCount,
+    validMatchedProductsCount: matchedProductsCount,
+    lowConfidenceProductsCount: lowConfidenceMatchesCount,
     checkedDomainsCount,
     changesDetected,
     latestError:
@@ -639,6 +808,8 @@ export async function getCompetitorOverview(shopDomain: string) {
         ? `${recentChanges} competitor signals detected in the last 24 hours`
         : primaryState === "NO_CHANGES"
         ? "Monitoring is active with no new competitor changes"
+        : primaryState === "LOW_CONFIDENCE"
+        ? "Possible competitor overlap was found, but confidence is still low"
         : primaryState === "NO_MATCHES"
         ? "Monitoring is active, but no comparable matches were found"
         : store.competitorDomains.length > 0
@@ -647,6 +818,8 @@ export async function getCompetitorOverview(shopDomain: string) {
     whyItMatters:
       primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor observations are available for pricing, promotion, stock, and visibility review."
+        : primaryState === "LOW_CONFIDENCE"
+        ? "Some pages resembled competitor product pages, but the captured pricing and product signals were not strong enough to trust yet."
         : primaryState === "NO_MATCHES"
         ? "Your domains were refreshed successfully, but VedaSuite did not find overlapping competitor products to compare yet."
         : store.competitorDomains.length > 0
@@ -655,6 +828,11 @@ export async function getCompetitorOverview(shopDomain: string) {
     suggestedActions:
       actionSuggestions.length > 0
         ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
+        : primaryState === "LOW_CONFIDENCE"
+        ? [
+            "Review domain relevance and ensure competitor product handles overlap your active catalog.",
+            "Refresh again after refining monitored domains.",
+          ]
         : primaryState === "NO_MATCHES"
         ? [
             "Review tracked products and competitor domains for overlap.",
@@ -666,6 +844,8 @@ export async function getCompetitorOverview(shopDomain: string) {
     reportReadiness:
       primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor report available"
+        : primaryState === "LOW_CONFIDENCE"
+        ? "Waiting for stronger match confidence"
         : primaryState === "NO_MATCHES"
         ? "Waiting for matched products"
         : lastSuccessAt
@@ -680,12 +860,16 @@ export async function getCompetitorOverview(shopDomain: string) {
       strategyDetections[0]?.implication ??
       ((primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES")
         ? "No dominant competitor strategy has been inferred yet from the current live data."
+        : primaryState === "LOW_CONFIDENCE"
+        ? "VedaSuite needs stronger comparable-product confirmation before it can build a reliable competitor brief."
         : primaryState === "NO_MATCHES"
         ? "VedaSuite needs comparable competitor product matches before it can build a reliable weekly brief."
         : "VedaSuite will build a weekly competitor brief after the first successful matched refresh."),
     nextBestAction:
       actionSuggestions[0]?.suggestion ??
-      (primaryState === "NO_MATCHES"
+      (primaryState === "LOW_CONFIDENCE"
+        ? "Review domains and prioritize competitor sites with clearer product overlap."
+        : primaryState === "NO_MATCHES"
         ? "Review tracked products and add more relevant competitor domains."
         : store.competitorDomains.length > 0
         ? "Run ingestion to populate the move feed."
@@ -802,6 +986,23 @@ export async function getCompetitorOverview(shopDomain: string) {
           description: primaryStateCopy.description,
           nextAction: primaryStateCopy.nextAction,
         })
+      : primaryState === "LOW_CONFIDENCE"
+      ? createUnifiedModuleState({
+          setupStatus: "complete",
+          syncStatus: "completed",
+          dataStatus: "partial",
+          lastSuccessfulSyncAt: toIsoString(lastSuccessAt),
+          lastAttemptAt: toIsoString(lastAttemptAt),
+          coverage: "partial",
+          dependencies: {
+            competitor: competitorDependencyState,
+            pricing: pricingDependencyState,
+            fraud: fraudDependencyState,
+          },
+          title: primaryStateCopy.title,
+          description: primaryStateCopy.description,
+          nextAction: primaryStateCopy.nextAction,
+        })
       : crawlStatus === "PARTIAL" || snapshotStatus === "PARTIAL"
       ? createUnifiedModuleState({
           setupStatus: "complete",
@@ -871,7 +1072,9 @@ export async function getCompetitorOverview(shopDomain: string) {
           ? "completed"
           : "never_run",
       matchStatus:
-        matchedProductsCount === 0
+        matchedProductsCount === 0 && lowConfidenceMatchesCount > 0
+          ? "partial_matches"
+          : matchedProductsCount === 0
           ? "no_matches"
           : crawlStatus === "PARTIAL"
           ? "partial_matches"
@@ -893,7 +1096,12 @@ export async function getCompetitorOverview(shopDomain: string) {
       lastAttemptAt: toIsoString(lastAttemptAt),
       configuredDomainsCount: store.competitorDomains.length,
       checkedDomainsCount,
+      monitoredProductsCount,
       matchedProductsCount,
+      validMatchedProductsCount: matchedProductsCount,
+      lowConfidenceMatchesCount,
+      excludedProductsCount: eligibleProducts.excludedCount,
+      excludedProducts: eligibleProducts.excluded,
       activePromotionsCount: promoCount,
       activePromotionCount: promoCount,
       stockAlertsCount: stockAlerts,
@@ -902,6 +1110,61 @@ export async function getCompetitorOverview(shopDomain: string) {
       coverageStatus: primaryStateCopy.coverageStatus,
       title: primaryStateCopy.title,
       description: primaryStateCopy.description,
+      confidenceExplanation:
+        primaryState === "LOW_CONFIDENCE"
+          ? "Possible competitor pages were found, but they did not provide strong enough live pricing or product signals to count as reliable comparable matches."
+          : primaryState === "NO_MATCHES"
+          ? "VedaSuite only counts a comparable match when the competitor page provides strong enough live product evidence."
+          : "Comparable products shown on this page passed the current match-confidence checks.",
+      actionPanel: {
+        headline:
+          primaryState === "SETUP_INCOMPLETE"
+            ? "Complete monitoring setup"
+            : primaryState === "AWAITING_FIRST_RUN"
+            ? "Run the first monitored refresh"
+            : primaryState === "NO_MATCHES"
+            ? "Improve comparable-product coverage"
+            : primaryState === "LOW_CONFIDENCE"
+            ? "Strengthen match confidence"
+            : primaryState === "CHANGES_DETECTED"
+            ? "Review competitor changes"
+            : "Keep monitoring active",
+        explanation:
+          primaryState === "SETUP_INCOMPLETE"
+            ? "Add relevant competitor domains before VedaSuite can check live competitor products."
+            : primaryState === "AWAITING_FIRST_RUN"
+            ? "Domains are configured. The next refresh will test those sites against your active catalog."
+            : primaryState === "NO_MATCHES"
+            ? "Monitoring completed successfully, but none of the checked competitor pages overlapped your active monitored products."
+            : primaryState === "LOW_CONFIDENCE"
+            ? "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable products yet."
+            : primaryState === "CHANGES_DETECTED"
+            ? "Prioritize the products with live price, promotion, or stock changes first."
+            : "Monitoring is working normally. No urgent competitor action is required right now.",
+        actions:
+          primaryState === "SETUP_INCOMPLETE"
+            ? ["Add competitor domains", "Refresh monitoring"]
+            : primaryState === "AWAITING_FIRST_RUN"
+            ? ["Run competitor monitoring", "Review active catalog coverage"]
+            : primaryState === "NO_MATCHES"
+            ? [
+                "Review active products for overlap with monitored competitors",
+                "Add more relevant competitor domains",
+                "Refresh monitoring again",
+              ]
+            : primaryState === "LOW_CONFIDENCE"
+            ? [
+                "Review domain quality and product overlap",
+                "Prioritize competitors with clearer product pages",
+                "Refresh monitoring again",
+              ]
+            : primaryState === "CHANGES_DETECTED"
+            ? [
+                "Open the move feed and review changed products",
+                "Use response guidance for highest-pressure products",
+              ]
+            : ["Refresh again later", "Review tracked products"],
+      },
       nextAction: primaryStateCopy.nextAction,
       toastMessage: primaryStateCopy.toastMessage,
     },
@@ -917,6 +1180,7 @@ export async function getCompetitorOverview(shopDomain: string) {
       checkedDomainsCount,
       monitoredProductsCount,
       matchedProductsCount,
+      lowConfidenceMatchesCount,
       detectedPriceChangesCount,
       detectedPromotionChangesCount,
       latestSyncReason:
@@ -950,6 +1214,26 @@ export async function getCompetitorOverview(shopDomain: string) {
     sourceBreakdown,
     topMovers,
     moveFeed,
+    lowConfidenceRows: comparableRecentRows.lowConfidenceRows.slice(0, 6).map((row) => {
+      const metadata = normalizeCompetitorMetadata(row);
+      return {
+        id: row.id,
+        productHandle: row.productHandle,
+        competitorName: row.competitorName,
+        confidenceLabel: metadata.confidenceLabel,
+        confidenceScore: metadata.confidenceScore,
+        matchReason: metadata.matchReason,
+      };
+    }),
+    productCoverage: {
+      eligibleProductsCount: eligibleProducts.eligible.length,
+      excludedProductsCount: eligibleProducts.excludedCount,
+      excludedProducts: eligibleProducts.excluded,
+      explanation:
+        eligibleProducts.excludedCount > 0
+          ? `Draft, archived, gift-card-like, or price-missing products are excluded from competitor monitoring to keep matches useful.`
+          : "Only active catalog products with usable pricing are monitored for competitor overlap.",
+    },
     strategyDetections,
     actionSuggestions,
     weeklyReport,
@@ -967,7 +1251,16 @@ export async function getCompetitorOverview(shopDomain: string) {
 
 export async function listTrackedCompetitorProducts(shopDomain: string) {
   const store = await getStore(shopDomain);
-  return getCompetitorRows(store.id, 100);
+  const rows = await getCompetitorRows(store.id, 150);
+  return filterComparableRows(rows).comparableRows.map((row) => {
+    const metadata = normalizeCompetitorMetadata(row);
+    return {
+      ...row,
+      confidenceScore: metadata.confidenceScore,
+      confidenceLabel: metadata.confidenceLabel,
+      matchReason: metadata.matchReason,
+    };
+  });
 }
 
 export async function listCompetitorConnectors(shopDomain: string) {
@@ -1099,14 +1392,16 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
       return result;
     }
 
-    const sourceProducts = await prisma.priceHistory.findMany({
-      where: { storeId: store.id },
-      orderBy: { createdAt: "desc" },
-      distinct: ["productHandle"],
-      take: 12,
-    });
+    const sourceProducts = filterCompetitorSourceProducts(
+      store.productSnapshots.map((product) => ({
+        productHandle: product.handle,
+        title: product.title,
+        status: product.status,
+        currentPrice: product.currentPrice ?? null,
+      }))
+    );
 
-    if (sourceProducts.length === 0) {
+    if (sourceProducts.eligible.length === 0) {
       const result = {
         ingested: 0,
         domains: domains.length,
@@ -1114,9 +1409,12 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         skipped: 0,
         status: "SUCCEEDED_NO_DATA",
         reason:
-          "Pricing history is not available yet, so competitor ingestion has no product handles to monitor.",
+          sourceProducts.excludedCount > 0
+            ? "No eligible active products were available for competitor monitoring after draft, archived, gift-card-like, and price-missing products were excluded."
+            : "No active priced products were available for competitor monitoring yet.",
         merchantMessage:
-          "Refresh completed, but there were no monitored products available for competitor matching yet.",
+          "Refresh completed, but there were no eligible active products available for competitor matching yet.",
+        excludedProducts: sourceProducts.excluded,
       };
 
       await prisma.syncJob.update({
@@ -1132,19 +1430,24 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     }
 
     let ingested = 0;
+    let lowConfidenceMatches = 0;
     let skipped = 0;
 
     for (const domain of domains) {
-      for (const product of sourceProducts) {
+      for (const product of sourceProducts.eligible.slice(0, 18)) {
         const liveSnapshot = await fetchCompetitorSnapshot(
           domain.domain,
           product.productHandle,
-          product.currentPrice
+          product.currentPrice ?? 0
         );
 
         if (!liveSnapshot) {
           skipped += 1;
           continue;
+        }
+
+        if (liveSnapshot.confidenceScore < 60) {
+          lowConfidenceMatches += 1;
         }
 
         await prisma.competitorData.create({
@@ -1164,6 +1467,12 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
               ingestionSource: "live_competitor_fetch",
               capturedAt: new Date().toISOString(),
               externalFetch: true,
+              sourceProductTitle: product.title,
+              sourceProductStatus: product.status,
+              confidenceScore: liveSnapshot.confidenceScore,
+              confidenceLabel: liveSnapshot.confidenceLabel,
+              matchReason: liveSnapshot.matchReason,
+              usedFallbackPrice: liveSnapshot.usedFallbackPrice,
             }),
           },
         });
@@ -1175,17 +1484,21 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     const result = {
       ingested,
       domains: domains.length,
-      products: sourceProducts.length,
+      products: sourceProducts.eligible.length,
       skipped,
+      lowConfidenceMatches,
+      excludedProducts: sourceProducts.excluded,
       status,
       reason:
         ingested > 0
           ? null
           : "Competitor pages were fetched, but no live competitor snapshots were captured for the monitored products.",
       merchantMessage:
-        ingested > 0
+        ingested > 0 && lowConfidenceMatches === 0
           ? "Competitor monitoring refreshed successfully."
-          : skipped > 0
+          : ingested > 0 && lowConfidenceMatches === ingested
+          ? "Refresh completed. Possible competitor pages were found, but the matches were too weak to rely on yet."
+        : skipped > 0
           ? "Refresh completed. No comparable competitor products were found."
           : "Refresh completed. No competitor changes detected.",
     };

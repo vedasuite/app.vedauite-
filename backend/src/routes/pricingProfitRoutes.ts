@@ -12,6 +12,21 @@ pricingProfitRouter.get("/overview", async (req, res) => {
     return res.status(400).json({ error: "Missing shop." });
   }
 
-  const overview = await getPricingProfitOverview(shop);
-  return res.json({ overview });
+  try {
+    const overview = await Promise.race([
+      getPricingProfitOverview(shop),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Pricing overview timed out.")), 12000);
+      }),
+    ]);
+
+    return res.json({ overview });
+  } catch (error) {
+    return res.status(503).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Pricing overview could not be loaded.",
+    });
+  }
 });

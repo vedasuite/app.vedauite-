@@ -593,11 +593,15 @@ export async function fetchCompetitorSnapshot(
   fallbackPrice: number
 ): Promise<{
   competitorUrl: string;
-  price: number;
+  price: number | null;
   promotion: string | null;
   stockStatus: string;
   source: string;
   adCopy: string | null;
+  confidenceScore: number;
+  confidenceLabel: "high" | "medium" | "low";
+  matchReason: string;
+  usedFallbackPrice: boolean;
 } | null> {
   try {
     return await withRetry(
@@ -629,19 +633,49 @@ export async function fetchCompetitorSnapshot(
               /property="product:price:amount"\s+content="([0-9]+(?:\.[0-9]{1,2})?)"/i
             );
 
+          const promotionDetected = /sale|discount|bundle|offer/.test(lowerHtml);
+          const stockStatus = /out of stock/.test(lowerHtml)
+            ? "out_of_stock"
+            : /low stock/.test(lowerHtml)
+            ? "low_stock"
+            : "in_stock";
+          const extractedPrice = priceMatch ? Number(priceMatch[1]) : null;
+          const usedFallbackPrice = extractedPrice == null && fallbackPrice > 0;
+          const signalScore =
+            (extractedPrice != null ? 48 : 0) +
+            (promotionDetected ? 18 : 0) +
+            (stockStatus !== "in_stock" ? 14 : 0) +
+            (lowerHtml.includes(productHandle.toLowerCase()) ? 12 : 0);
+          const confidenceScore = Math.max(
+            18,
+            Math.min(96, signalScore + (usedFallbackPrice ? 6 : 0))
+          );
+
+          if (extractedPrice == null && !promotionDetected && stockStatus === "in_stock") {
+            return null;
+          }
+
           return {
             competitorUrl: `https://${domain}/products/${productHandle}`,
-            price: priceMatch ? Number(priceMatch[1]) : fallbackPrice,
-            promotion: /sale|discount|bundle|offer/.test(lowerHtml)
-              ? "Live promo detected"
-              : null,
-            stockStatus: /out of stock/.test(lowerHtml)
-              ? "out_of_stock"
-              : /low stock/.test(lowerHtml)
-              ? "low_stock"
-              : "in_stock",
+            price: extractedPrice ?? (usedFallbackPrice ? fallbackPrice : null),
+            promotion: promotionDetected ? "Live promo detected" : null,
+            stockStatus,
             source: "website_live",
             adCopy: null,
+            confidenceScore,
+            confidenceLabel:
+              confidenceScore >= 80
+                ? "high"
+                : confidenceScore >= 60
+                ? "medium"
+                : "low",
+            matchReason:
+              extractedPrice != null
+                ? "Product page and live price were confirmed on the competitor domain."
+                : promotionDetected
+                ? "Product page matched by handle and a live promotion signal was detected."
+                : "Product page matched by handle, but price confirmation relied on limited page signals.",
+            usedFallbackPrice,
           };
         } finally {
           clearTimeout(timeout);
@@ -1086,109 +1120,6 @@ export async function syncShopifyStoreData(shopDomain: string) {
     ordersSynced: orders.length,
     customersSynced: orders.filter((order) => order.customer?.legacyResourceId).length,
     counts: syncCounts,
-  };
-}
-
-type ProductLookupResponse = {
-  products: {
-    edges: Array<{
-      node: {
-        id: string;
-        handle: string;
-        variants: {
-          edges: Array<{
-            node: {
-              id: string;
-              title: string;
-              price: string;
-            };
-          }>;
-        };
-      };
-    }>;
-  };
-};
-
-export async function publishProductPrice(
-  shopDomain: string,
-  productHandle: string,
-  nextPrice: number
-) {
-  const lookup = await shopifyGraphQL<ProductLookupResponse>(
-    shopDomain,
-    `
-      query ProductByHandle($query: String!) {
-        products(first: 1, query: $query) {
-          edges {
-            node {
-              id
-              handle
-              variants(first: 25) {
-                edges {
-                  node {
-                    id
-                    title
-                    price
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `,
-    { query: `handle:${productHandle}` }
-  );
-
-  const product = lookup.products.edges[0]?.node;
-  const variants = product?.variants.edges.map((edge) => edge.node) ?? [];
-  if (!product?.id || variants.length === 0) {
-    return { updated: false, reason: "No matching Shopify product variant found." };
-  }
-
-  const baseVariantPrice = Number(variants[0]?.price ?? 0);
-  const priceDelta = nextPrice - baseVariantPrice;
-
-  const mutation = await shopifyGraphQL<{
-    productVariantsBulkUpdate: {
-      userErrors: Array<{ message: string }>;
-    };
-  }>(
-    shopDomain,
-    `
-      mutation UpdateVariantPrice($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          userErrors {
-            message
-          }
-        }
-      }
-    `,
-    {
-      productId: product.id,
-      variants: variants.map((variant, index) => {
-        const currentPrice = Number(variant.price ?? 0);
-        const variantPrice =
-          index === 0 ? nextPrice : Math.max(0.01, currentPrice + priceDelta);
-
-        return {
-          id: variant.id,
-          price: variantPrice.toFixed(2),
-        };
-      }),
-    }
-  );
-
-  const errors = mutation.productVariantsBulkUpdate.userErrors;
-  if (errors.length) {
-    return { updated: false, reason: errors.map((error) => error.message).join(", ") };
-  }
-
-  return {
-    updated: true,
-    productHandle,
-    variantCount: variants.length,
-    price: nextPrice,
   };
 }
 

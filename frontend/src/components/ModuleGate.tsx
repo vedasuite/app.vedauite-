@@ -28,14 +28,14 @@ export function ModuleGate({
   allowed,
 }: Props) {
   const { navigateEmbedded } = useEmbeddedNavigation();
-  const { subscription } = useSubscriptionPlan();
+  const { subscription, billingState, entitlements } = useSubscriptionPlan();
 
   if (allowed) {
     return <>{children}</>;
   }
 
-  const currentPlan = subscription?.planName ?? "NONE";
-  const currentStarterModule = subscription?.starterModule;
+  const currentPlan = entitlements?.planName ?? subscription?.planName ?? "NONE";
+  const currentStarterModule = entitlements?.starterModule ?? subscription?.starterModule;
   const starterLabel =
     currentStarterModule === "trustAbuse"
       ? "Trust & Abuse Intelligence"
@@ -49,8 +49,7 @@ export function ModuleGate({
         <Layout.Section>
           <Banner title={`Upgrade required: ${requiredPlan}`} tone="info">
             <p>
-              Upgrade to {requiredPlan} to unlock this module and its
-              backend-confirmed features for your store.
+              Upgrade to {requiredPlan} to unlock this module for your store.
             </p>
           </Banner>
         </Layout.Section>
@@ -64,9 +63,15 @@ export function ModuleGate({
                 <Badge tone="attention">{currentPlan}</Badge>
               </InlineStack>
               <Text as="p" tone="subdued">
-                Move to the appropriate plan to enable this workflow and all of
-                its analytics, actions, and reports.
+                {billingState?.lifecycle === "pending_approval"
+                  ? "A plan change is waiting for Shopify approval. Until that completes, VedaSuite keeps the current verified module access."
+                  : "Move to the appropriate plan to enable this workflow and all of its analytics, actions, and reports."}
               </Text>
+              {billingState?.merchantDescription ? (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {billingState.merchantDescription}
+                </Text>
+              ) : null}
               {currentPlan === "STARTER" && currentStarterModule ? (
                 <Banner title="Starter module selection detected" tone="info">
                   <p>

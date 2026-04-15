@@ -1,9 +1,11 @@
 import { useContext } from "react";
 import { SubscriptionContext } from "../providers/SubscriptionProvider";
 import type {
+  BillingState,
   BillingPlanName,
   Capability,
   CapabilityMap,
+  EntitlementState,
   FeatureAccess,
   ModuleAccess,
   StarterModule,
@@ -13,9 +15,11 @@ import type {
 import { normalizeSubscriptionInfo } from "../lib/subscriptionState";
 
 export type {
+  BillingState,
   BillingPlanName,
   Capability,
   CapabilityMap,
+  EntitlementState,
   FeatureAccess,
   ModuleAccess,
   StarterModule,
@@ -29,6 +33,8 @@ export function useSubscriptionPlan() {
   if (!context) {
     return {
       subscription: null,
+      billingState: null,
+      entitlements: null,
       loading: true,
       refresh: async () => normalizeSubscriptionInfo(null),
       billingFlowState: "IDLE" as const,

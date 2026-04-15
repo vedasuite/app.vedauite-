@@ -35,6 +35,29 @@ type PricingProfitOverview = {
     description: string;
     nextAction?: string | null;
   };
+  viewState?: {
+    status: "initializing" | "syncing_data" | "empty" | "ready" | "failed";
+    title: string;
+    description: string;
+    nextAction?: string | null;
+    emptyReason?:
+      | "no_catalog_data"
+      | "no_sales_history"
+      | "no_competitor_input"
+      | "no_recommendations"
+      | null;
+    processingSummary?: {
+      catalogProducts: number;
+      salesOrders: number;
+      competitorInputs: number;
+      pricingRows: number;
+      profitRows: number;
+      recommendations: number;
+    };
+    timedOutSources?: string[];
+    invalidRecommendationCount?: number;
+    lastSuccessfulRunAt?: string | null;
+  };
   pricingState?: {
     primaryState: PricingPrimaryState;
     pricingStatus: string;
@@ -88,16 +111,32 @@ type PricingProfitOverview = {
     title: string;
     detail: string;
   }>;
+  requestMeta?: {
+    resolvedAt?: string;
+    durationMs?: number;
+    timedOutSources?: string[];
+    invalidRecommendationCount?: number;
+    processingSummary?: {
+      catalogProducts: number;
+      salesOrders: number;
+      competitorInputs: number;
+      pricingRows: number;
+      profitRows: number;
+      recommendations: number;
+    };
+  };
 };
 
 const CACHE_KEY = "pricing-profit-overview";
 const MIN_LOADING_MS = 400;
 
 type CanonicalPricingViewState = {
-  status: "idle" | "loading" | "ready" | "empty" | "error";
+  status: "initializing" | "syncing_data" | "ready" | "empty" | "failed";
   lastUpdatedAt: string | null;
   hasRecommendations: boolean;
   hasProfitData: boolean;
+  error: string | null;
+  requestInFlight: boolean;
 };
 
 function createEmptyOverview(): PricingProfitOverview {
@@ -177,65 +216,73 @@ function deriveCanonicalPricingState(
 ): CanonicalPricingViewState {
   const hasRecommendations = (overview.prioritizedRecommendations?.length ?? 0) > 0;
   const hasProfitData = (overview.summary.profitOpportunityCount ?? 0) > 0;
-  const lastUpdatedAt = overview.pricingState?.lastSuccessfulRunAt ?? null;
-
-  if (hasRecommendations || hasProfitData) {
-    return {
-      status: "ready",
-      lastUpdatedAt,
-      hasRecommendations,
-      hasProfitData,
-    };
-  }
-
+  const status =
+    overview.viewState?.status ??
+    (hasRecommendations || hasProfitData ? "ready" : "empty");
   return {
-    status: "empty",
-    lastUpdatedAt,
-    hasRecommendations: false,
-    hasProfitData: false,
+    status,
+    lastUpdatedAt:
+      overview.viewState?.lastSuccessfulRunAt ??
+      overview.pricingState?.lastSuccessfulRunAt ??
+      null,
+    hasRecommendations,
+    hasProfitData,
+    error: null,
+    requestInFlight: false,
   };
 }
 
 function StatusBanner(props: {
   status: CanonicalPricingViewState["status"];
   overview: PricingProfitOverview;
+  error?: string | null;
 }) {
   const pricingState = props.overview.pricingState ?? createEmptyOverview().pricingState!;
+  const viewState = props.overview.viewState;
 
   switch (props.status) {
-    case "loading":
+    case "initializing":
       return (
         <Banner title="Loading pricing engine" tone="info">
-          <p>VedaSuite is loading the latest pricing recommendations and profit guidance.</p>
+          <p>
+            VedaSuite is checking the latest catalog, sales, competitor, and pricing data for this store.
+          </p>
+        </Banner>
+      );
+    case "syncing_data":
+      return (
+        <Banner title="Refreshing pricing engine" tone="info">
+          <p>
+            VedaSuite is processing the latest store data before it refreshes pricing recommendations.
+          </p>
         </Banner>
       );
     case "ready":
       return (
-        <Banner title={pricingState.title} tone="success">
-          <p>{pricingState.description}</p>
+        <Banner title={viewState?.title ?? pricingState.title} tone="success">
+          <p>{viewState?.description ?? pricingState.description}</p>
         </Banner>
       );
     case "empty":
       return (
-        <Banner title="No pricing changes recommended right now" tone="info">
+        <Banner title={viewState?.title ?? "No pricing recommendations yet"} tone="info">
+          <p>{viewState?.description ?? pricingState.description}</p>
+        </Banner>
+      );
+    case "failed":
+      return (
+        <Banner title="Pricing engine could not be loaded" tone="critical">
           <p>
-            {pricingState.primaryState === "EMPTY_HEALTHY"
-              ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
-              : pricingState.description}
+            {props.error ??
+              viewState?.description ??
+              "VedaSuite could not load the latest pricing data. Try refreshing again."}
           </p>
         </Banner>
       );
-    case "error":
-      return (
-        <Banner title="Pricing engine could not be loaded" tone="critical">
-          <p>VedaSuite could not load the latest pricing data. Try refreshing again.</p>
-        </Banner>
-      );
-    case "idle":
     default:
       return (
-        <Banner title="Pricing engine is idle" tone="info">
-          <p>{pricingState.description}</p>
+        <Banner title="Pricing engine" tone="info">
+          <p>{viewState?.description ?? pricingState.description}</p>
         </Banner>
       );
   }
@@ -256,38 +303,84 @@ export function PricingProfitPage() {
     cachedOverview
       ? deriveCanonicalPricingState(initialOverview)
       : {
-          status: "loading",
+          status: "initializing",
           lastUpdatedAt: null,
           hasRecommendations: false,
           hasProfitData: false,
+          error: null,
+          requestInFlight: false,
         }
   );
   const requestIdRef = useRef(0);
+  const requestPromiseRef = useRef<Promise<void> | null>(null);
   const allowed = !!subscription?.enabledModules?.pricingProfit;
 
   const loadOverview = async () => {
+    if (requestPromiseRef.current) {
+      return requestPromiseRef.current;
+    }
+
     const requestId = ++requestIdRef.current;
     const startedAt = Date.now();
     setPageState((current) => ({
       ...current,
-      status: "loading",
+      status:
+        current.hasRecommendations || current.hasProfitData
+          ? "syncing_data"
+          : "initializing",
+      requestInFlight: true,
+      error: null,
     }));
 
-    const response = await embeddedShopRequest<{ overview: PricingProfitOverview }>(
-      "/api/pricing-profit/overview",
-      { timeoutMs: 15000 }
-    );
-    const elapsed = Date.now() - startedAt;
-    const remainingDelay = Math.max(0, MIN_LOADING_MS - elapsed);
-    if (remainingDelay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, remainingDelay));
-    }
-    if (requestId !== requestIdRef.current) {
-      return;
-    }
-    setOverview(response.overview);
-    writeModuleCache(CACHE_KEY, response.overview);
-    setPageState(deriveCanonicalPricingState(response.overview));
+    const requestPromise = (async () => {
+      try {
+        const response = await embeddedShopRequest<{ overview: PricingProfitOverview }>(
+          "/api/pricing-profit/overview",
+          { timeoutMs: 15000 }
+        );
+        if (!response?.overview || typeof response.overview !== "object") {
+          throw new Error("Pricing response was incomplete.");
+        }
+        if (!response.overview.viewState?.status) {
+          throw new Error("Pricing response did not include a valid view state.");
+        }
+        const elapsed = Date.now() - startedAt;
+        const remainingDelay = Math.max(0, MIN_LOADING_MS - elapsed);
+        if (remainingDelay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+        }
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+        setOverview(response.overview);
+        writeModuleCache(CACHE_KEY, response.overview);
+        setPageState({
+          ...deriveCanonicalPricingState(response.overview),
+          requestInFlight: false,
+          error: null,
+        });
+      } catch (error) {
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+        setPageState((current) => ({
+          ...current,
+          status: "failed",
+          requestInFlight: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Pricing engine could not be loaded.",
+        }));
+      } finally {
+        if (requestPromiseRef.current === requestPromise) {
+          requestPromiseRef.current = null;
+        }
+      }
+    })();
+
+    requestPromiseRef.current = requestPromise;
+    return requestPromise;
   };
 
   useEffect(() => {
@@ -297,53 +390,24 @@ export function PricingProfitPage() {
         cachedOverview
           ? deriveCanonicalPricingState(initialOverview)
           : {
-              status: "idle",
+              status: "initializing",
               lastUpdatedAt: null,
               hasRecommendations: false,
               hasProfitData: false,
+              error: null,
+              requestInFlight: false,
             }
       );
       return;
     }
 
     let mounted = true;
-    const requestId = ++requestIdRef.current;
-    const startedAt = Date.now();
-    setPageState((current) => ({
-      ...current,
-      status: "loading",
-    }));
-
-    embeddedShopRequest<{ overview: PricingProfitOverview }>("/api/pricing-profit/overview", {
-      timeoutMs: 15000,
-    })
-      .then(async (response) => {
-        const elapsed = Date.now() - startedAt;
-        const remainingDelay = Math.max(0, MIN_LOADING_MS - elapsed);
-        if (remainingDelay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, remainingDelay));
-        }
-        if (!mounted || requestId !== requestIdRef.current) return;
-        setOverview(response.overview);
-        writeModuleCache(CACHE_KEY, response.overview);
-        setPageState(deriveCanonicalPricingState(response.overview));
-      })
-      .catch(() => {
-        if (!mounted || requestId !== requestIdRef.current) return;
-        setOverview(initialOverview);
-        setPageState({
-          status: "error",
-          lastUpdatedAt: initialOverview.pricingState?.lastSuccessfulRunAt ?? null,
-          hasRecommendations:
-            (initialOverview.prioritizedRecommendations?.length ?? 0) > 0,
-          hasProfitData: (initialOverview.summary.profitOpportunityCount ?? 0) > 0,
-        });
-      });
+    void loadOverview().catch(() => undefined);
 
     return () => {
       mounted = false;
     };
-  }, [allowed, cachedOverview, initialOverview]);
+  }, [allowed]);
 
   if (!allowed) {
     return (
@@ -393,29 +457,99 @@ export function PricingProfitPage() {
       title="AI Pricing Engine"
       subtitle="Review the products that need pricing attention, why they were flagged, and what data supports each action."
       primaryAction={{
-        content: pageState.status === "loading" ? "Refreshing..." : "Refresh pricing view",
+        content: pageState.requestInFlight ? "Refreshing..." : "Refresh pricing view",
         onAction: loadOverview,
-        disabled: pageState.status === "loading",
+        disabled: pageState.requestInFlight,
       }}
     >
       <Layout>
         <Layout.Section>
-          <StatusBanner status={pageState.status} overview={overview} />
+          <StatusBanner status={pageState.status} overview={overview} error={pageState.error} />
         </Layout.Section>
 
-        {pageState.status === "loading" || pageState.status === "error" ? null : pageState.status === "empty" ? (
+        {pageState.status === "initializing" || pageState.status === "syncing_data" ? (
           <Layout.Section>
             <Card>
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
-                  No pricing changes recommended
+                  {pageState.status === "syncing_data"
+                    ? "Pricing refresh is in progress"
+                    : "Preparing pricing inputs"}
                 </Text>
                 <Text as="p" tone="subdued">
-                  The pricing engine ran successfully, but no important pricing changes are recommended right now.
+                  {pageState.status === "syncing_data"
+                    ? "The latest sync is still processing pricing rows and profit signals."
+                    : "VedaSuite is checking catalog, sales, competitor, and pricing data before showing this module."}
                 </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        ) : pageState.status === "failed" ? (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">
+                  Pricing engine needs attention
+                </Text>
+                <Text as="p" tone="subdued">
+                  {pageState.error ??
+                    overview.viewState?.description ??
+                    "VedaSuite could not finish loading the pricing engine."}
+                </Text>
+                <Button variant="primary" onClick={loadOverview} disabled={pageState.requestInFlight}>
+                  Retry pricing refresh
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        ) : pageState.status === "empty" ? (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  {overview.viewState?.title ?? "No pricing recommendations yet"}
+                </Text>
+                <Text as="p" tone="subdued">
+                  {overview.viewState?.description ??
+                    "The pricing engine ran successfully, but no important pricing changes are recommended right now."}
+                </Text>
+                <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Catalog products processed
+                    </Text>
+                    <Text as="p">
+                      {overview.viewState?.processingSummary?.catalogProducts ?? 0}
+                    </Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Sales orders processed
+                    </Text>
+                    <Text as="p">
+                      {overview.viewState?.processingSummary?.salesOrders ?? 0}
+                    </Text>
+                  </div>
+                  <div className="vs-signal-stat">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Competitor inputs
+                    </Text>
+                    <Text as="p">
+                      {overview.viewState?.processingSummary?.competitorInputs ?? 0}
+                    </Text>
+                  </div>
+                </InlineGrid>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Last successful pricing run: {formatDateTime(pageState.lastUpdatedAt)}
                 </Text>
+                <InlineStack gap="300">
+                  <Button variant="primary" onClick={loadOverview} disabled={pageState.requestInFlight}>
+                    Refresh pricing view
+                  </Button>
+                  <Button onClick={() => navigateEmbedded("/app/dashboard")}>
+                    Open dashboard
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.Section>

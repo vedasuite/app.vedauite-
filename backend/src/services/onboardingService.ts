@@ -1,10 +1,10 @@
 import { prisma } from "../db/prismaClient";
 import {
   normalizeStarterModuleLabel,
-  type BillingPlanName,
   type StarterModule,
 } from "../billing/capabilities";
 import { getConnectionHealth } from "./shopifyConnectionService";
+import { getUnifiedReadinessState } from "./readinessEngineService";
 import { getCurrentSubscription, resolveBillingState } from "./subscriptionService";
 import {
   deriveSyncStatus,
@@ -102,7 +102,7 @@ function firstIncompleteIndex(steps: Array<{ complete: boolean }>) {
 }
 
 export async function getOnboardingState(shopDomain: string) {
-  const [storeResult, connection, operational, billing, subscription] = await Promise.all([
+  const [storeResult, connection, operational, billing, subscription, readiness] = await Promise.all([
     prisma.store.findUnique({
       where: { shop: shopDomain },
       select: {
@@ -122,10 +122,10 @@ export async function getOnboardingState(shopDomain: string) {
     getStoreOperationalSnapshot(shopDomain),
     resolveBillingState(shopDomain),
     getCurrentSubscription(shopDomain),
+    getUnifiedReadinessState(shopDomain),
   ]);
 
   const store = storeResult as any;
-
   if (!store) {
     throw new Error("Store not found");
   }
@@ -207,47 +207,40 @@ export async function getOnboardingState(shopDomain: string) {
     },
   ];
 
-  const dataSyncComplete =
-    connection.healthy &&
-    !!operational.store.lastSyncAt &&
-    syncState.status !== "SYNC_REQUIRED" &&
-    syncState.status !== "SYNC_IN_PROGRESS" &&
-    syncState.status !== "FAILED" &&
-    syncState.status !== "NOT_CONNECTED";
   const selectedModuleAvailable =
     !!selectedModule &&
     moduleAvailability.some(
       (module) => module.key === selectedModule && module.available
     );
-  const moduleSelectionComplete = dataSyncComplete && selectedModuleAvailable;
+  const selectedModuleReadiness =
+    selectedModule === "trustAbuse"
+      ? readiness.modules.fraud
+      : selectedModule === "competitor"
+      ? readiness.modules.competitor
+      : selectedModule === "pricingProfit"
+      ? readiness.modules.pricing
+      : null;
+  const moduleSelectionComplete = readiness.initialSync.ready && selectedModuleAvailable;
   const firstInsightViewedComplete =
-    moduleSelectionComplete && !!store.onboardingFirstInsightViewedAt;
-  const planConfirmationComplete = !!store.onboardingPlanConfirmedAt;
+    moduleSelectionComplete &&
+    !!selectedModuleReadiness?.ready &&
+    !!store.onboardingFirstInsightViewedAt;
+  const planConfirmationComplete =
+    readiness.billing.ready && !!store.onboardingPlanConfirmedAt;
   const canAccessDashboard =
-    !!store.onboardingCompletedAt ||
-    (dataSyncComplete &&
-      moduleSelectionComplete &&
-      firstInsightViewedComplete &&
-      planConfirmationComplete);
+    readiness.setup.minimumComplete &&
+    firstInsightViewedComplete &&
+    planConfirmationComplete;
 
   const stepTemplates: Array<Omit<OnboardingStep, "locked" | "active">> = [
     {
       key: "DATA_SYNC",
       label: "Step 1: Sync Data",
-      complete: dataSyncComplete,
+      complete: readiness.initialSync.ready,
       description:
         "Sync live Shopify products, customers, and orders so VedaSuite can analyze the store.",
-      helper:
-        !connection.healthy
-          ? connection.message
-          : syncState.status === "SYNC_IN_PROGRESS"
-          ? "We’re analyzing your store. Insights will appear soon."
-          : syncState.status === "FAILED"
-          ? syncState.reason
-          : syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-          ? "Data synced successfully. Processing is still preparing the first insights."
-          : syncState.reason,
-      ctaLabel: !connection.healthy ? "Reconnect Shopify" : "Sync Data",
+      helper: readiness.initialSync.description,
+      ctaLabel: readiness.connection.healthy ? "Sync Data" : "Reconnect Shopify",
     },
     {
       key: "MODULE_SELECTION",
@@ -256,12 +249,13 @@ export async function getOnboardingState(shopDomain: string) {
       description:
         "Pick one module to start with so the first guided workflow is clear and focused.",
       helper:
-        !dataSyncComplete
-          ? "Finish data sync before selecting the first workflow."
-          : selectedModuleAvailable
-          ? `${moduleTitle(selectedModule!)} is selected as the first workflow.`
-          : billing.planName === "STARTER" &&
-            subscription.starterModule === null
+        !readiness.initialSync.ready
+          ? "Finish syncing Shopify data before choosing the first workflow."
+          : selectedModuleAvailable && selectedModuleReadiness?.ready
+          ? `${moduleTitle(selectedModule!)} is selected and ready for the first guided review.`
+          : selectedModuleAvailable && selectedModuleReadiness
+          ? `${moduleTitle(selectedModule!)} is selected, but ${selectedModuleReadiness.description.toLowerCase()}`
+          : billing.planName === "STARTER" && subscription.starterModule === null
           ? "Starter requires one selected module in billing before you can continue."
           : "Choose one available module to start with.",
       ctaLabel: selectedModuleAvailable ? "Module selected" : "Choose Module",
@@ -271,14 +265,16 @@ export async function getOnboardingState(shopDomain: string) {
       label: "Step 3: View First Insight",
       complete: firstInsightViewedComplete,
       description:
-        "Open the first module view and review the first real or limited-data insight from your store.",
+        "Open the selected module and review the first real store insight before moving into the dashboard.",
       helper:
         !moduleSelectionComplete
-          ? "Select a module first."
+          ? "Select a starting module first."
           : store.onboardingFirstInsightViewedAt
           ? "First insight viewed."
+          : selectedModuleReadiness && !selectedModuleReadiness.ready
+          ? selectedModuleReadiness.description
           : !hasAnyProcessedData
-          ? "If the store has little history, VedaSuite will explain why insights are still limited."
+          ? "VedaSuite is still turning synced Shopify data into dashboard-ready outputs."
           : "Review the first insight in the selected module.",
       ctaLabel: "View First Insight",
     },
@@ -288,15 +284,16 @@ export async function getOnboardingState(shopDomain: string) {
       complete: planConfirmationComplete,
       description:
         "Confirm the current plan so VedaSuite can unlock the right modules and take you to the dashboard.",
-      helper:
-        planConfirmationComplete
-          ? `Plan confirmed: ${billing.planName}.`
-          : `Current plan: ${billing.planName}. Confirm it or manage the subscription before entering the dashboard.`,
+      helper: planConfirmationComplete
+        ? `Plan confirmed: ${billing.planName}.`
+        : readiness.billing.description,
       ctaLabel: "Confirm Plan",
     },
   ];
 
-  const activeStepIndex = canAccessDashboard ? stepTemplates.length - 1 : firstIncompleteIndex(stepTemplates);
+  const activeStepIndex = canAccessDashboard
+    ? stepTemplates.length - 1
+    : firstIncompleteIndex(stepTemplates);
   const steps: OnboardingStep[] = stepTemplates.map((step, index) => ({
     ...step,
     locked: index > 0 && !stepTemplates[index - 1].complete,
@@ -309,7 +306,7 @@ export async function getOnboardingState(shopDomain: string) {
   }
 
   const primaryAction =
-    !connection.healthy
+    !readiness.connection.healthy
       ? {
           key: "RECONNECT_SHOPIFY" as const,
           label: "Reconnect Shopify",
@@ -319,7 +316,7 @@ export async function getOnboardingState(shopDomain: string) {
       ? {
           key: "SYNC_LIVE_DATA" as const,
           label:
-            syncState.status === "SYNC_IN_PROGRESS" ? "Analyzing store" : "Sync Data",
+            readiness.initialSync.state === "collecting_data" ? "Analyzing store" : "Sync Data",
           route: "/app/onboarding",
         }
       : stage === "MODULE_SELECTION"
@@ -346,11 +343,48 @@ export async function getOnboardingState(shopDomain: string) {
           route: "/app/dashboard",
         };
 
+  const stateSummary =
+    readiness.setup.minimumComplete
+      ? {
+          tone: readiness.setup.allCoreModulesReady ? "success" : "info",
+          title: readiness.setup.summaryTitle,
+          description: readiness.setup.summaryDescription,
+          ctaLabel: readiness.setup.nextAction.label,
+        }
+      : readiness.connection.state === "error"
+      ? {
+          tone: "critical" as const,
+          title: readiness.setup.summaryTitle,
+          description: readiness.setup.summaryDescription,
+          ctaLabel: readiness.setup.nextAction.label,
+        }
+      : readiness.initialSync.state === "collecting_data" ||
+        readiness.billing.state === "collecting_data"
+      ? {
+          tone: "info" as const,
+          title: readiness.setup.summaryTitle,
+          description: readiness.setup.summaryDescription,
+          ctaLabel: readiness.setup.nextAction.label,
+        }
+      : readiness.initialSync.state === "error" || readiness.billing.state === "error"
+      ? {
+          tone: "critical" as const,
+          title: readiness.setup.summaryTitle,
+          description: readiness.setup.summaryDescription,
+          ctaLabel: readiness.setup.nextAction.label,
+        }
+      : {
+          tone: "attention" as const,
+          title: readiness.setup.summaryTitle,
+          description: readiness.setup.summaryDescription,
+          ctaLabel: readiness.setup.nextAction.label,
+        };
+
   return {
     stage,
     canAccessDashboard,
-    dashboardEntryState: mapDashboardState(syncState.status),
-    isCompleted: !!store.onboardingCompletedAt,
+    dashboardEntryState: mapDashboardState(readiness.initialSync.syncStatus),
+    isCompleted: !!store.onboardingCompletedAt && readiness.setup.minimumComplete,
     isDismissed: !!store.onboardingDismissedAt,
     title: "Turn Your Store Data Into Fraud Detection & Profit Insights",
     description:
@@ -375,70 +409,15 @@ export async function getOnboardingState(shopDomain: string) {
       ],
     },
     dataReadiness: {
-      syncStatus: syncState.status,
-      syncReason: syncState.reason,
-      connectionHealthy: connection.healthy,
+      syncStatus: readiness.initialSync.syncStatus,
+      syncReason: readiness.initialSync.description,
+      connectionHealthy: readiness.connection.healthy,
       webhooksReady,
       hasAnyRawData,
       hasAnyProcessedData,
-      stateLabel:
-        syncState.status === "SYNC_IN_PROGRESS"
-          ? "Analyzing store"
-          : syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING" ||
-            syncState.status === "EMPTY_STORE_DATA"
-          ? "Limited insights"
-          : syncState.status === "FAILED"
-          ? "Needs attention"
-          : syncState.status === "READY_WITH_DATA"
-          ? "Ready with data"
-          : "Sync required",
+      stateLabel: readiness.initialSync.status,
     },
-    stateSummary:
-      !connection.healthy
-        ? {
-            tone: "critical",
-            title: "Shopify connection needs attention",
-            description: connection.message,
-            ctaLabel: "Reconnect Shopify",
-          }
-        : syncState.status === "SYNC_IN_PROGRESS"
-        ? {
-            tone: "info",
-            title: "We’re analyzing your store. Insights will appear soon.",
-            description:
-              "VedaSuite is syncing Shopify data and preparing the first insight views.",
-            ctaLabel: "Refresh state",
-          }
-        : syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-        ? {
-            tone: "info",
-            title: "Store data is synced. Insights are still being prepared.",
-            description:
-              "You can continue onboarding while VedaSuite finalizes the first insights.",
-            ctaLabel: "Continue onboarding",
-          }
-        : syncState.status === "EMPTY_STORE_DATA"
-        ? {
-            tone: "attention",
-            title: "Store synced, but there is limited historical data to analyze.",
-            description:
-              "VedaSuite will show limited insights until Shopify has more order and customer history.",
-            ctaLabel: "Continue onboarding",
-          }
-        : syncState.status === "FAILED"
-        ? {
-            tone: "critical",
-            title: "Store analysis needs attention",
-            description: syncState.reason,
-            ctaLabel: "Retry sync",
-          }
-        : {
-            tone: "success",
-            title: "Store data is ready for guided setup",
-            description:
-              "VedaSuite has enough synced data to guide you through the first workflow.",
-            ctaLabel: "Continue onboarding",
-          },
+    stateSummary,
     moduleOverview: moduleAvailability,
     selectedModule,
     selectedModuleTitle: selectedModule ? moduleTitle(selectedModule) : null,
@@ -468,7 +447,7 @@ export async function getOnboardingState(shopDomain: string) {
     ],
     planSummary: {
       planName: billing.planName,
-      billingActive: billing.active,
+      billingActive: readiness.billing.accessActive,
       starterModule:
         normalizeStarterModuleLabel(subscription.starterModule as StarterModule | null) ??
         null,
@@ -496,13 +475,14 @@ export async function getOnboardingState(shopDomain: string) {
       ],
     },
     currentPlan: billing.planName,
-    billingActive: billing.active,
+    billingActive: readiness.billing.accessActive,
     limitedDataReason:
       syncState.status === "EMPTY_STORE_DATA"
         ? "Shopify synced successfully, but the store currently has limited order or customer history."
         : !hasAnyProcessedData && hasAnyRawData
         ? "VedaSuite is still turning synced store data into dashboard-ready outputs."
         : null,
+    readiness,
   };
 }
 
@@ -562,7 +542,7 @@ export async function confirmOnboardingPlan(shopDomain: string) {
     where: { shop: shopDomain },
     data: {
       onboardingPlanConfirmedAt: new Date(),
-      onboardingCompletedAt: new Date(),
+      onboardingCompletedAt: onboarding.canAccessDashboard ? new Date() : null,
       onboardingDismissedAt: null,
     } as any,
   });

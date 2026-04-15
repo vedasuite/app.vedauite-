@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { embeddedShopRequest } from "../lib/embeddedShopRequest";
+import { useAppState } from "../hooks/useAppState";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
 
 export type OnboardingModuleKey = "trustAbuse" | "competitor" | "pricingProfit";
@@ -87,6 +88,49 @@ export type OnboardingState = {
   currentPlan: string;
   billingActive: boolean;
   limitedDataReason: string | null;
+  readiness?: {
+    connection: {
+      state: string;
+      status: string;
+      title: string;
+      description: string;
+      ready: boolean;
+      healthy: boolean;
+    };
+    initialSync: {
+      state: string;
+      status: string;
+      title: string;
+      description: string;
+      ready: boolean;
+      syncStatus: string;
+    };
+    billing: {
+      state: string;
+      status: string;
+      title: string;
+      description: string;
+      ready: boolean;
+      accessActive: boolean;
+    };
+    modules: {
+      fraud: { state: string; status: string; title: string; description: string; ready: boolean };
+      competitor: { state: string; status: string; title: string; description: string; ready: boolean };
+      pricing: { state: string; status: string; title: string; description: string; ready: boolean };
+    };
+    setup: {
+      minimumComplete: boolean;
+      allCoreModulesReady: boolean;
+      blockers: string[];
+      nextAction: {
+        label: string;
+        route: string;
+      };
+      percent: number;
+      summaryTitle: string;
+      summaryDescription: string;
+    };
+  };
 };
 
 type OnboardingContextValue = {
@@ -109,7 +153,10 @@ type OnboardingResponse = {
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const { subscription } = useSubscriptionPlan();
-  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
+  const { appState } = useAppState();
+  const [onboarding, setOnboarding] = useState<OnboardingState | null>(
+    (appState?.onboarding as OnboardingState | undefined) ?? null
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +169,12 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     setError(null);
     return response.onboarding;
   }, []);
+
+  useEffect(() => {
+    if (appState?.onboarding) {
+      setOnboarding(appState.onboarding as OnboardingState);
+    }
+  }, [appState?.onboarding]);
 
   useEffect(() => {
     let mounted = true;

@@ -1,5 +1,7 @@
 import { prisma } from "../db/prismaClient";
 import { getCompetitorResponseEngine } from "./competitorService";
+import { logEvent } from "./observabilityService";
+import { derivePricingEngineViewState } from "./pricingEngineStateService";
 import { getPricingRecommendations, simulatePricingChange } from "./pricingService";
 import { getProfitOpportunities } from "./profitService";
 import { getCurrentSubscription } from "./subscriptionService";
@@ -67,7 +69,46 @@ async function safelyResolveWithTimeout<T>(
   );
 }
 
+async function resolveWithTimeoutReport<T>(
+  work: Promise<T>,
+  fallback: T,
+  timeoutMs = 8000
+) {
+  let timedOut = false;
+
+  const value = await safelyResolve(
+    Promise.race<T>([
+      work,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => {
+          timedOut = true;
+          reject(new Error("Timed out"));
+        }, timeoutMs);
+      }),
+    ]),
+    fallback
+  );
+
+  return { value, timedOut };
+}
+
+function isValidPricingRecommendation(value: any) {
+  return (
+    value &&
+    typeof value.id === "string" &&
+    typeof value.productHandle === "string" &&
+    typeof value.currentPrice === "number" &&
+    Number.isFinite(value.currentPrice) &&
+    typeof value.recommendedPrice === "number" &&
+    Number.isFinite(value.recommendedPrice) &&
+    Array.isArray(value.demandSignals)
+  );
+}
+
 export async function getPricingProfitOverview(shopDomain: string) {
+  const startedAt = Date.now();
+  logEvent("info", "pricing_profit.overview_started", { shop: shopDomain });
+
   const [store, operational] = await Promise.all([
     prisma.store.findUnique({
       where: { shop: shopDomain },
@@ -99,9 +140,10 @@ export async function getPricingProfitOverview(shopDomain: string) {
     failureReason: operational.store.lastConnectionError,
   });
 
-  const [pricingRecommendations, competitorResponse] = await Promise.all([
-    safelyResolveWithTimeout(getPricingRecommendations(shopDomain), [], 7000),
-    safelyResolveWithTimeout(
+  const timedOutSources: string[] = [];
+  const [pricingRecommendationResult, competitorResponseResult] = await Promise.all([
+    resolveWithTimeoutReport(getPricingRecommendations(shopDomain), [], 7000),
+    resolveWithTimeoutReport(
       getCompetitorResponseEngine(shopDomain),
       {
         summary: {
@@ -115,6 +157,20 @@ export async function getPricingProfitOverview(shopDomain: string) {
       7000
     ),
   ]);
+  if (pricingRecommendationResult.timedOut) {
+    timedOutSources.push("pricing_recommendations");
+  }
+  if (competitorResponseResult.timedOut) {
+    timedOutSources.push("competitor_response");
+  }
+  const rawPricingRecommendations = pricingRecommendationResult.value;
+  const competitorResponse = competitorResponseResult.value;
+  const invalidRecommendationCount = rawPricingRecommendations.filter(
+    (item) => !isValidPricingRecommendation(item)
+  ).length;
+  const pricingRecommendations = rawPricingRecommendations.filter(
+    isValidPricingRecommendation
+  );
   const competitorDependencyStatus =
     operational.counts.competitorRows > 0 ? "ready" : "missing";
   const pricingDependencyStatus =
@@ -747,9 +803,35 @@ export async function getPricingProfitOverview(shopDomain: string) {
     },
   ];
 
+  const viewState = derivePricingEngineViewState({
+    syncStatus: syncState.status,
+    moduleState,
+    productsCount: operational.counts.products,
+    ordersCount: operational.counts.orders,
+    competitorCount: operational.counts.competitorRows,
+    pricingRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    recommendationCount,
+    invalidRecommendationCount,
+    timedOutSources,
+  });
+
+  logEvent("info", "pricing_profit.overview_resolved", {
+    shop: shopDomain,
+    durationMs: Date.now() - startedAt,
+    viewStatus: viewState.status,
+    recommendationCount,
+    invalidRecommendationCount,
+    timedOutSources,
+    pricingRows: operational.counts.pricingRows,
+    profitRows: operational.counts.profitRows,
+    competitorRows: operational.counts.competitorRows,
+  });
+
   return {
     subscription,
     moduleState,
+    viewState,
     readiness,
     pricingState: {
       primaryState,
@@ -820,6 +902,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
     diagnosticSummary,
     planGateSummary,
     scenarioPreset,
+    requestMeta: {
+      resolvedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      timedOutSources,
+      invalidRecommendationCount,
+      processingSummary: viewState.processingSummary,
+    },
     marginAtRisk: {
       pressureProducts: competitorResponse.responsePlans
         .filter((plan) => plan.pressureScore >= 30)

@@ -5,6 +5,7 @@ import enTranslations from "@shopify/polaris/locales/en.json";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { OnboardingProvider } from "./providers/OnboardingProvider";
+import { AppStateProvider } from "./providers/AppStateProvider";
 import { SubscriptionProvider } from "./providers/SubscriptionProvider";
 import "@shopify/polaris/build/esm/styles.css";
 import { Button, Card, Layout, Page, Text } from "@shopify/polaris";
@@ -92,11 +93,13 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <AppProvider i18n={enTranslations}>
     <BrowserRouter>
       <FrontendErrorBoundary>
-        <SubscriptionProvider>
-          <OnboardingProvider>
-            <App />
-          </OnboardingProvider>
-        </SubscriptionProvider>
+        <AppStateProvider>
+          <SubscriptionProvider>
+            <OnboardingProvider>
+              <App />
+            </OnboardingProvider>
+          </SubscriptionProvider>
+        </AppStateProvider>
       </FrontendErrorBoundary>
     </BrowserRouter>
   </AppProvider>
