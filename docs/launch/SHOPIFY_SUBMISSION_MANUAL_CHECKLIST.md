@@ -34,7 +34,7 @@ Use this checklist before submitting VedaSuite for Shopify review.
 - `SHOPIFY_API_KEY`
 - `SHOPIFY_API_SECRET`
 - `SHOPIFY_APP_URL=https://app.vedasuite.in`
-- `SHOPIFY_SCOPES=read_products,read_orders,write_orders,read_customers`
+- `SHOPIFY_SCOPES=read_products,read_orders,write_orders,read_customers,write_own_subscription`
 - `DATABASE_URL`
 - `VITE_SHOPIFY_API_KEY`
 - `SHOPIFY_BILLING_TEST_MODE=false` for real review billing behavior
@@ -47,6 +47,8 @@ Use:
 ```bash
 cd frontend && npm install && npm run build && cd ../backend && npm install && npx prisma generate && npx prisma migrate deploy && npm run build
 ```
+
+Do not use `prisma db push --accept-data-loss` in Render production deploys.
 
 ## 5. Production verification
 

@@ -199,7 +199,7 @@ model Order {
   customer        Customer? @relation(fields: [customerId], references: [id])
   customerId      String?
   shopifyOrderId  String    @unique
-  shopifyOrderGid String?   @unique
+  shopifyOrderGid String?
   shopifyLegacyOrderId String?
   orderName       String?
   totalAmount     Float
@@ -215,6 +215,7 @@ model Order {
   fraudSignals FraudSignal[]
   timelineEvents TimelineEvent[]
 
+  @@index([shopifyOrderGid])
   @@index([storeId, shopifyLegacyOrderId])
   @@index([storeId, orderName])
 }

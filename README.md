@@ -32,9 +32,10 @@ app-repo/
 - App URL: `https://app.vedasuite.in`
 - OAuth callback: `https://app.vedasuite.in/auth/callback`
 - Embedded app: `true`
-- Shopify scopes: `read_products,read_orders,write_orders,read_customers`
+- Shopify scopes: `read_products,read_orders,write_orders,read_customers,write_own_subscription`
 
 Only request `write_products` if live Shopify price publishing is enabled in the deployment you are shipping.
+Use `npx prisma migrate deploy` in production deploys. Do not use `prisma db push --accept-data-loss` against live merchant databases.
 
 ### Backend quick start
 

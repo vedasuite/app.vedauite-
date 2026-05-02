@@ -103,7 +103,7 @@ Confirm Render environment values:
 - `SHOPIFY_API_KEY`
 - `SHOPIFY_API_SECRET`
 - `SHOPIFY_APP_URL=https://app.vedasuite.in`
-- `SHOPIFY_SCOPES=read_products,read_orders,write_orders,read_customers`
+- `SHOPIFY_SCOPES=read_products,read_orders,write_orders,read_customers,write_own_subscription`
 - `SHOPIFY_ADMIN_API_VERSION=2026-01`
 - `DATABASE_URL`
 - `VITE_SHOPIFY_API_KEY`
@@ -115,3 +115,5 @@ Use this build command:
 ```bash
 cd frontend && npm install && npm run build && cd ../backend && npm install && npx prisma generate && npx prisma migrate deploy && npm run build
 ```
+
+Do not replace `prisma migrate deploy` with `prisma db push --accept-data-loss` in production.

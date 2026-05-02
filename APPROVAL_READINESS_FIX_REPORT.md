@@ -76,6 +76,16 @@
 - Merchant message now says:
   - `Review status saved in VedaSuite. Shopify tagging will be available after the order is fully synced.`
 
+### Safe Prisma migration handling
+
+- Removed the direct Prisma schema-level `@unique` declaration from nullable `Order.shopifyOrderGid`.
+- Reworked the order-identity migration so production deploys:
+  - keep `shopifyOrderGid` nullable
+  - normalize blank values to `NULL`
+  - clear duplicate non-null GIDs by preserving the most recently updated and most complete row
+  - add a PostgreSQL partial unique index only for non-null `shopifyOrderGid` values
+- Production guidance continues to use `npx prisma migrate deploy`, not `prisma db push --accept-data-loss`.
+
 ### Competitor consistency
 
 - Competitor freshness labeling now uses merchant-readable time descriptions instead of raw extreme hour counts.
