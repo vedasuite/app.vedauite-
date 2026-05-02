@@ -159,52 +159,55 @@ export function buildCapabilities(
     planName === "STARTER" && normalizedStarterModule === "trustAbuse";
   const isStarterCompetitor =
     planName === "STARTER" && normalizedStarterModule === "competitor";
+  const trialPreviewOnly = isTrial && (options?.trialActive ?? true);
+  const fraudModule = isStarterTrust || isGrowth || isPro;
+  const competitorModule = isStarterCompetitor || isGrowth || isPro;
+  const pricingModule = isGrowth || isPro;
+  const creditScoreModule = isGrowth || isPro;
+  const reportsModule = isGrowth || isPro;
+  const profitModule = isPro;
 
-  capabilities["reports.view"] = true;
+  capabilities["reports.view"] = reportsModule;
   capabilities["settings.view"] = true;
   capabilities["settings.manage"] = true;
   capabilities["billing.planManagement"] = true;
   capabilities["billing.upgrade"] = true;
   capabilities["billing.downgrade"] = planName !== "NONE";
   capabilities["billing.moduleSelectionStarter"] = planName === "STARTER";
-  capabilities["billing.trialActive"] = isTrial && (options?.trialActive ?? true);
+  capabilities["billing.trialActive"] = trialPreviewOnly;
 
-  capabilities["module.trustAbuse"] = isTrial || isGrowth || isPro || isStarterTrust;
-  capabilities["module.competitorIntel"] =
-    isTrial || isGrowth || isPro || isStarterCompetitor;
-  capabilities["module.pricingProfit"] = isTrial || isGrowth || isPro;
+  capabilities["module.trustAbuse"] = fraudModule;
+  capabilities["module.competitorIntel"] = competitorModule;
+  capabilities["module.pricingProfit"] = pricingModule;
 
-  capabilities["trust.score"] = capabilities["module.trustAbuse"];
-  capabilities["trust.timeline"] = capabilities["module.trustAbuse"];
-  capabilities["trust.returnAbuse"] = capabilities["module.trustAbuse"];
-  capabilities["trust.refundOutcomeSimulator"] = isTrial || isPro;
-  capabilities["trust.smartPolicyEngine"] = isTrial || isPro;
-  capabilities["trust.trustRecoveryEngine"] = isTrial || isPro;
-  capabilities["trust.supportCopilot"] = isTrial || isPro;
-  capabilities["trust.evidencePackExport"] = isTrial || isPro;
-  capabilities["trust.advancedAutomation"] = isTrial || isPro;
+  capabilities["trust.score"] = creditScoreModule;
+  capabilities["trust.timeline"] = fraudModule;
+  capabilities["trust.returnAbuse"] = fraudModule;
+  capabilities["trust.refundOutcomeSimulator"] = profitModule;
+  capabilities["trust.smartPolicyEngine"] = fraudModule;
+  capabilities["trust.trustRecoveryEngine"] = profitModule;
+  capabilities["trust.supportCopilot"] = profitModule;
+  capabilities["trust.evidencePackExport"] = fraudModule;
+  capabilities["trust.advancedAutomation"] = profitModule;
 
-  capabilities["competitor.moveFeed"] =
-    isTrial || isGrowth || isPro || isStarterCompetitor;
-  capabilities["competitor.impactScore"] = isTrial || isGrowth || isPro;
-  capabilities["competitor.actionSuggestions"] = isTrial || isGrowth || isPro;
-  capabilities["competitor.strategyDetection"] = isTrial || isPro;
-  capabilities["competitor.weeklyReports"] = isTrial || isGrowth || isPro;
-  capabilities["competitor.advancedReports"] = isTrial || isPro;
+  capabilities["competitor.moveFeed"] = competitorModule;
+  capabilities["competitor.impactScore"] = competitorModule;
+  capabilities["competitor.actionSuggestions"] = competitorModule;
+  capabilities["competitor.strategyDetection"] = isGrowth || isPro;
+  capabilities["competitor.weeklyReports"] = reportsModule && competitorModule;
+  capabilities["competitor.advancedReports"] = isPro;
 
-  capabilities["pricing.basicRecommendations"] = capabilities["module.pricingProfit"];
-  capabilities["pricing.explainableRecommendations"] =
-    capabilities["module.pricingProfit"];
-  capabilities["pricing.advancedModes"] = isTrial || isPro;
-  capabilities["pricing.doNothingRecommendation"] =
-    capabilities["module.pricingProfit"];
-  capabilities["pricing.profitLeakDetector"] = isTrial || isPro;
-  capabilities["pricing.dailyActionBoard"] = isTrial || isPro;
-  capabilities["pricing.scenarioSimulator"] = isTrial || isPro;
-  capabilities["pricing.marginAtRisk"] = isTrial || isPro;
-  capabilities["pricing.advancedAutomation"] = isTrial || isPro;
+  capabilities["pricing.basicRecommendations"] = pricingModule;
+  capabilities["pricing.explainableRecommendations"] = pricingModule;
+  capabilities["pricing.advancedModes"] = pricingModule;
+  capabilities["pricing.doNothingRecommendation"] = pricingModule;
+  capabilities["pricing.profitLeakDetector"] = profitModule;
+  capabilities["pricing.dailyActionBoard"] = profitModule;
+  capabilities["pricing.scenarioSimulator"] = pricingModule;
+  capabilities["pricing.marginAtRisk"] = profitModule;
+  capabilities["pricing.advancedAutomation"] = profitModule;
 
-  capabilities["reports.export"] = capabilities["competitor.weeklyReports"];
+  capabilities["reports.export"] = reportsModule;
 
   return capabilities;
 }

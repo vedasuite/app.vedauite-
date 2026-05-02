@@ -193,10 +193,15 @@ function getCompetitorFreshnessLabel(
   if (freshnessHours <= 1) {
     return "Refreshed recently";
   }
-  if (freshnessHours > 24) {
-    return `Stale: last refreshed ${freshnessHours} hours ago`;
+  if (freshnessHours < 24) {
+    return `Last refreshed ${Math.round(freshnessHours)} hour${Math.round(freshnessHours) === 1 ? "" : "s"} ago`;
   }
-  return `Last refreshed ${freshnessHours} hours ago`;
+  const freshnessDays = Number((freshnessHours / 24).toFixed(1));
+  if (freshnessDays < 7) {
+    return `Last refreshed ${freshnessDays} day${freshnessDays === 1 ? "" : "s"} ago`;
+  }
+  const freshnessWeeks = Number((freshnessDays / 7).toFixed(1));
+  return `Last refreshed ${freshnessWeeks} week${freshnessWeeks === 1 ? "" : "s"} ago`;
 }
 
 export function deriveCompetitorPrimaryState(args: {
@@ -749,7 +754,10 @@ export async function getCompetitorOverview(shopDomain: string) {
       : "READY";
   const freshnessFailureReason =
     freshnessHours != null && freshnessHours > 72
-      ? `Competitor monitoring is stale. Last successful ingestion was ${freshnessHours} hours ago.`
+      ? `Competitor monitoring is stale. The last successful refresh was ${getCompetitorFreshnessLabel(
+          freshnessHours,
+          lastSuccessAt
+        ).toLowerCase()}.`
       : operational.latestCompetitorIngestJob?.status === "FAILED"
       ? operational.latestCompetitorIngestJob.errorMessage ??
         "The latest competitor ingestion failed."

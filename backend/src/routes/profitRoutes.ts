@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import {
   getProfitOpportunities,
   getProfitRecommendations,
@@ -10,7 +10,7 @@ export const profitRouter = Router();
 
 profitRouter.get(
   "/recommendations",
-  requireCapability("pricing.profitLeakDetector"),
+  requireFeature("profitOptimization"),
   async (req, res) => {
   const shop = resolveAuthenticatedShop(req);
   if (!shop) {
@@ -22,7 +22,7 @@ profitRouter.get(
 
 profitRouter.get(
   "/opportunities",
-  requireCapability("pricing.profitLeakDetector"),
+  requireFeature("profitOptimization"),
   async (req, res) => {
   const shop = resolveAuthenticatedShop(req);
   if (!shop) {

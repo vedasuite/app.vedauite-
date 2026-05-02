@@ -223,16 +223,18 @@ export function TrustAbusePage() {
   const runAction = useCallback(async (action: QueueAction) => {
     if (!activeOrder) return;
     try {
-      const response = await embeddedShopRequest<{ order?: { shopifyTagResult?: { updated?: boolean; reason?: string } } }>("/api/fraud/action", {
+      const response = await embeddedShopRequest<{ order?: { shopifyTagResult?: { updated?: boolean; reason?: string }; merchantMessage?: string } }>("/api/fraud/action", {
         method: "POST",
         body: { orderId: activeOrder.id, action },
         timeoutMs: 30000,
       });
       const tagResult = response.order?.shopifyTagResult;
+      const merchantMessage = response.order?.merchantMessage;
       setToast(
-        tagResult?.updated
-          ? `Order ${activeOrder.shopifyOrderId} was updated and tagged in Shopify.`
-          : `Order ${activeOrder.shopifyOrderId} was updated${tagResult?.reason ? ` (${tagResult.reason})` : "."}`
+        merchantMessage ??
+          (tagResult?.updated
+            ? `Order ${activeOrder.shopifyOrderId} was updated and tagged in Shopify.`
+            : `Order ${activeOrder.shopifyOrderId} was updated${tagResult?.reason ? ` (${tagResult.reason})` : "."}`)
       );
       setActiveOrder(null);
       await loadOverview();

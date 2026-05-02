@@ -64,6 +64,57 @@ export function useApiClient() {
       return config;
     });
 
+    client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const status = error?.response?.status;
+        const payload = error?.response?.data;
+        const requestId =
+          payload?.error?.requestId ??
+          error?.response?.headers?.["x-request-id"] ??
+          null;
+
+        if (status === 401) {
+          const message =
+            payload?.error?.message ??
+            "Your Shopify session expired. Reload VedaSuite from Shopify Admin and try again.";
+          return Promise.reject(
+            Object.assign(new Error(message), {
+              code: payload?.error?.code ?? "REAUTHORIZE_REQUIRED",
+              reauthorizeUrl: payload?.error?.reauthorizeUrl ?? null,
+            })
+          );
+        }
+
+        if (status === 403) {
+          const message =
+            payload?.error?.message ??
+            "This feature is not included in your current plan.";
+          return Promise.reject(
+            Object.assign(new Error(message), {
+              code: payload?.error?.code ?? "FEATURE_LOCKED",
+              requiredPlan: payload?.error?.requiredPlan ?? null,
+              upgradePath: payload?.error?.upgradePath ?? "/app/billing",
+            })
+          );
+        }
+
+        if (status >= 500) {
+          const message = requestId
+            ? `VedaSuite hit a server problem. Please retry. Reference: ${requestId}.`
+            : "VedaSuite hit a server problem. Please retry.";
+          return Promise.reject(
+            Object.assign(new Error(message), {
+              code: payload?.error?.code ?? "SERVER_ERROR",
+              requestId,
+            })
+          );
+        }
+
+        return Promise.reject(error);
+      }
+    );
+
     clientCache.set(cacheKey, client);
     return client;
   }, [host, shop]);

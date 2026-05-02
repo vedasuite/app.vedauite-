@@ -842,33 +842,53 @@ export async function syncShopifyStoreData(shopDomain: string) {
       normalizedStatus.includes("partially_refunded");
     const refundRequested = refunded || orderNode.tags.some((tag) => /refund/i.test(tag));
 
-    const existingOrder = await prisma.order.findUnique({
-      where: { shopifyOrderId: orderNode.legacyResourceId },
+    const displayOrderId = orderNode.name || orderNode.legacyResourceId || orderNode.id;
+    const existingOrder = await prisma.order.findFirst({
+      where: {
+        storeId: store.id,
+        OR: [
+          { shopifyOrderGid: orderNode.id },
+          { shopifyLegacyOrderId: orderNode.legacyResourceId },
+          { shopifyOrderId: displayOrderId },
+        ],
+      },
       select: { id: true },
     });
 
-    await prisma.order.upsert({
-      where: { shopifyOrderId: orderNode.legacyResourceId },
-      create: {
-        storeId: store.id,
-        customerId,
-        shopifyOrderId: orderNode.legacyResourceId,
-        totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
-        currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
-        status: normalizedStatus,
-        refunded,
-        refundRequested,
-        createdAt: new Date(orderNode.createdAt),
-      },
-      update: {
-        customerId,
-        totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
-        currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
-        status: normalizedStatus,
-        refunded,
-        refundRequested,
-      },
-    });
+    if (existingOrder) {
+      await prisma.order.update({
+        where: { id: existingOrder.id },
+        data: {
+          customerId,
+          shopifyOrderId: displayOrderId,
+          shopifyOrderGid: orderNode.id,
+          shopifyLegacyOrderId: orderNode.legacyResourceId,
+          orderName: orderNode.name,
+          totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
+          currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
+          status: normalizedStatus,
+          refunded,
+          refundRequested,
+        },
+      });
+    } else {
+      await prisma.order.create({
+        data: {
+          storeId: store.id,
+          customerId,
+          shopifyOrderId: displayOrderId,
+          shopifyOrderGid: orderNode.id,
+          shopifyLegacyOrderId: orderNode.legacyResourceId,
+          orderName: orderNode.name,
+          totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
+          currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
+          status: normalizedStatus,
+          refunded,
+          refundRequested,
+          createdAt: new Date(orderNode.createdAt),
+        },
+      });
+    }
 
     if (existingOrder) {
       syncCounts.saved.ordersUpdated += 1;
@@ -1125,17 +1145,27 @@ export async function syncShopifyStoreData(shopDomain: string) {
 
 export async function tagShopifyOrder(
   shopDomain: string,
-  shopifyOrderId: string,
+  orderReference: {
+    shopifyOrderGid?: string | null;
+    shopifyLegacyOrderId?: string | null;
+    orderName?: string | null;
+  },
   tags: string[]
 ) {
-  if (!/^\d+$/.test(shopifyOrderId)) {
+  const orderGid =
+    orderReference.shopifyOrderGid && orderReference.shopifyOrderGid.startsWith("gid://shopify/Order/")
+      ? orderReference.shopifyOrderGid
+      : orderReference.shopifyLegacyOrderId && /^\d+$/.test(orderReference.shopifyLegacyOrderId)
+      ? `gid://shopify/Order/${orderReference.shopifyLegacyOrderId}`
+      : null;
+
+  if (!orderGid) {
     return {
       updated: false,
-      reason: "Order does not have a Shopify numeric order id yet.",
+      reason:
+        "Review status saved in VedaSuite. Shopify tagging will be available after the order is fully synced.",
     };
   }
-
-  const orderGid = `gid://shopify/Order/${shopifyOrderId}`;
   const mutation = await shopifyGraphQL<{
     tagsAdd: {
       userErrors: Array<{ message: string }>;
@@ -1162,7 +1192,7 @@ export async function tagShopifyOrder(
     return { updated: false, reason: errors.map((error) => error.message).join(", ") };
   }
 
-  return { updated: true, shopifyOrderId, tags };
+  return { updated: true, shopifyOrderGid: orderGid, tags };
 }
 
 export { extractLegacyId };

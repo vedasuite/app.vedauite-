@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import {
   approvePricingRecommendation,
   getPricingRecommendations,
@@ -11,7 +11,7 @@ export const pricingRouter = Router();
 
 pricingRouter.get(
   "/recommendations",
-  requireCapability("pricing.basicRecommendations"),
+  requireFeature("pricing"),
   async (req, res) => {
   const shop = resolveAuthenticatedShop(req);
   if (!shop) {
@@ -24,7 +24,7 @@ pricingRouter.get(
 
 pricingRouter.post(
   "/simulate",
-  requireCapability("pricing.scenarioSimulator"),
+  requireFeature("pricing"),
   async (req, res) => {
   const { currentPrice, recommendedPrice, salesVelocity, margin } = req.body;
   const result = await simulatePricingChange({
@@ -38,7 +38,7 @@ pricingRouter.post(
 
 pricingRouter.post(
   "/recommendations/:id/approve",
-  requireCapability("pricing.basicRecommendations"),
+  requireFeature("pricing"),
   async (req, res) => {
   const { id } = req.params;
   const shop = resolveAuthenticatedShop(req);

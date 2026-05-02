@@ -339,7 +339,7 @@ export function CompetitorPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [domainsInput, setDomainsInput] = useState("styleorbit.example, urbanloom.example");
+  const [domainsInput, setDomainsInput] = useState("");
 
   const allowed = !!subscription?.enabledModules?.competitor;
   const canSeeWeeklyReports =

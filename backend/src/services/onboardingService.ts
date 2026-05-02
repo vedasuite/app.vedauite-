@@ -1,4 +1,5 @@
 import { prisma } from "../db/prismaClient";
+import { env } from "../config/env";
 import {
   normalizeStarterModuleLabel,
   type StarterModule,
@@ -422,29 +423,31 @@ export async function getOnboardingState(shopDomain: string) {
     selectedModule,
     selectedModuleTitle: selectedModule ? moduleTitle(selectedModule) : null,
     selectedModuleRoute: selectedModule ? moduleRoute(selectedModule) : null,
-    sampleInsights: [
-      {
-        key: "fraud-sample",
-        module: "Fraud Intelligence",
-        title: "Customer flagged: High refund frequency (Score: 82/100)",
-        detail:
-          "Sample insight: VedaSuite highlights refund-heavy shopper behavior so you can review risky orders faster.",
-      },
-      {
-        key: "competitor-sample",
-        module: "Competitor Intelligence",
-        title: "Competitor reduced price by 12% on top product",
-        detail:
-          "Sample insight: competitor monitoring surfaces price moves, promotions, and market pressure worth reacting to.",
-      },
-      {
-        key: "pricing-sample",
-        module: "AI Pricing Engine",
-        title: "Suggested price increase: +8% to improve margin",
-        detail:
-          "Sample insight: pricing recommendations weigh margin protection against current demand signals.",
-      },
-    ],
+    sampleInsights: env.enableSampleData
+      ? [
+          {
+            key: "fraud-sample",
+            module: "Fraud Intelligence",
+            title: "Sample preview: Customer flagged for repeated refund behaviour",
+            detail:
+              "Sample preview only. Live fraud insights appear here after Shopify orders and customer history are synced.",
+          },
+          {
+            key: "competitor-sample",
+            module: "Competitor Intelligence",
+            title: "Sample preview: Competitor changed price on a monitored product",
+            detail:
+              "Sample preview only. Live competitor changes appear after domains are connected and the first monitoring run completes.",
+          },
+          {
+            key: "pricing-sample",
+            module: "AI Pricing Engine",
+            title: "Sample preview: Suggested price change based on baseline store data",
+            detail:
+              "Sample preview only. Live pricing actions appear after enough synced product and order history is available.",
+          },
+        ]
+      : [],
     planSummary: {
       planName: billing.planName,
       billingActive: readiness.billing.accessActive,

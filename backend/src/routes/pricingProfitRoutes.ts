@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import { getPricingProfitOverview } from "../services/pricingProfitService";
 import { logEvent } from "../services/observabilityService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const pricingProfitRouter = Router();
-pricingProfitRouter.use(requireCapability("module.pricingProfit"));
+pricingProfitRouter.use(requireFeature("pricing"));
 
 pricingProfitRouter.get("/overview", async (req, res) => {
   const shop = resolveAuthenticatedShop(req);

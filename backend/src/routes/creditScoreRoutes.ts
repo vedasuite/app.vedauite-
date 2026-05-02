@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import {
   getCustomerScore,
   getTrustOperatingLayer,
@@ -9,7 +9,7 @@ import {
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const creditScoreRouter = Router();
-creditScoreRouter.use(requireCapability("module.trustAbuse"));
+creditScoreRouter.use(requireFeature("creditScore"));
 
 creditScoreRouter.get("/customers", async (req, res) => {
   const shop = resolveAuthenticatedShop(req);

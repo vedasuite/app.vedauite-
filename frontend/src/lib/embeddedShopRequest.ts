@@ -93,10 +93,17 @@ async function doFetch(
 
 function enrichError(
   payload: any,
-  fallbackMessage: string
+  fallbackMessage: string,
+  statusCode?: number
 ) {
+  const requestId =
+    payload?.error?.requestId ?? payload?.requestId ?? null;
   const errorMessage =
-    typeof payload?.error === "string"
+    statusCode && statusCode >= 500
+      ? requestId
+        ? `VedaSuite hit a server problem. Please retry. Reference: ${requestId}.`
+        : "VedaSuite hit a server problem. Please retry."
+      : typeof payload?.error === "string"
       ? payload.error
       : payload?.error?.message ||
         payload?.message ||
@@ -105,6 +112,9 @@ function enrichError(
   const enrichedError = new Error(errorMessage) as Error & {
     reauthorizeUrl?: string;
     code?: string;
+    requestId?: string | null;
+    requiredPlan?: string | null;
+    upgradePath?: string | null;
   };
 
   if (typeof payload?.error?.reauthorizeUrl === "string") {
@@ -112,6 +122,15 @@ function enrichError(
   }
   if (typeof payload?.error?.code === "string") {
     enrichedError.code = payload.error.code;
+  }
+  if (requestId) {
+    enrichedError.requestId = requestId;
+  }
+  if (typeof payload?.error?.requiredPlan === "string") {
+    enrichedError.requiredPlan = payload.error.requiredPlan;
+  }
+  if (typeof payload?.error?.upgradePath === "string") {
+    enrichedError.upgradePath = payload.error.upgradePath;
   }
 
   return enrichedError;
@@ -157,14 +176,18 @@ export async function embeddedShopRequest<T = unknown>(
       ) {
         throw enrichError(
           responseResult.payload,
-          "Shopify authorization expired. Reconnect the app and retry."
+          responseResult.response.status === 401
+            ? "Shopify authorization expired. Reconnect the app and retry."
+            : "This feature is not included in your current plan.",
+          responseResult.response.status
         );
       }
 
       if (!responseResult.response.ok) {
         throw enrichError(
           responseResult.payload,
-          `Request failed with status ${responseResult.response.status}`
+          `Request failed with status ${responseResult.response.status}`,
+          responseResult.response.status
         );
       }
 

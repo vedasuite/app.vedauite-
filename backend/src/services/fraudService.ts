@@ -265,13 +265,21 @@ export async function applyFraudAction(
   ];
   const shopifyTagResult = await tagShopifyOrder(
     shopDomain,
-    order.shopifyOrderId,
+    {
+      shopifyOrderGid: (order as { shopifyOrderGid?: string | null }).shopifyOrderGid ?? null,
+      shopifyLegacyOrderId:
+        (order as { shopifyLegacyOrderId?: string | null }).shopifyLegacyOrderId ?? null,
+      orderName: (order as { orderName?: string | null }).orderName ?? order.shopifyOrderId,
+    },
     tags
   );
 
   return {
     ...order,
     shopifyTagResult,
+    merchantMessage: shopifyTagResult.updated
+      ? "Review status saved in VedaSuite and synced to Shopify."
+      : shopifyTagResult.reason,
   };
 }
 

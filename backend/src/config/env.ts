@@ -41,6 +41,8 @@ export const env = {
   enableDemoBootstrap:
     (process.env.VEDASUITE_ENABLE_DEMO_BOOTSTRAP || "false").toLowerCase() ===
     "true",
+  enableSampleData:
+    (process.env.ENABLE_SAMPLE_DATA || "false").toLowerCase() === "true",
 };
 
 if (!env.shopifyApiKey || !env.shopifyApiSecret || !env.shopifyAppUrl) {

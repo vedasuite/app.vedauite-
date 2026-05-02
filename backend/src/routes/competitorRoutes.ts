@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import {
   getCompetitorResponseEngine,
   getCompetitorOverview,
@@ -11,7 +11,7 @@ import {
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const competitorRouter = Router();
-competitorRouter.use(requireCapability("module.competitorIntel"));
+competitorRouter.use(requireFeature("competitor"));
 
 competitorRouter.get("/overview", async (req, res) => {
   const shop = resolveAuthenticatedShop(req);

@@ -206,15 +206,17 @@ export function FraudPage() {
         orderId: activeOrder.id,
         action,
       });
+      const merchantMessage = response.data?.order?.merchantMessage as string | undefined;
       const tagResult = response.data?.order?.shopifyTagResult as
         | { updated?: boolean; reason?: string }
         | undefined;
       setToast(
-        tagResult?.updated
-          ? `Order ${activeOrder.shopifyOrderId} updated and tagged in Shopify: ${action}.`
-          : `Order ${activeOrder.shopifyOrderId} updated locally: ${action}${
-              tagResult?.reason ? ` (${tagResult.reason})` : "."
-            }`
+        merchantMessage ??
+          (tagResult?.updated
+            ? `Order ${activeOrder.shopifyOrderId} updated and tagged in Shopify: ${action}.`
+            : `Order ${activeOrder.shopifyOrderId} updated locally: ${action}${
+                tagResult?.reason ? ` (${tagResult.reason})` : "."
+              }`)
       );
       setActiveOrder(null);
       loadOrders();

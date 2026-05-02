@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireCapability } from "../middleware/requireCapability";
+import { requireFeature } from "../middleware/requireFeature";
 import {
   applyFraudAction,
   getFraudIntelligenceOverview,
@@ -9,7 +9,7 @@ import {
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const fraudRouter = Router();
-fraudRouter.use(requireCapability("module.trustAbuse"));
+fraudRouter.use(requireFeature("fraud"));
 
 fraudRouter.get("/orders", async (req, res) => {
   const shop = resolveAuthenticatedShop(req);

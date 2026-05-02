@@ -129,3 +129,118 @@ test("inactive paid plan blocks protected capabilities through backend gating", 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("STARTER fraud access unlocks only fraud-backed routes", async () => {
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
+  );
+  const requireFeaturePath = path.resolve(
+    __dirname,
+    "../dist/middleware/requireFeature.js"
+  );
+
+  resetModule(subscriptionServicePath);
+  require(subscriptionServicePath).getCurrentSubscription = async () => ({
+    planName: "STARTER",
+    active: true,
+    status: "active_paid",
+    billingStatus: "ACTIVE",
+    enabledModules: {
+      fraud: true,
+      competitor: false,
+      pricing: false,
+      creditScore: false,
+      profitOptimization: false,
+      reports: false,
+      settings: true,
+      trustAbuse: true,
+      pricingProfit: false,
+    },
+  });
+
+  resetModule(requireFeaturePath);
+  const { requireFeature } = require(requireFeaturePath);
+  const app = express();
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.get("/fraud", requireFeature("fraud"), (_req, res) => res.json({ ok: true }));
+  app.get("/competitor", requireFeature("competitor"), (_req, res) =>
+    res.json({ ok: true })
+  );
+  const server = app.listen(0);
+
+  try {
+    const fraudResponse = await request(server, "/fraud?shop=test-shop.myshopify.com");
+    assert.equal(fraudResponse.statusCode, 200);
+
+    const competitorResponse = await request(
+      server,
+      "/competitor?shop=test-shop.myshopify.com"
+    );
+    assert.equal(competitorResponse.statusCode, 403);
+    assert.match(competitorResponse.body, /FEATURE_LOCKED/);
+    assert.match(competitorResponse.body, /requiredPlan/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("STARTER competitor access unlocks only competitor-backed routes", async () => {
+  const subscriptionServicePath = path.resolve(
+    __dirname,
+    "../dist/services/subscriptionService.js"
+  );
+  const requireFeaturePath = path.resolve(
+    __dirname,
+    "../dist/middleware/requireFeature.js"
+  );
+
+  resetModule(subscriptionServicePath);
+  require(subscriptionServicePath).getCurrentSubscription = async () => ({
+    planName: "STARTER",
+    active: true,
+    status: "active_paid",
+    billingStatus: "ACTIVE",
+    enabledModules: {
+      fraud: false,
+      competitor: true,
+      pricing: false,
+      creditScore: false,
+      profitOptimization: false,
+      reports: false,
+      settings: true,
+      trustAbuse: false,
+      pricingProfit: false,
+    },
+  });
+
+  resetModule(requireFeaturePath);
+  const { requireFeature } = require(requireFeaturePath);
+  const app = express();
+  app.use((req, _res, next) => {
+    req.shopifySession = { shop: "test-shop.myshopify.com" };
+    next();
+  });
+  app.get("/fraud", requireFeature("fraud"), (_req, res) => res.json({ ok: true }));
+  app.get("/competitor", requireFeature("competitor"), (_req, res) =>
+    res.json({ ok: true })
+  );
+  const server = app.listen(0);
+
+  try {
+    const fraudResponse = await request(server, "/fraud?shop=test-shop.myshopify.com");
+    assert.equal(fraudResponse.statusCode, 403);
+    assert.match(fraudResponse.body, /FEATURE_LOCKED/);
+
+    const competitorResponse = await request(
+      server,
+      "/competitor?shop=test-shop.myshopify.com"
+    );
+    assert.equal(competitorResponse.statusCode, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

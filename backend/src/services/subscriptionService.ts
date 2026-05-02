@@ -825,6 +825,27 @@ export async function getCurrentSubscription(
   });
 }
 
+export async function reconcileBillingState(shopDomain: string) {
+  const [billingState, subscription] = await Promise.all([
+    resolveBillingState(shopDomain),
+    getCurrentSubscription(shopDomain),
+  ]);
+
+  const entitlements = buildCanonicalEntitlements({
+    planName: billingState.planName,
+    starterModule: billingState.starterModule,
+    accessActive: billingState.accessActive,
+    verified: billingState.verified,
+    trialActive: billingState.planName === "TRIAL" && billingState.accessActive,
+  });
+
+  return {
+    billingState,
+    subscription,
+    entitlements,
+  };
+}
+
 export async function resolveActivePlan(shopDomain: string): Promise<BillingPlanName> {
   const subscription = await getCurrentSubscription(shopDomain);
   return subscription.planName;
