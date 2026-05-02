@@ -273,14 +273,14 @@ function buildSetupSummary(input: {
 }
 
 function normalizeSelectedModule(value?: string | null) {
-  if (value === "trustAbuse" || value === "competitor" || value === "pricingProfit") {
+  if (value === "fraud" || value === "competitor" || value === "pricing") {
     return value;
   }
-  if (value === "fraud" || value === "creditScore") {
-    return "trustAbuse";
+  if (value === "trustAbuse" || value === "creditScore") {
+    return "fraud";
   }
-  if (value === "pricing" || value === "profit") {
-    return "pricingProfit";
+  if (value === "pricingProfit" || value === "profit") {
+    return "pricing";
   }
   return null;
 }
@@ -444,7 +444,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
 
   const fraudReadiness = createReadinessItem({
     state: deriveReadinessState({
-      entitled: subscription.enabledModules.trustAbuse,
+      entitled: subscription.enabledModules.fraud,
       connectionHealthy: connectionHealth.healthy,
       syncStatus: syncStatus.status,
       setupComplete: hasRawData,
@@ -453,7 +453,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       hasFailed: syncStatus.status === "FAILED",
     }),
     title:
-      !subscription.enabledModules.trustAbuse
+      !subscription.enabledModules.fraud
         ? "Fraud Intelligence is locked"
         : operational.counts.timelineEvents > 0
         ? "Fraud Intelligence is ready"
@@ -462,7 +462,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "Fraud Intelligence is collecting data"
         : "Fraud Intelligence needs more store history",
     description:
-      !subscription.enabledModules.trustAbuse
+      !subscription.enabledModules.fraud
         ? "Upgrade the current plan to unlock Fraud Intelligence."
         : operational.counts.timelineEvents > 0
         ? "Risk checks and refund-abuse signals are available from the latest synced data."
@@ -470,12 +470,12 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "The latest sync failed before fraud checks could finish."
         : "Sync more orders and customers so VedaSuite can build fraud and refund-abuse signals.",
     nextAction:
-      !subscription.enabledModules.trustAbuse
+      !subscription.enabledModules.fraud
         ? "Open billing"
         : operational.counts.timelineEvents > 0
         ? "Open Fraud Intelligence"
         : "Sync store data",
-    route: subscription.enabledModules.trustAbuse ? "/app/fraud-intelligence" : "/app/billing",
+    route: subscription.enabledModules.fraud ? "/app/fraud-intelligence" : "/app/billing",
     freshnessAt: lastProcessingAt,
     detail: {
       timelineEvents: operational.counts.timelineEvents,
@@ -592,7 +592,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
   });
   const pricingReadiness = createReadinessItem({
     state:
-      !subscription.enabledModules.pricingProfit
+      !subscription.enabledModules.pricing
         ? "locked"
         : pricingViewState.status === "ready"
         ? "ready"
@@ -603,7 +603,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "collecting_data"
         : "setup_needed",
     title:
-      !subscription.enabledModules.pricingProfit
+      !subscription.enabledModules.pricing
         ? "AI Pricing Engine is locked"
         : pricingViewState.status === "ready"
         ? "AI Pricing Engine is ready"
@@ -615,12 +615,12 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         : "AI Pricing Engine needs more store data",
     description: pricingViewState.description,
     nextAction:
-      !subscription.enabledModules.pricingProfit
+      !subscription.enabledModules.pricing
         ? "Open billing"
         : pricingViewState.status === "ready"
         ? "Open AI Pricing Engine"
         : pricingViewState.nextAction ?? "Sync store data",
-    route: subscription.enabledModules.pricingProfit ? "/app/ai-pricing-engine" : "/app/billing",
+    route: subscription.enabledModules.pricing ? "/app/ai-pricing-engine" : "/app/billing",
     freshnessAt: pricingViewState.lastSuccessfulRunAt,
     detail: {
       viewStatus: pricingViewState.status,
@@ -714,11 +714,11 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     normalizeSelectedModule(operational.store.onboardingSelectedModule) ??
     normalizeSelectedModule(subscription.starterModule);
   const selectedModuleState =
-    selectedModule === "trustAbuse"
+    selectedModule === "fraud"
       ? fraudReadiness.state
       : selectedModule === "competitor"
       ? competitorReadiness.state
-      : selectedModule === "pricingProfit"
+      : selectedModule === "pricing"
       ? pricingReadiness.state
       : null;
 

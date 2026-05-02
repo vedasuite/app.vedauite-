@@ -3,7 +3,7 @@ import { embeddedShopRequest } from "../lib/embeddedShopRequest";
 import { useAppState } from "../hooks/useAppState";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
 
-export type OnboardingModuleKey = "trustAbuse" | "competitor" | "pricingProfit";
+export type OnboardingModuleKey = "fraud" | "competitor" | "pricing";
 
 export type OnboardingState = {
   stage: string;

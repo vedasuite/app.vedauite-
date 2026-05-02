@@ -94,7 +94,7 @@ export default function App() {
           element={
             withRouteBoundary(
               "Fraud Intelligence",
-              <InsightRoute moduleKey="trustAbuse">
+              <InsightRoute moduleKey="fraud">
                 <TrustAbusePage />
               </InsightRoute>
             )
@@ -116,7 +116,7 @@ export default function App() {
           element={
             withRouteBoundary(
               "AI Pricing Engine",
-              <InsightRoute moduleKey="pricingProfit">
+              <InsightRoute moduleKey="pricing">
                 <PricingProfitPage />
               </InsightRoute>
             )

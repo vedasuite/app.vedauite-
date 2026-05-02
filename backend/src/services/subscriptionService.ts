@@ -480,7 +480,7 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
   const billingStatus = activeSubscription.status?.toUpperCase() ?? "ACTIVE";
   const starterModule =
     planName === "STARTER"
-      ? normalizeStarterModule(store.subscription?.starterModule) ?? "trustAbuse"
+      ? normalizeStarterModule(store.subscription?.starterModule) ?? "fraud"
       : null;
 
   const previousPlanName = store.subscription?.plan?.name ?? null;
@@ -1116,7 +1116,7 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       endsAt: currentPeriodEnd,
       starterModule:
         planName === "STARTER"
-          ? normalizeStarterModule(store.subscription?.starterModule) ?? "trustAbuse"
+          ? normalizeStarterModule(store.subscription?.starterModule) ?? "fraud"
           : null,
     } as any,
     create: {
@@ -1131,7 +1131,7 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       lastBillingResolutionSource: "webhook_app_subscriptions_update",
       lastBillingSubscriptionName: input.planName ?? planName,
       endsAt: currentPeriodEnd,
-      starterModule: planName === "STARTER" ? "trustAbuse" : null,
+      starterModule: planName === "STARTER" ? "fraud" : null,
     } as any,
     include: {
       plan: true,

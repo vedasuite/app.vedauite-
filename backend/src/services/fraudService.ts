@@ -3,6 +3,26 @@ import { prisma } from "../db/prismaClient";
 import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
 import { tagShopifyOrder } from "./shopifyAdminService";
 
+function formatMerchantOrderLabel(order: {
+  shopifyOrderId: string;
+  orderName?: string | null;
+  shopifyLegacyOrderId?: string | null;
+}) {
+  if (order.orderName?.trim()) {
+    return order.orderName.trim();
+  }
+
+  if (order.shopifyLegacyOrderId?.trim()) {
+    return `Order #${order.shopifyLegacyOrderId.trim()}`;
+  }
+
+  if (/\.myshopify\.com-order-\d+$/i.test(order.shopifyOrderId)) {
+    return "Order pending sync";
+  }
+
+  return order.shopifyOrderId;
+}
+
 export type FraudSignalInput = {
   ipAddress?: string;
   email?: string;
@@ -406,7 +426,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
     .slice(0, 5)
     .map((order) => ({
       id: order.id,
-      shopifyOrderId: order.shopifyOrderId,
+      shopifyOrderId: formatMerchantOrderLabel(order),
       chargebackRiskScore: Math.min(
         100,
         Math.round(order.fraudScore * 0.75 + (order.refundRequested ? 18 : 0))

@@ -1,10 +1,13 @@
 import { prisma } from "../db/prismaClient";
+import { getCompetitorOverview } from "./competitorService";
 import { getOnboardingState } from "./onboardingService";
+import { getPricingProfitOverview } from "./pricingProfitService";
 import { getUnifiedReadinessState } from "./readinessEngineService";
 import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
+import { getTrustAbuseOverview } from "./trustAbuseService";
 import { toIsoString } from "./unifiedModuleStateService";
 
 function latestIsoTimestamp(...values: Array<Date | string | null | undefined>) {
@@ -67,53 +70,29 @@ export async function getDashboardMetrics(shopDomain: string) {
   }
 
   const [
-    todayHighRiskOrders,
+    trustOverview,
+    competitorOverview,
+    pricingOverview,
     serialReturners,
-    competitorChanges,
-    pricingSuggestions,
-    profitOpportunities,
   ] =
     await Promise.all([
-      prisma.order.count({
-        where: {
-          storeId: store.id,
-          fraudRiskLevel: "High",
-          createdAt: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-          },
-        },
-      }),
+      getTrustAbuseOverview(shopDomain),
+      getCompetitorOverview(shopDomain),
+      getPricingProfitOverview(shopDomain),
       prisma.customer.count({
         where: {
           storeId: store.id,
           refundRate: { gt: 0.3 },
         },
       }),
-      prisma.competitorData.count({
-        where: {
-          storeId: store.id,
-          collectedAt: {
-            gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-      prisma.priceHistory.count({
-        where: {
-          storeId: store.id,
-          createdAt: {
-            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-      prisma.profitOptimizationData.count({
-        where: {
-          storeId: store.id,
-          createdAt: {
-            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
     ]);
+
+  const todayHighRiskOrders = trustOverview.summary.highRiskOrders;
+  const competitorChanges =
+    (competitorOverview.competitorState?.detectedPriceChangesCount ?? 0) +
+    (competitorOverview.competitorState?.detectedPromotionChangesCount ?? 0);
+  const pricingSuggestions = pricingOverview.summary.recommendationCount;
+  const profitOpportunities = pricingOverview.summary.profitOpportunityCount;
 
   const syncState = operational
     ? deriveSyncStatus({

@@ -53,7 +53,7 @@ subscriptionRouter.post("/downgrade-to-trial", requireCapability("billing.downgr
 
 subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSelectionStarter"), async (req, res) => {
   const body = req.body as {
-    starterModule?: "trustAbuse" | "competitor";
+    starterModule?: "fraud" | "competitor";
   };
   const shop = resolveAuthenticatedShop(req);
   const starterModule = body.starterModule;

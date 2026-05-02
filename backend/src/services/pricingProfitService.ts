@@ -673,16 +673,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
         });
   const competitorReady = competitorDependencyStatus === "ready";
   const profitReady = canUseFullProfitEngine && profitOpportunityCount > 0;
-  const projectedGainValue =
-    topProfitOpportunity?.projectedMonthlyProfitGain ??
-    topRecommendation?.expectedProfitGain ??
-    0;
+  const projectedGainValue = profitReady
+    ? topProfitOpportunity?.projectedMonthlyProfitGain ??
+      topRecommendation?.expectedProfitGain ??
+      0
+    : 0;
   const projectedGainStatus =
-    projectedGainValue <= 0
-      ? "not_available"
-      : profitReady
-      ? "available"
-      : "estimated_baseline";
+    projectedGainValue > 0 && profitReady ? "available" : "not_available";
   const primaryState: PricingPrimaryState =
     moduleState.dataStatus === "processing"
       ? "PROCESSING"
@@ -849,7 +846,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       competitorDependency: competitorReady ? "ready" : "missing",
       profitModelStatus: profitReady ? "ready" : canUseFullProfitEngine ? "partial" : "missing",
       recommendationCount,
-      prioritizedRecommendationCount: prioritizedRecommendations.length,
+      prioritizedRecommendationCount: recommendationCount,
       projectedGainStatus,
       projectedGainValue,
       responseMode,

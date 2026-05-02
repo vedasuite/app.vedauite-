@@ -28,7 +28,7 @@ export type OnboardingActionKey =
   | "CONFIRM_PLAN"
   | "OPEN_DASHBOARD";
 
-type OnboardingModuleKey = "trustAbuse" | "competitor" | "pricingProfit";
+type OnboardingModuleKey = "fraud" | "competitor" | "pricing";
 
 type OnboardingStep = {
   key: OnboardingStage;
@@ -44,36 +44,36 @@ type OnboardingStep = {
 function normalizeOnboardingModule(
   value?: string | null
 ): OnboardingModuleKey | null {
-  if (value === "trustAbuse" || value === "competitor" || value === "pricingProfit") {
+  if (value === "fraud" || value === "competitor" || value === "pricing") {
     return value;
   }
-  if (value === "fraud" || value === "creditScore") {
-    return "trustAbuse";
+  if (value === "trustAbuse" || value === "creditScore") {
+    return "fraud";
   }
-  if (value === "pricing" || value === "profit") {
-    return "pricingProfit";
+  if (value === "pricingProfit" || value === "profit") {
+    return "pricing";
   }
   return null;
 }
 
 function moduleRoute(moduleKey: OnboardingModuleKey) {
   switch (moduleKey) {
-    case "trustAbuse":
+    case "fraud":
       return "/app/fraud-intelligence";
     case "competitor":
       return "/app/competitor-intelligence";
-    case "pricingProfit":
+    case "pricing":
       return "/app/ai-pricing-engine";
   }
 }
 
 function moduleTitle(moduleKey: OnboardingModuleKey) {
   switch (moduleKey) {
-    case "trustAbuse":
+    case "fraud":
       return "Fraud Intelligence";
     case "competitor":
       return "Competitor Intelligence";
-    case "pricingProfit":
+    case "pricing":
       return "AI Pricing Engine";
   }
 }
@@ -162,17 +162,17 @@ export async function getOnboardingState(shopDomain: string) {
 
   const moduleAvailability = [
     {
-      key: "trustAbuse" as const,
+      key: "fraud" as const,
       title: "Fraud Intelligence",
-      route: moduleRoute("trustAbuse"),
+      route: moduleRoute("fraud"),
       summary: "Detect refund abuse, flag risky customers, and reduce chargeback exposure.",
       benefits: [
         "Detect refund abuse",
         "Flag risky customers",
         "Reduce chargebacks",
       ],
-      available: subscription.enabledModules.trustAbuse,
-      lockReason: subscription.enabledModules.trustAbuse
+      available: subscription.enabledModules.fraud,
+      lockReason: subscription.enabledModules.fraud
         ? null
         : "Upgrade your plan to unlock Fraud Intelligence.",
     },
@@ -192,17 +192,17 @@ export async function getOnboardingState(shopDomain: string) {
         : "Upgrade your plan to unlock Competitor Intelligence.",
     },
     {
-      key: "pricingProfit" as const,
+      key: "pricing" as const,
       title: "AI Pricing Engine",
-      route: moduleRoute("pricingProfit"),
+      route: moduleRoute("pricing"),
       summary: "Suggest optimal pricing, balance margin versus demand, and improve conversion.",
       benefits: [
         "Suggest optimal pricing",
         "Balance margin vs demand",
         "Improve conversion",
       ],
-      available: subscription.enabledModules.pricingProfit,
-      lockReason: subscription.enabledModules.pricingProfit
+      available: subscription.enabledModules.pricing,
+      lockReason: subscription.enabledModules.pricing
         ? null
         : "Upgrade to Growth or Pro to unlock AI Pricing Engine.",
     },
@@ -214,11 +214,11 @@ export async function getOnboardingState(shopDomain: string) {
       (module) => module.key === selectedModule && module.available
     );
   const selectedModuleReadiness =
-    selectedModule === "trustAbuse"
+    selectedModule === "fraud"
       ? readiness.modules.fraud
       : selectedModule === "competitor"
       ? readiness.modules.competitor
-      : selectedModule === "pricingProfit"
+      : selectedModule === "pricing"
       ? readiness.modules.pricing
       : null;
   const moduleSelectionComplete = readiness.initialSync.ready && selectedModuleAvailable;
@@ -455,14 +455,14 @@ export async function getOnboardingState(shopDomain: string) {
         normalizeStarterModuleLabel(subscription.starterModule as StarterModule | null) ??
         null,
       unlockedFeatures: [
-        subscription.enabledModules.trustAbuse ? "Fraud detection" : null,
+        subscription.enabledModules.fraud ? "Fraud detection" : null,
         subscription.enabledModules.competitor ? "Competitor tracking" : null,
-        subscription.enabledModules.pricingProfit ? "Pricing optimization" : null,
+        subscription.enabledModules.pricing ? "Pricing optimization" : null,
       ].filter((value): value is string => !!value),
       lockedFeatures: [
-        subscription.enabledModules.trustAbuse ? null : "Fraud detection",
+        subscription.enabledModules.fraud ? null : "Fraud detection",
         subscription.enabledModules.competitor ? null : "Competitor tracking",
-        subscription.enabledModules.pricingProfit ? null : "Pricing optimization",
+        subscription.enabledModules.pricing ? null : "Pricing optimization",
       ].filter((value): value is string => !!value),
       manageRoute: "/app/billing",
       canConfirmPlan: stage === "PLAN_CONFIRMATION" || canAccessDashboard,

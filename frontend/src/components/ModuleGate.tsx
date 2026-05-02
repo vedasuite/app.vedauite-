@@ -37,8 +37,8 @@ export function ModuleGate({
   const currentPlan = entitlements?.planName ?? subscription?.planName ?? "NONE";
   const currentStarterModule = entitlements?.starterModule ?? subscription?.starterModule;
   const starterLabel =
-    currentStarterModule === "trustAbuse"
-      ? "Trust & Abuse Intelligence"
+    currentStarterModule === "fraud"
+      ? "Fraud Intelligence"
       : currentStarterModule === "competitor"
       ? "Competitor Intelligence"
       : null;

@@ -286,7 +286,10 @@ export function PricingProfitPage() {
   const requestIdRef = useRef(0);
   const inFlightRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const allowed = !!subscription?.enabledModules?.pricingProfit;
+  const allowed = !!(
+    subscription?.enabledModules?.pricing ??
+    subscription?.enabledModules?.pricingProfit
+  );
 
   const loadOverview = useCallback(async (reason: "mount" | "refresh" | "retry" = "refresh") => {
     if (!allowed) return;
@@ -423,7 +426,7 @@ export function PricingProfitPage() {
   const refreshing = screenState.status === "initializing" || screenState.status === "syncing";
   const gainValue =
     pricingState.projectedGainStatus === "not_available"
-      ? "Not available"
+      ? "Not enough data yet"
       : `$${Math.round(pricingState.projectedGainValue)}`;
 
   return (

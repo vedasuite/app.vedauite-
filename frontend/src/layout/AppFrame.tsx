@@ -48,8 +48,8 @@ function ShellLoadingState({
 }
 
 function starterModuleLabel(value: string | null | undefined) {
-  if (value === "trustAbuse") {
-    return "Trust & Abuse";
+  if (value === "fraud") {
+    return "Fraud";
   }
   if (value === "competitor") {
     return "Competitor";
@@ -77,9 +77,10 @@ export function AppFrame({ children }: Props) {
   const activePlan =
     entitlements?.planName ?? appState?.billing.planName ?? subscription?.planName ?? "NONE";
   const moduleStatus = {
-    trustAbuse:
-      entitlements?.modules.trustAbuse ??
-      appState?.entitlements.trustAbuse ??
+    fraud:
+      entitlements?.modules.fraud ??
+      appState?.entitlements.fraud ??
+      subscription?.enabledModules?.fraud ??
       subscription?.enabledModules?.trustAbuse ??
       false,
     competitor:
@@ -87,9 +88,10 @@ export function AppFrame({ children }: Props) {
       appState?.entitlements.competitor ??
       subscription?.enabledModules?.competitor ??
       false,
-    pricingProfit:
-      entitlements?.modules.pricingProfit ??
-      appState?.entitlements.pricingProfit ??
+    pricing:
+      entitlements?.modules.pricing ??
+      appState?.entitlements.pricing ??
+      subscription?.enabledModules?.pricing ??
       subscription?.enabledModules?.pricingProfit ??
       false,
     reports:
@@ -125,13 +127,13 @@ export function AppFrame({ children }: Props) {
       createNavItem("/app/onboarding", "Onboarding"),
       createNavItem("/app/dashboard", "Dashboard"),
       createNavItem("/app/fraud-intelligence", "Fraud Intelligence", {
-        badge: moduleStatus.trustAbuse ? undefined : "Upgrade",
+        badge: moduleStatus.fraud ? undefined : "Upgrade",
       }),
       createNavItem("/app/competitor-intelligence", "Competitor Intelligence", {
         badge: moduleStatus.competitor ? undefined : "Upgrade",
       }),
       createNavItem("/app/ai-pricing-engine", "AI Pricing Engine", {
-        badge: moduleStatus.pricingProfit ? undefined : "Upgrade",
+        badge: moduleStatus.pricing ? undefined : "Upgrade",
       }),
       createNavItem("/app/billing", "Billing"),
       createNavItem("/app/settings", "Settings"),
@@ -139,8 +141,8 @@ export function AppFrame({ children }: Props) {
     [
       createNavItem,
       moduleStatus.competitor,
-      moduleStatus.pricingProfit,
-      moduleStatus.trustAbuse,
+      moduleStatus.fraud,
+      moduleStatus.pricing,
     ]
   );
 

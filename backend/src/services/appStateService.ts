@@ -3,6 +3,7 @@ import { getOnboardingState } from "./onboardingService";
 import { logEvent } from "./observabilityService";
 import { getUnifiedReadinessState } from "./readinessEngineService";
 import { getConnectionHealth } from "./shopifyConnectionService";
+import { getStoreReadinessState } from "./storeReadinessService";
 import { getCurrentSubscription, resolveBillingState } from "./subscriptionService";
 
 type MerchantOnboardingAppState = Awaited<
@@ -42,9 +43,12 @@ export type MerchantAppState = {
     };
   onboarding: MerchantOnboardingAppState;
   entitlements: {
+    fraud: boolean;
     trustAbuse: boolean;
     competitor: boolean;
+    pricing: boolean;
     pricingProfit: boolean;
+    profit: boolean;
     reports: boolean;
     settings: boolean;
   };
@@ -66,6 +70,7 @@ export type MerchantAppState = {
     };
   };
   readiness: Awaited<ReturnType<typeof getUnifiedReadinessState>>;
+  storeReadiness: Awaited<ReturnType<typeof getStoreReadinessState>>;
 };
 
 export function deriveInstallState(health: Awaited<ReturnType<typeof getConnectionHealth>>) {
@@ -139,13 +144,14 @@ export function deriveConnectionState(health: Awaited<ReturnType<typeof getConne
 }
 
 export async function getMerchantAppState(shopDomain: string): Promise<MerchantAppState> {
-  const [health, subscription, billing, onboarding, dashboard, readiness] = await Promise.all([
+  const [health, subscription, billing, onboarding, dashboard, readiness, storeReadiness] = await Promise.all([
     getConnectionHealth(shopDomain, { probeApi: false }),
     getCurrentSubscription(shopDomain),
     resolveBillingState(shopDomain),
     getOnboardingState(shopDomain),
     getDashboardMetrics(shopDomain),
     getUnifiedReadinessState(shopDomain),
+    getStoreReadinessState(shopDomain),
   ]);
 
   if (!dashboard) {
@@ -187,9 +193,12 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       nextRoute: onboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding",
     },
     entitlements: {
+      fraud: subscription.enabledModules.fraud,
       trustAbuse: subscription.enabledModules.trustAbuse,
       competitor: subscription.enabledModules.competitor,
+      pricing: subscription.enabledModules.pricing,
       pricingProfit: subscription.enabledModules.pricingProfit,
+      profit: subscription.enabledModules.profit,
       reports: subscription.enabledModules.reports,
       settings: subscription.enabledModules.settings,
     },
@@ -214,5 +223,6 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       },
     },
     readiness,
+    storeReadiness,
   };
 }

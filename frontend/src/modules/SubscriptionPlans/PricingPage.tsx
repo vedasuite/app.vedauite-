@@ -173,8 +173,8 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
 };
 
 function starterLabel(moduleKey: StarterModule | null) {
-  return moduleKey === "trustAbuse"
-    ? "Trust & Abuse Intelligence"
+  return moduleKey === "fraud"
+    ? "Fraud Intelligence"
     : moduleKey === "competitor"
     ? "Competitor Intelligence"
     : "Not selected";
@@ -212,6 +212,26 @@ function formatDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function lifecycleLabel(value: BillingManagementState["billing"]["lifecycle"]) {
+  switch (value) {
+    case "active":
+    case "test_charge":
+      return "Active";
+    case "pending_approval":
+      return "Awaiting approval";
+    case "cancelled":
+      return "Cancelled";
+    case "frozen":
+      return "Needs attention";
+    case "uninstalled":
+      return "Reconnect required";
+    case "unknown_error":
+      return "Resolving";
+    default:
+      return "No active subscription";
+  }
+}
+
 export function PricingPage() {
   const { host } = useAppBridge();
   const {
@@ -230,7 +250,7 @@ export function PricingPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [starterModule, setStarterModule] = useState<StarterModule>("trustAbuse");
+  const [starterModule, setStarterModule] = useState<StarterModule>("fraud");
   const [confirmCancel, setConfirmCancel] = useState(false);
 
   const loadBillingState = useCallback(async () => {
@@ -564,7 +584,7 @@ export function PricingPage() {
                   <Text as="p" variant="bodySm" tone="subdued">
                     Billing lifecycle
                   </Text>
-                  <Text as="p">{currentSummary.billingStatus}</Text>
+                  <Text as="p">{lifecycleLabel(management.billing.lifecycle)}</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
@@ -687,8 +707,8 @@ export function PricingPage() {
                           label="Trust & Abuse Intelligence"
                           id="starter-trust-abuse"
                           name="starter-module"
-                          checked={starterModule === "trustAbuse"}
-                          onChange={() => setStarterModule("trustAbuse")}
+                          checked={starterModule === "fraud"}
+                          onChange={() => setStarterModule("fraud")}
                         />
                         <RadioButton
                           label="Competitor Intelligence"

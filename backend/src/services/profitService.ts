@@ -12,7 +12,7 @@ async function assertProPlan(shopDomain: string) {
   if (!store) throw new Error("Store not found");
 
   const hasFullProfitAccess =
-    subscription.enabledModules.pricingProfit &&
+    subscription.enabledModules.pricing &&
     subscription.featureAccess.fullProfitEngine;
 
   if (!hasFullProfitAccess) {

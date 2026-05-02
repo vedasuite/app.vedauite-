@@ -68,6 +68,7 @@ type CompetitorMatchMetadata = {
 
 const GIFT_CARD_PATTERN =
   /\bgift\s*card\b|\bgiftcard\b|\bgift[-\s]?voucher\b|\be[-\s]?gift\b/i;
+const LIVE_COMPETITOR_SOURCES = new Set(["website", "website_live"]);
 
 function parseCompetitorMetadata(value?: string | null): CompetitorMatchMetadata | null {
   if (!value) {
@@ -151,11 +152,12 @@ export function filterCompetitorSourceProducts(products: SourceProductCandidate[
 }
 
 function filterComparableRows(rows: OverviewRow[]) {
+  const productionRows = rows.filter((row) => LIVE_COMPETITOR_SOURCES.has(row.source));
   const deduped = new Map<string, OverviewRow>();
   const lowConfidenceRows: OverviewRow[] = [];
   const excludedDuplicates: OverviewRow[] = [];
 
-  for (const row of rows) {
+  for (const row of productionRows) {
     const metadata = normalizeCompetitorMetadata(row);
     if (metadata.confidenceScore < 60) {
       lowConfidenceRows.push(row);

@@ -1,7 +1,7 @@
 export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as const;
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
-export type StarterModule = "trustAbuse" | "competitor";
+export type StarterModule = "fraud" | "competitor";
 
 export const CAPABILITIES = [
   "module.trustAbuse",
@@ -46,13 +46,14 @@ export type Capability = (typeof CAPABILITIES)[number];
 export type CapabilityMap = Record<Capability, boolean>;
 
 export type ModuleAccess = {
-  trustAbuse: boolean;
+  fraud: boolean;
   competitor: boolean;
+  pricing: boolean;
+  profit: boolean;
+  trustAbuse: boolean;
   pricingProfit: boolean;
   reports: boolean;
   settings: boolean;
-  fraud: boolean;
-  pricing: boolean;
   creditScore: boolean;
   profitOptimization: boolean;
 };
@@ -112,12 +113,16 @@ const PLAN_PRICE_MAP: Record<BillingPlanName, number> = {
 };
 
 export function normalizeStarterModule(value?: string | null): StarterModule | null {
-  if (value === "trustAbuse" || value === "competitor") {
+  if (value === "fraud" || value === "competitor") {
     return value;
   }
 
   if (value === "fraud" || value === "creditScore") {
-    return "trustAbuse";
+    return "fraud";
+  }
+
+  if (value === "trustAbuse") {
+    return "fraud";
   }
 
   return null;
@@ -156,7 +161,7 @@ export function buildCapabilities(
   const isGrowth = planName === "GROWTH";
   const isPro = planName === "PRO";
   const isStarterTrust =
-    planName === "STARTER" && normalizedStarterModule === "trustAbuse";
+    planName === "STARTER" && normalizedStarterModule === "fraud";
   const isStarterCompetitor =
     planName === "STARTER" && normalizedStarterModule === "competitor";
   const trialPreviewOnly = isTrial && (options?.trialActive ?? true);
@@ -199,11 +204,11 @@ export function buildCapabilities(
 
   capabilities["pricing.basicRecommendations"] = pricingModule;
   capabilities["pricing.explainableRecommendations"] = pricingModule;
-  capabilities["pricing.advancedModes"] = pricingModule;
+  capabilities["pricing.advancedModes"] = profitModule;
   capabilities["pricing.doNothingRecommendation"] = pricingModule;
   capabilities["pricing.profitLeakDetector"] = profitModule;
   capabilities["pricing.dailyActionBoard"] = profitModule;
-  capabilities["pricing.scenarioSimulator"] = pricingModule;
+  capabilities["pricing.scenarioSimulator"] = profitModule;
   capabilities["pricing.marginAtRisk"] = profitModule;
   capabilities["pricing.advancedAutomation"] = profitModule;
 
@@ -216,21 +221,23 @@ export function buildModuleAccessFromCapabilities(capabilities: CapabilityMap): 
   const trustAbuse = capabilities["module.trustAbuse"];
   const competitor = capabilities["module.competitorIntel"];
   const pricingProfit = capabilities["module.pricingProfit"];
+  const profitOptimization =
+    pricingProfit &&
+    (capabilities["pricing.profitLeakDetector"] ||
+      capabilities["pricing.dailyActionBoard"] ||
+      capabilities["pricing.marginAtRisk"]);
 
   return {
-    trustAbuse,
+    fraud: trustAbuse,
     competitor,
+    pricing: pricingProfit,
+    profit: profitOptimization,
+    trustAbuse,
     pricingProfit,
     reports: capabilities["reports.view"],
     settings: capabilities["settings.view"],
-    fraud: trustAbuse,
-    pricing: pricingProfit,
     creditScore: trustAbuse,
-    profitOptimization:
-      pricingProfit &&
-      (capabilities["pricing.profitLeakDetector"] ||
-        capabilities["pricing.dailyActionBoard"] ||
-        capabilities["pricing.marginAtRisk"]),
+    profitOptimization,
   };
 }
 
@@ -265,8 +272,8 @@ export function buildFeatureAccessFromCapabilities(
 }
 
 export function normalizeStarterModuleLabel(moduleKey: StarterModule | null) {
-  if (moduleKey === "trustAbuse") {
-    return "Trust & Abuse Intelligence";
+  if (moduleKey === "fraud") {
+    return "Fraud Intelligence";
   }
   if (moduleKey === "competitor") {
     return "Competitor Intelligence";

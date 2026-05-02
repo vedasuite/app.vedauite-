@@ -1053,12 +1053,12 @@ export function DashboardPage() {
 
         {onboarding && !onboarding.canAccessDashboard ? (
           <Layout.Section>
-            <Banner title="Finish onboarding to unlock the full dashboard" tone="info">
+            <Banner title="Dashboard preview until onboarding is complete" tone="info">
               <BlockStack gap="200">
                 <p>
-                  Dashboard reporting is available now, but the guided setup is not
-                  complete yet. Finish onboarding to mark the store ready and lock
-                  in the first workflow.
+                  VedaSuite is still guiding this store through setup. The metrics
+                  below are a preview only until onboarding, billing, and the first
+                  module review are complete.
                 </p>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => navigateEmbedded("/app/onboarding")}>
@@ -1446,12 +1446,16 @@ export function DashboardPage() {
                         onClick={() =>
                           navigateEmbedded(
                             subscription?.enabledModules?.pricingProfit
+                              || subscription?.enabledModules?.pricing
                               ? "/app/ai-pricing-engine"
                               : "/app/billing"
                           )
                         }
                       >
-                        {subscription?.enabledModules?.pricingProfit ? "Open" : "Upgrade to unlock"}
+                        {subscription?.enabledModules?.pricingProfit ||
+                        subscription?.enabledModules?.pricing
+                          ? "Open"
+                          : "Upgrade to unlock"}
                       </Button>
                     </InlineStack>
                   </div>

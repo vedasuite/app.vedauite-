@@ -41,9 +41,12 @@ export type CanonicalAppState = {
     description: string;
   };
   entitlements: {
+    fraud: boolean;
     trustAbuse: boolean;
     competitor: boolean;
+    pricing: boolean;
     pricingProfit: boolean;
+    profit: boolean;
     reports: boolean;
     settings: boolean;
   };
@@ -105,6 +108,40 @@ export type CanonicalAppState = {
       competitor: { state: string; status: string; freshnessAt: string | null; reason: string };
       pricing: { state: string; status: string; freshnessAt: string | null; reason: string };
     };
+  };
+  storeReadiness?: {
+    billing: {
+      plan: string;
+      isActive: boolean;
+      isTrial: boolean;
+      starterModule: string | null;
+      enabledModules: {
+        fraud: boolean;
+        competitor: boolean;
+        pricing: boolean;
+        profit: boolean;
+        reports: boolean;
+        settings: boolean;
+      };
+    };
+    onboarding: {
+      complete: boolean;
+      stepsRemaining: string[];
+    };
+    data: {
+      hasOrders: boolean;
+      hasProducts: boolean;
+      hasCompetitors: boolean;
+      hasPricingData: boolean;
+      hasProfitData: boolean;
+    };
+    modules: {
+      fraudReady: boolean;
+      competitorReady: boolean;
+      pricingReady: boolean;
+      profitReady: boolean;
+    };
+    sampleMode: boolean;
   };
 };
 

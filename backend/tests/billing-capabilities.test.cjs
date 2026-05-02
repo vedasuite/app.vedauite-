@@ -14,19 +14,36 @@ test("starter plan enables exactly one selected module plus shared settings and 
     buildFeatureAccessFromCapabilities,
   } = require(capabilitiesPath);
 
-  const capabilities = buildCapabilities("STARTER", "trustAbuse");
+  const capabilities = buildCapabilities("STARTER", "fraud");
   const modules = buildModuleAccessFromCapabilities(capabilities);
   const features = buildFeatureAccessFromCapabilities(capabilities);
 
+  assert.equal(modules.fraud, true);
   assert.equal(modules.trustAbuse, true);
   assert.equal(modules.competitor, false);
+  assert.equal(modules.pricing, false);
   assert.equal(modules.pricingProfit, false);
-  assert.equal(modules.reports, true);
+  assert.equal(modules.reports, false);
   assert.equal(modules.settings, true);
   assert.equal(capabilities["billing.moduleSelectionStarter"], true);
   assert.equal(features.returnAbuseIntelligence, true);
   assert.equal(features.weeklyCompetitorReports, false);
   assert.equal(features.fullProfitEngine, false);
+});
+
+test("starter competitor plan enables competitor only", async () => {
+  const {
+    buildCapabilities,
+    buildModuleAccessFromCapabilities,
+  } = require(capabilitiesPath);
+
+  const capabilities = buildCapabilities("STARTER", "competitor");
+  const modules = buildModuleAccessFromCapabilities(capabilities);
+
+  assert.equal(modules.fraud, false);
+  assert.equal(modules.competitor, true);
+  assert.equal(modules.pricing, false);
+  assert.equal(modules.profit, false);
 });
 
 test("growth and pro capabilities separate baseline access from premium access", async () => {

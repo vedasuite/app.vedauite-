@@ -1,7 +1,7 @@
 export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as const;
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
-export type StarterModule = "trustAbuse" | "competitor" | null;
+export type StarterModule = "fraud" | "competitor" | null;
 
 export const CAPABILITIES = [
   "module.trustAbuse",
@@ -46,13 +46,14 @@ export type Capability = (typeof CAPABILITIES)[number];
 export type CapabilityMap = Record<Capability, boolean>;
 
 export type ModuleAccess = {
-  trustAbuse: boolean;
+  fraud: boolean;
   competitor: boolean;
+  pricing: boolean;
+  profit: boolean;
+  trustAbuse: boolean;
   pricingProfit: boolean;
   reports: boolean;
   settings: boolean;
-  fraud: boolean;
-  pricing: boolean;
   creditScore: boolean;
   profitOptimization: boolean;
 };
@@ -205,12 +206,16 @@ function normalizeBillingPlanName(value?: string | null): BillingPlanName {
 }
 
 export function normalizeStarterModule(value?: string | null): StarterModule {
-  if (value === "trustAbuse" || value === "competitor") {
+  if (value === "fraud" || value === "competitor") {
     return value;
   }
 
   if (value === "fraud" || value === "creditScore") {
-    return "trustAbuse";
+    return "fraud";
+  }
+
+  if (value === "trustAbuse") {
+    return "fraud";
   }
 
   return null;
@@ -228,7 +233,7 @@ export function buildCapabilities(
   const isTrial = planName === "TRIAL";
   const isGrowth = planName === "GROWTH";
   const isPro = planName === "PRO";
-  const isStarterTrust = planName === "STARTER" && starterModule === "trustAbuse";
+  const isStarterTrust = planName === "STARTER" && starterModule === "fraud";
   const isStarterCompetitor = planName === "STARTER" && starterModule === "competitor";
   const fraudModule = isStarterTrust || isGrowth || isPro;
   const competitorModule = isStarterCompetitor || isGrowth || isPro;
@@ -269,11 +274,11 @@ export function buildCapabilities(
 
   capabilities["pricing.basicRecommendations"] = pricingModule;
   capabilities["pricing.explainableRecommendations"] = pricingModule;
-  capabilities["pricing.advancedModes"] = pricingModule;
+  capabilities["pricing.advancedModes"] = profitModule;
   capabilities["pricing.doNothingRecommendation"] = pricingModule;
   capabilities["pricing.profitLeakDetector"] = profitModule;
   capabilities["pricing.dailyActionBoard"] = profitModule;
-  capabilities["pricing.scenarioSimulator"] = pricingModule;
+  capabilities["pricing.scenarioSimulator"] = profitModule;
   capabilities["pricing.marginAtRisk"] = profitModule;
   capabilities["pricing.advancedAutomation"] = profitModule;
 
@@ -287,21 +292,23 @@ export function buildModuleAccess(planName: BillingPlanName, starterModule: Star
   const pricingProfit = capabilities["module.pricingProfit"];
   const trustAbuse = capabilities["module.trustAbuse"];
   const competitor = capabilities["module.competitorIntel"];
+  const profitOptimization =
+    pricingProfit &&
+    (capabilities["pricing.profitLeakDetector"] ||
+      capabilities["pricing.dailyActionBoard"] ||
+      capabilities["pricing.marginAtRisk"]);
 
   return {
-    trustAbuse,
+    fraud: trustAbuse,
     competitor,
+    pricing: pricingProfit,
+    profit: profitOptimization,
+    trustAbuse,
     pricingProfit,
     reports: capabilities["reports.view"],
     settings: capabilities["settings.view"],
-    fraud: trustAbuse,
-    pricing: pricingProfit,
     creditScore: trustAbuse,
-    profitOptimization:
-      pricingProfit &&
-      (capabilities["pricing.profitLeakDetector"] ||
-        capabilities["pricing.dailyActionBoard"] ||
-        capabilities["pricing.marginAtRisk"]),
+    profitOptimization,
   };
 }
 

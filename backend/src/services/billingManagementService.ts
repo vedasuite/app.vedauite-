@@ -16,6 +16,7 @@ import {
 import {
   cancelSubscription,
   getCurrentSubscription,
+  reconcileBillingState,
   reconcileStoreSubscriptionFromWebhook,
   resolveBillingState,
   updateStarterModuleSelection,
@@ -257,6 +258,7 @@ function buildActionType(current: CurrentSubscription, requestedPlan: BillingPla
 export async function getBillingManagementState(
   shopDomain: string
 ): Promise<BillingManagementState> {
+  await reconcileBillingState(shopDomain).catch(() => null);
   const [store, subscription, billing] = await Promise.all([
     getStoreForBilling(shopDomain),
     getCurrentSubscription(shopDomain),
@@ -574,6 +576,7 @@ export async function confirmBillingApprovalReturn(input: {
     status: activeSubscription.status,
     currentPeriodEnd: activeSubscription.currentPeriodEnd ?? null,
   });
+  await reconcileBillingState(input.shopDomain);
 
   const confirmedStarterModule = normalizeStarterModule(
     intent?.requestedStarterModule ?? null
@@ -602,5 +605,6 @@ export async function cancelBillingPlan(
   shopDomain: string
 ): Promise<BillingManagementState> {
   await cancelSubscription(shopDomain);
+  await reconcileBillingState(shopDomain).catch(() => null);
   return getBillingManagementState(shopDomain);
 }

@@ -11,6 +11,26 @@ import {
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
 
+function formatMerchantOrderLabel(order: {
+  shopifyOrderId: string;
+  orderName?: string | null;
+  shopifyLegacyOrderId?: string | null;
+}) {
+  if (order.orderName?.trim()) {
+    return order.orderName.trim();
+  }
+
+  if (order.shopifyLegacyOrderId?.trim()) {
+    return `Order #${order.shopifyLegacyOrderId.trim()}`;
+  }
+
+  if (/\.myshopify\.com-order-\d+$/i.test(order.shopifyOrderId)) {
+    return "Order pending sync";
+  }
+
+  return order.shopifyOrderId;
+}
+
 function maskIdentity(value: string | null | undefined, fallback: string) {
   if (!value) {
     return fallback;
@@ -58,15 +78,25 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     throw new Error("Store not found");
   }
 
-  const queue = recentOrders.slice(0, 6).map((order) => ({
-    id: order.id,
-    shopifyOrderId: order.shopifyOrderId,
-    riskScore: order.fraudScore,
-    riskLevel: order.fraudRiskLevel,
-    status: order.status,
-    refundRequested: order.refundRequested,
-    createdAt: order.createdAt,
-  }));
+  const queue = recentOrders
+    .filter(
+      (order) =>
+        order.status === "manual_review" ||
+        order.status === "flagged" ||
+        order.status === "blocked" ||
+        order.fraudScore >= 71 ||
+        order.refundRequested
+    )
+    .slice(0, 6)
+    .map((order) => ({
+      id: order.id,
+      shopifyOrderId: formatMerchantOrderLabel(order),
+      riskScore: order.fraudScore,
+      riskLevel: order.fraudRiskLevel,
+      status: order.status,
+      refundRequested: order.refundRequested,
+      createdAt: order.createdAt,
+    }));
 
   const behaviorTimeline =
     store.timelineEvents.length > 0
@@ -306,7 +336,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
       shopperTrustProfiles: customers.length,
       returnAbuseProfiles: fraudOverview.summary.returnAbuseProfiles,
       highRiskOrders: fraudOverview.summary.highRiskOrders,
-      manualReviewCount: fraudOverview.summary.manualReviewCount,
+      manualReviewCount: queue.length,
       sharedFraudNetworkEnabled: fraudOverview.summary.sharedFraudNetworkEnabled,
       automationReadiness: fraudOverview.summary.automationReadiness,
       timelineEvents: store.timelineEvents.length,

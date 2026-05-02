@@ -48,14 +48,14 @@ function scrollToSection(id: string) {
 
 function ModuleIcon({ moduleKey }: { moduleKey: OnboardingModuleKey }) {
   const path =
-    moduleKey === "trustAbuse"
+    moduleKey === "fraud"
       ? "M18 5l7 4v6c0 5-3.4 9.4-8 10.8C12.4 24.4 9 20 9 15V9l9-4zm0 5l-4 1.8V15c0 2.8 1.7 5.4 4 6.6 2.3-1.2 4-3.8 4-6.6v-3.2L18 10z"
       : moduleKey === "competitor"
       ? "M6 7h12l2 5v8H4v-8l2-5zm2 2-1.2 3H19.2L18 9H8zm-1 5v4h10v-4H7z"
       : "M6 6h16v4H6V6zm2 6h12v8H8v-8zm3 2v4h2v-4h-2zm4-3h2v7h-2v-7z";
 
   const background =
-    moduleKey === "trustAbuse"
+    moduleKey === "fraud"
       ? "#fde68a"
       : moduleKey === "competitor"
       ? "#bfdbfe"
@@ -116,7 +116,7 @@ export function OnboardingPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingModule, setPendingModule] = useState<OnboardingModuleKey>("trustAbuse");
+  const [pendingModule, setPendingModule] = useState<OnboardingModuleKey>("fraud");
 
   const reauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${

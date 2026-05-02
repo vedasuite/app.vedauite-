@@ -13,6 +13,18 @@ test("dashboard metrics stay consistent with persisted pricing and profit data",
     __dirname,
     "../dist/services/onboardingService.js"
   );
+  const trustAbusePath = path.resolve(
+    __dirname,
+    "../dist/services/trustAbuseService.js"
+  );
+  const competitorPath = path.resolve(
+    __dirname,
+    "../dist/services/competitorService.js"
+  );
+  const pricingProfitPath = path.resolve(
+    __dirname,
+    "../dist/services/pricingProfitService.js"
+  );
   const readinessPath = path.resolve(
     __dirname,
     "../dist/services/readinessEngineService.js"
@@ -28,6 +40,9 @@ test("dashboard metrics stay consistent with persisted pricing and profit data",
 
   resetModule(prismaPath);
   resetModule(onboardingPath);
+  resetModule(trustAbusePath);
+  resetModule(competitorPath);
+  resetModule(pricingProfitPath);
   resetModule(readinessPath);
   resetModule(operationalPath);
   resetModule(dashboardPath);
@@ -54,11 +69,25 @@ test("dashboard metrics stay consistent with persisted pricing and profit data",
       },
     ],
   });
-  prismaModule.prisma.order.count = async () => 3;
   prismaModule.prisma.customer.count = async () => 2;
-  prismaModule.prisma.competitorData.count = async () => 5;
-  prismaModule.prisma.priceHistory.count = async () => 7;
-  prismaModule.prisma.profitOptimizationData.count = async () => 4;
+  require(trustAbusePath).getTrustAbuseOverview = async () => ({
+    summary: {
+      highRiskOrders: 3,
+      manualReviewCount: 2,
+    },
+  });
+  require(competitorPath).getCompetitorOverview = async () => ({
+    competitorState: {
+      detectedPriceChangesCount: 3,
+      detectedPromotionChangesCount: 2,
+    },
+  });
+  require(pricingProfitPath).getPricingProfitOverview = async () => ({
+    summary: {
+      recommendationCount: 7,
+      profitOpportunityCount: 4,
+    },
+  });
 
   require(onboardingPath).getOnboardingState = async () => ({
     complete: false,
@@ -121,6 +150,8 @@ test("dashboard metrics stay consistent with persisted pricing and profit data",
 
   assert.equal(metrics.aiPricingSuggestions, 7);
   assert.equal(metrics.profitOptimizationOpportunities, 4);
+  assert.equal(metrics.competitorPriceChanges, 5);
+  assert.equal(metrics.highRiskOrders, 3);
   assert.equal(metrics.dashboardState.kpis.pricingOpportunities, 7);
   assert.equal(metrics.dashboardState.kpis.profitOpportunities, 4);
   assert.equal(metrics.dashboardState.recentInsights.length, 1);

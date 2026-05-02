@@ -127,7 +127,9 @@ export function TrustAbusePage() {
   const [selectedEvidenceTab, setSelectedEvidenceTab] = useState(0);
   const [activeOrder, setActiveOrder] = useState<Overview["fraudReviewQueue"][number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const allowed = !!subscription?.enabledModules?.trustAbuse;
+  const allowed = !!(
+    subscription?.enabledModules?.fraud ?? subscription?.enabledModules?.trustAbuse
+  );
 
   const loadOverview = useCallback(async () => {
     if (!allowed) {
