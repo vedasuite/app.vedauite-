@@ -2,6 +2,7 @@ export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as co
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
 export type StarterModule = "fraud" | "competitor";
+export type CanonicalModuleKey = "fraud" | "competitor" | "pricing" | "profit";
 
 export const CAPABILITIES = [
   "module.trustAbuse",
@@ -101,6 +102,17 @@ export type CurrentSubscription = {
   capabilities: CapabilityMap;
 };
 
+export type ResolvedEntitlements = {
+  plan: BillingPlanName;
+  billingStatus: string | null;
+  starterModule: StarterModule | null;
+  enabledModules: CanonicalModuleKey[];
+  lockedModules: CanonicalModuleKey[];
+  moduleAccess: ModuleAccess;
+  featureAccess: FeatureAccess;
+  capabilities: CapabilityMap;
+};
+
 export const STARTER_MODULE_SWITCH_COOLDOWN_HOURS = 24;
 export const DEFAULT_TRIAL_DAYS = 3;
 
@@ -117,12 +129,12 @@ export function normalizeStarterModule(value?: string | null): StarterModule | n
     return value;
   }
 
-  if (value === "fraud" || value === "creditScore") {
+  if (value === "trust" || value === "trustAbuse" || value === "fraudIntelligence" || value === "creditScore") {
     return "fraud";
   }
 
-  if (value === "trustAbuse") {
-    return "fraud";
+  if (value === "competitorIntelligence" || value === "competitor_monitoring") {
+    return "competitor";
   }
 
   return null;
@@ -238,6 +250,34 @@ export function buildModuleAccessFromCapabilities(capabilities: CapabilityMap): 
     settings: capabilities["settings.view"],
     creditScore: trustAbuse,
     profitOptimization,
+  };
+}
+
+export function resolveEntitlements(input: {
+  plan: BillingPlanName;
+  billingStatus: string | null;
+  starterModule: StarterModule | null;
+}) : ResolvedEntitlements {
+  const normalizedStarterModule = normalizeStarterModule(input.starterModule);
+  const capabilities = buildCapabilities(input.plan, normalizedStarterModule);
+  const moduleAccess = buildModuleAccessFromCapabilities(capabilities);
+  const featureAccess = buildFeatureAccessFromCapabilities(capabilities);
+  const enabledModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
+    (moduleKey) => moduleAccess[moduleKey]
+  );
+  const lockedModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
+    (moduleKey) => !moduleAccess[moduleKey]
+  );
+
+  return {
+    plan: input.plan,
+    billingStatus: input.billingStatus,
+    starterModule: input.plan === "STARTER" ? normalizedStarterModule : null,
+    enabledModules,
+    lockedModules,
+    moduleAccess,
+    featureAccess,
+    capabilities,
   };
 }
 

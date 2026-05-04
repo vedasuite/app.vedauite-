@@ -352,6 +352,22 @@ export function CompetitorPage() {
   }, [focus]);
 
   useEffect(() => {
+    if (allowed) {
+      return;
+    }
+
+    const emptyOverview = createEmptyOverview();
+    setRows([]);
+    setOverview(emptyOverview);
+    setConnectors([]);
+    setResponseEngine(createEmptyResponseEngine());
+    writeModuleCache("competitor-rows", []);
+    writeModuleCache("competitor-overview", emptyOverview);
+    writeModuleCache("competitor-connectors", []);
+    writeModuleCache("competitor-response-engine", createEmptyResponseEngine());
+  }, [allowed]);
+
+  useEffect(() => {
     if (!allowed) return;
     let mounted = true;
 

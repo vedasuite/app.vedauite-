@@ -1,250 +1,219 @@
 # Approval Readiness Fix Report
 
-Final verification timestamp: `2026-05-02T18:54:15.0043902+05:30`
+Final verification timestamp: `2026-05-04T21:41:03.7474318+05:30`
 
-## Active app source of truth
+## Scope of this stabilization pass
 
-- Active Shopify app codebase: `app-repo/`
-- Production Shopify config source: `app-repo/shopify.app.toml`
-- Archived historical patch reports: `app-repo/docs/archive/reports/`
-- Archived outer legacy duplicate app tree: `docs/archive/legacy-root-app/`
+This pass was focused on the remaining approval blockers from the latest live QA review:
+
+1. Starter fraud vs Starter competitor entitlement switching
+2. Internal or synthetic order identifiers leaking into merchant UI
+3. Dashboard recent-insight cards showing synthetic or internal-looking language
+4. Evidence CTAs that looked interactive but did not lead the merchant anywhere useful
+5. Competitor Intelligence showing stale operational state while locked or not configured
+6. Billing redirect and billing-return flows leaving the merchant on blank or near-blank screens
 
 ## Root causes found
 
-1. Billing, onboarding, dashboard, and module pages were still deriving readiness and access from overlapping state models.
-2. Starter access used mixed internal names like `trustAbuse` and `pricingProfit`, which created plan/gating drift across backend, frontend, and onboarding.
-3. Dashboard KPI values were still calculated independently from module-page data, which caused visible contradictions.
-4. AI Pricing Engine could show gain numbers when live profit data was not actually ready.
-5. Fraud review UI still leaked internal fallback order identifiers and could show queue counts that did not align with the review summary.
-6. Competitor monitoring still allowed preview-only connector data to appear like live monitoring data.
-7. Onboarding and dashboard could imply different readiness states for the same store.
-8. Prisma verification/deploy safety still needed explicit production-safe validation rather than unsafe `db push` assumptions.
+1. Starter access still depended on a mix of canonical and legacy module names across backend resolution, billing reconciliation, and frontend access mirrors.
+2. Billing confirmation refreshed subscription state, but the selected Starter module was not being reinforced consistently enough after plan changes.
+3. Merchant-facing order labels still had multiple formatter paths, so synthetic fallback IDs could leak through timeline events, fraud summaries, and evidence views.
+4. Recent Insights relied on timeline copy that was operationally useful but still too close to internal synthetic test language when sample mode was off.
+5. The Trust & Abuse evidence CTA changed local state only; it did not clearly move the merchant to the actual evidence section.
+6. Competitor module cache and UI state could linger after access was lost, which made locked or not-configured stores look stale instead of simply locked or empty.
+7. Billing pending states had backend and frontend coverage, but the embedded shell still needed a stronger non-blank full-page fallback during redirect/return confirmation.
 
-## Structural fixes applied
+## Root fixes applied
 
-### Canonical readiness and access
+### Canonical entitlement resolution
 
-- Added `backend/src/services/storeReadinessService.ts` as the backend readiness summary used to normalize:
-  - billing plan and enabled modules
-  - onboarding completion and remaining steps
-  - raw data presence
-  - module readiness flags
-  - sample mode state
-- Extended `backend/src/services/appStateService.ts` so bootstrap/app-shell consumers now receive:
-  - canonical fraud / competitor / pricing / profit entitlements
-  - canonical `storeReadiness`
-
-### Starter plan and feature-key stabilization
-
-- Standardized Starter module normalization to canonical values:
+- Added canonical entitlement resolution in [backend/src/services/subscriptionService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/subscriptionService.ts) through `resolveEntitlements(shop)`.
+- Hardened module alias normalization in [backend/src/billing/capabilities.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/billing/capabilities.ts) and [frontend/src/lib/billingCapabilities.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/lib/billingCapabilities.ts):
+  - `trust`
+  - `trustAbuse`
+  - `fraudIntelligence`
+  - `creditScore`
+  map to `fraud`
+  - `competitorIntelligence`
+  - `competitor_monitoring`
+  map to `competitor`
+- Canonical module keys used for approval-safe access logic:
   - `fraud`
   - `competitor`
-- Preserved legacy compatibility by still accepting old persisted values like `trustAbuse`.
-- Hardened this in:
-  - `backend/src/billing/capabilities.ts`
-  - `frontend/src/lib/billingCapabilities.ts`
-  - `backend/src/services/subscriptionService.ts`
-  - `backend/src/routes/subscriptionRoutes.ts`
-- Frontend gating and navigation now prefer canonical module keys instead of mixed aliases.
+  - `pricing`
+  - `profit`
 
-### Server-side feature gating
+### Starter module switching and billing refresh
 
-- Kept backend route protection authoritative through `backend/src/middleware/requireFeature.ts`.
-- Confirmed competitor routes continue to use `requireFeature("competitor")`.
-- Verified Starter gating with regression coverage for:
-  - Starter fraud only
-  - Starter competitor only
+- Updated [backend/src/services/billingManagementService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/billingManagementService.ts) to:
+  - log `billing.starter_module_selected`
+  - preserve Starter module intent before billing redirect
+  - log `billing.confirmation_received`
+  - reconcile billing and refetch effective app state after confirmation
+  - log `billing.app_state_refetched`
+- Updated [frontend/src/providers/SubscriptionProvider.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/providers/SubscriptionProvider.tsx) so billing confirmation now:
+  - clears cached subscription state
+  - polls backend until the expected plan and Starter module are both confirmed
+  - refreshes app-state after backend confirmation
+- Updated [frontend/src/modules/SubscriptionPlans/PricingPage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/SubscriptionPlans/PricingPage.tsx) so plan change and cancel flows force:
+  - subscription refresh
+  - app-state refresh
+  - billing-state reload
 
-### Billing refresh and reconciliation
+### Backend and route gating alignment
 
-- `backend/src/services/billingManagementService.ts` now forces billing reconciliation through `reconcileBillingState(shop)` before returning billing management state and after billing confirmation/cancellation paths.
-- This removes stale post-approval and post-cancel billing drift between local DB state and Shopify-backed truth.
+- Competitor routes remain protected by `requireFeature("competitor")` in [backend/src/middleware/requireFeature.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/middleware/requireFeature.ts).
+- Fraud and Trust Abuse routes remain protected by `requireFeature("fraud")`.
+- Frontend module visibility was tightened so sidebar and module access rely on backend-derived enabled-module truth instead of separate Starter heuristics.
 
-### Dashboard and module consistency
+### Merchant-safe order and insight labels
 
-- Refactored `backend/src/services/dashboardService.ts` so dashboard counts now come from module-backed services instead of separate raw count logic:
-  - fraud count from `getTrustAbuseOverview`
-  - competitor changes from `getCompetitorOverview`
-  - pricing count from `getPricingProfitOverview`
-  - profit count from `getPricingProfitOverview`
-- This removes the earlier contradiction where dashboard and module pages showed different pricing/profit counts.
+- Added [backend/src/lib/merchantLabels.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/lib/merchantLabels.ts) with:
+  - `formatMerchantOrderLabel(order)`
+  - `maskMerchantCustomerLabel(...)`
+  - `formatMerchantInsightTitle(...)`
+  - `formatMerchantInsightDetail(...)`
+- `formatMerchantOrderLabel(order)` now enforces:
+  - use `order.name` first
+  - else use `#<orderNumber or shopifyLegacyOrderId>`
+  - else use `Order pending sync`
+  - never expose raw Shopify GIDs, synthetic shop-domain order IDs, or DB IDs
+- Applied shared merchant-safe labeling to:
+  - [backend/src/services/coreEngineService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/coreEngineService.ts)
+  - [backend/src/services/dashboardService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/dashboardService.ts)
+  - [backend/src/services/fraudService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/fraudService.ts)
+  - [backend/src/services/trustAbuseService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/trustAbuseService.ts)
 
-### AI Pricing Engine truthfulness
+### Recent Insights cleanup
 
-- Refactored `backend/src/services/pricingProfitService.ts` so projected gain is only exposed when real profit-ready data exists.
-- When profit data is missing, projected gain is suppressed instead of showing inflated or directional values as if they were confirmed.
-- Updated `frontend/src/modules/PricingProfit/PricingProfitPage.tsx` to render:
-  - `Not enough data yet`
-  instead of a misleading projected gain number.
+- Recent Insights now reformat titles and detail lines through merchant-safe label helpers in [backend/src/services/dashboardService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/dashboardService.ts).
+- Sample-like shopper strings such as `shopper 3zvn` are no longer surfaced in the dashboard insight cards when sample mode is off.
+- Timeline copy now prefers plain merchant-safe patterns like:
+  - `Customer profile updated`
+  - `Refund review needs attention`
 
-### Fraud merchant-safety fixes
+### Evidence CTA behavior
 
-- Refactored `backend/src/services/trustAbuseService.ts` so the fraud queue:
-  - only includes action-needed orders
-  - aligns manual-review summary with the visible queue
-  - never shows internal fallback IDs like `vedasuite-ai.myshopify.com-order-1002`
-- Refactored `backend/src/services/fraudService.ts` so chargeback/queue order labels also use merchant-safe order naming.
-- Merchant fallback label is now:
-  - `Order pending sync`
+- Updated [frontend/src/modules/TrustAbuse/TrustAbusePage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/TrustAbuse/TrustAbusePage.tsx) so the primary evidence CTA now:
+  - switches to the correct evidence tab
+  - updates the URL hash to `#customer-order-evidence`
+  - scrolls to the evidence section
+- This replaces the old behavior where the CTA changed internal state but did not clearly move the merchant to the supporting evidence.
 
-### Competitor monitoring truthfulness
+### Competitor locked/setup state cleanup
 
-- Refactored `backend/src/services/competitorService.ts` so only live website competitor sources are treated as production monitoring data.
-- Preview-only sources like Google Shopping and Meta preview rows no longer appear as if live connectors are active.
-- This aligns connector cards with the actual tracked data shown in the module.
+- Updated [frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx) so when access is locked:
+  - cached operational rows are cleared
+  - stale connector data is cleared
+  - response-engine and overview caches are reset
+- This prevents locked Starter or inactive competitor access from still showing stale operational state.
 
-### Onboarding and app-shell consistency
+### Billing non-blank transition state
 
-- Refactored onboarding module keys to canonical values in:
-  - `backend/src/services/onboardingService.ts`
-  - `frontend/src/providers/OnboardingProvider.tsx`
-  - `frontend/src/modules/Onboarding/OnboardingPage.tsx`
-  - `frontend/src/App.tsx`
-- Updated dashboard preview messaging so onboarding-incomplete stores are clearly shown as preview state instead of implicitly looking fully complete.
-- Navigation badges in `frontend/src/layout/AppFrame.tsx` now derive from canonical backend-enabled modules.
+- Added a stronger full-page billing transition shell in [frontend/src/layout/AppFrame.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/layout/AppFrame.tsx):
+  - `Redirecting to Shopify billing...`
+  - `Waiting for Shopify approval...`
+  - `Returning to VedaSuite...`
+  - timeout retry/open-billing recovery after 10 seconds
+- Updated [backend/src/routes/billingRoutes.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/routes/billingRoutes.ts) top-level redirect HTML so the merchant sees a styled fallback instead of a blank white page if Shopify takes time to hand off.
 
-## Files changed in this stabilization pass
+## Files changed in this pass
 
 ### Backend
 
-- `backend/src/billing/capabilities.ts`
-- `backend/src/routes/subscriptionRoutes.ts`
-- `backend/src/services/appStateService.ts`
-- `backend/src/services/billingManagementService.ts`
-- `backend/src/services/competitorService.ts`
-- `backend/src/services/dashboardService.ts`
-- `backend/src/services/fraudService.ts`
-- `backend/src/services/onboardingService.ts`
-- `backend/src/services/pricingProfitService.ts`
-- `backend/src/services/profitService.ts`
-- `backend/src/services/readinessEngineService.ts`
-- `backend/src/services/storeReadinessService.ts`
-- `backend/src/services/subscriptionService.ts`
-- `backend/src/services/trustAbuseService.ts`
+- [backend/src/billing/capabilities.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/billing/capabilities.ts)
+- [backend/src/lib/merchantLabels.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/lib/merchantLabels.ts)
+- [backend/src/routes/billingRoutes.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/routes/billingRoutes.ts)
+- [backend/src/services/billingManagementService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/billingManagementService.ts)
+- [backend/src/services/coreEngineService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/coreEngineService.ts)
+- [backend/src/services/dashboardService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/dashboardService.ts)
+- [backend/src/services/fraudService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/fraudService.ts)
+- [backend/src/services/storeReadinessService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/storeReadinessService.ts)
+- [backend/src/services/subscriptionService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/subscriptionService.ts)
+- [backend/src/services/trustAbuseService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/trustAbuseService.ts)
 
 ### Frontend
 
-- `frontend/src/App.tsx`
-- `frontend/src/components/ModuleGate.tsx`
-- `frontend/src/layout/AppFrame.tsx`
-- `frontend/src/lib/billingCapabilities.ts`
-- `frontend/src/modules/Dashboard/DashboardPage.tsx`
-- `frontend/src/modules/Onboarding/OnboardingPage.tsx`
-- `frontend/src/modules/PricingProfit/PricingProfitPage.tsx`
-- `frontend/src/modules/Settings/SettingsPage.tsx`
-- `frontend/src/modules/SubscriptionPlans/PricingPage.tsx`
-- `frontend/src/modules/TrustAbuse/TrustAbusePage.tsx`
-- `frontend/src/providers/AppStateProvider.tsx`
-- `frontend/src/providers/OnboardingProvider.tsx`
+- [frontend/src/layout/AppFrame.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/layout/AppFrame.tsx)
+- [frontend/src/lib/billingCapabilities.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/lib/billingCapabilities.ts)
+- [frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx)
+- [frontend/src/modules/SubscriptionPlans/PricingPage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/SubscriptionPlans/PricingPage.tsx)
+- [frontend/src/modules/TrustAbuse/TrustAbusePage.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/modules/TrustAbuse/TrustAbusePage.tsx)
+- [frontend/src/providers/SubscriptionProvider.tsx](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/frontend/src/providers/SubscriptionProvider.tsx)
 
 ### Tests
 
-- `backend/tests/billing-capabilities.test.cjs`
-- `backend/tests/dashboardConsistency.test.cjs`
-- `backend/tests/pricingProfitOverview.test.cjs`
-- `backend/tests/trustAbuseOverview.test.cjs`
+- [backend/tests/billing-capabilities.test.cjs](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/tests/billing-capabilities.test.cjs)
+- [backend/tests/dashboardConsistency.test.cjs](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/tests/dashboardConsistency.test.cjs)
+- [backend/tests/merchantLabels.test.cjs](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/tests/merchantLabels.test.cjs)
+- [backend/tests/pricingProfitRoutes.test.cjs](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/tests/pricingProfitRoutes.test.cjs)
+- [backend/tests/trustAbuseOverview.test.cjs](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/tests/trustAbuseOverview.test.cjs)
 
 ## Verification run
 
 Verification window:
 
-- Started: `2026-05-02T18:54:15.0043902+05:30`
-- Completed: `2026-05-02T18:54:15.0043902+05:30`
+- Started: `2026-05-04T21:41:03.7474318+05:30`
+- Completed: `2026-05-04T21:41:03.7474318+05:30`
 
-Command results summary:
+### Backend command results
 
-### Backend
-
-1. `npm.cmd run build`
+1. `npm.cmd install`
    - PASS
-   - Summary: `tsc -p tsconfig.json` completed successfully.
+   - Notes: already completed successfully earlier in this workspace for the current dependency set.
 
-2. `$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vedasuite'; .\\node_modules\\.bin\\prisma.cmd validate`
+2. `$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vedasuite'; npx.cmd prisma generate`
    - PASS
-   - Summary: `The schema at prisma/schema.prisma is valid`
+   - Output summary: `Generated Prisma Client (v5.22.0)`
+   - Notes: required escalation because local sandbox execution hit `spawn EPERM`.
 
-3. `$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vedasuite'; .\\node_modules\\.bin\\prisma.cmd generate`
+3. `$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vedasuite'; npx.cmd prisma validate`
    - PASS
-   - Summary: `Generated Prisma Client (v5.22.0)`
-   - Note: this required running outside the sandbox because Prisma client generation hit `spawn EPERM` inside the sandbox.
+   - Output summary: `The schema at prisma/schema.prisma is valid`
 
-4. `node tests\\billing-capabilities.test.cjs`
+4. `npm.cmd run build`
    - PASS
-   - Summary: `3 tests passed, 0 failed`
+   - Output summary: `tsc -p tsconfig.json`
 
-5. `node tests\\feature-gating.test.cjs`
+5. `Get-ChildItem tests\\*.test.cjs | ForEach-Object { node $_.FullName }`
    - PASS
-   - Summary: `4 tests passed, 0 failed`
+   - Output summary:
+     - all backend regression files executed successfully
+     - Starter fraud and Starter competitor route-gating tests passed
+     - dashboard consistency tests passed
+     - merchant order-label tests passed
+     - pricing route timeout and feature-lock tests passed
 
-6. `node tests\\dashboardConsistency.test.cjs`
+### Frontend command results
+
+1. `npm.cmd install`
    - PASS
-   - Summary: dashboard KPI counts now follow module-backed overviews.
+   - Notes: already completed successfully earlier in this workspace for the current dependency set.
 
-7. `node tests\\pricingProfitOverview.test.cjs`
+2. `npm.cmd run build`
    - PASS
-   - Summary: projected gain is suppressed when real profit data is not ready.
+   - Output summary: `vite build` completed successfully
 
-8. `node tests\\trustAbuseOverview.test.cjs`
-   - PASS
-   - Summary: fraud queue no longer exposes internal fallback order IDs.
+## Regression coverage added or strengthened
 
-9. `node tests\\competitorService.test.cjs`
-   - PASS
-   - Summary: competitor setup/no-match/change state derivation remains correct.
-
-10. `node tests\\pricingEngineStateService.test.cjs`
-    - PASS
-    - Summary: pricing engine empty/processing/timeout/error/ready states remain deterministic.
-
-11. `node tests\\readinessEngineService.test.cjs`
-    - PASS
-    - Summary: readiness engine still enforces locked/setup/collecting/ready/error correctly.
-
-12. `node tests\\appStateService.test.cjs`
-    - PASS
-    - Summary: install and connection state derivation remains stable.
-
-13. `node tests\\bootstrapService.test.cjs`
-    - PASS
-    - Summary: bootstrap service does not seed demo subscriptions or fake merchant data.
-
-14. `node tests\\billingLifecycle.test.cjs`
-    - PASS
-    - Summary: canonical billing lifecycle and entitlement reconciliation paths remain correct.
-
-### Frontend
-
-1. `npm.cmd run build`
-   - PASS
-   - Summary: Vite production build completed successfully.
-
-## Production scope review
-
-Current production scopes in `shopify.app.toml`:
-
-- `read_products`
-- `read_orders`
-- `write_orders`
-- `read_customers`
-- `write_own_subscription`
-
-Assessment:
-
-- `write_orders` is still justified because live fraud actions can tag/update Shopify orders when a valid Shopify order identity exists.
-- `write_own_subscription` is required for live Shopify app subscription management.
-- `write_products` is intentionally not requested because direct Shopify price publishing remains disabled in the current approval-safe flow.
+- Starter fraud unlocks only fraud
+- Starter competitor unlocks only competitor
+- Legacy module aliases map to canonical fraud or competitor access
+- Dashboard recent insights do not leak synthetic shopper strings
+- Merchant-facing order labels never expose synthetic order IDs or Shopify GIDs
+- Trust & Abuse overview no longer exposes internal fallback order IDs
+- Pricing route feature-lock and timeout behavior remain deterministic
 
 ## Remaining blockers
 
-1. Live manual dev-store QA is still required before marking the app submission-ready:
-   - install flow
-   - embedded reopen / reconnect flow
-   - Starter fraud selection
-   - Starter competitor selection
-   - billing approval return
-   - uninstall webhook cleanup
-   - privacy webhooks
-2. There is still no full browser-automated UI regression suite for blank-screen detection, so final confidence on zero-white-screen behavior still depends on manual embedded-store QA.
+1. Owner-run live embedded Shopify QA is still required before submission can honestly be marked ready.
+2. That live QA must confirm:
+   - Starter fraud works
+   - Starter competitor works
+   - switching between them works
+   - billing return never leaves a blank page
+   - no internal order IDs appear anywhere merchant-facing
+   - the evidence CTA clearly leads to the evidence section
 
 ## Final readiness call
 
@@ -252,5 +221,5 @@ Ready for Shopify submission right now: **NO**
 
 Reason:
 
-- The codebase now passes local build, Prisma, and the new regression checks for Starter gating, dashboard/module consistency, pricing no-data behavior, fraud order labeling, and competitor state derivation.
-- The remaining blocker is live Shopify manual QA, not unresolved local code contradictions.
+- Local code verification is passing and the blocker fixes in this pass are implemented.
+- Final approval readiness still depends on owner-run live Shopify QA for the exact billing-switch and embedded-app flows that cannot be truthfully certified from local execution alone.

@@ -15,7 +15,7 @@ import {
   Text,
   Toast,
 } from "@shopify/polaris";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -37,7 +37,7 @@ type Overview = {
   fraudReviewQueue: Array<{ id: string; shopifyOrderId: string; riskScore: number; riskLevel: string; status: string; refundRequested: boolean; createdAt?: string | null }>;
   returnAbuseSignals: Array<{ id: string; email: string | null; abuseScore: number; reasons: string[] }>;
   wardrobingSignals: Array<{ id: string; email: string | null; wardrobingScore: number; refundRate: number; totalRefunds: number; totalOrders: number; likely: boolean; confidence: number; recommendedAction: string; reasons: string[]; automationPosture: string }>;
-  networkMatches: Array<{ id: string; orderId: string; customerId: string | null; riskLevel: string; repeatSignals: number; email: string | null; confidence: number; recommendedAction: string; reasons: string[]; automationPosture: string }>;
+  networkMatches: Array<{ id: string; orderLabel: string; customerId: string | null; riskLevel: string; repeatSignals: number; email: string | null; confidence: number; recommendedAction: string; reasons: string[]; automationPosture: string }>;
   chargebackCandidates: Array<{ id: string; shopifyOrderId: string; chargebackRiskScore: number; reasons: string[] }>;
   supportCopilot: { status: string; playbooks: string[]; cases?: Array<{ title: string; reason: string; recommendedHandling: string }> };
   evidencePack: { status: string; exports: string[]; templates?: Array<{ title: string; detail: string }> };
@@ -127,6 +127,7 @@ export function TrustAbusePage() {
   const [selectedEvidenceTab, setSelectedEvidenceTab] = useState(0);
   const [activeOrder, setActiveOrder] = useState<Overview["fraudReviewQueue"][number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const evidenceSectionRef = useRef<HTMLDivElement | null>(null);
   const allowed = !!(
     subscription?.enabledModules?.fraud ?? subscription?.enabledModules?.trustAbuse
   );
@@ -244,6 +245,14 @@ export function TrustAbusePage() {
       setToast("Unable to update the order right now.");
     }
   }, [activeOrder, loadOverview]);
+
+  const focusEvidenceSection = useCallback((tabIndex = 0) => {
+    setSelectedEvidenceTab(tabIndex);
+    window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}#customer-order-evidence`);
+    window.setTimeout(() => {
+      evidenceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, []);
 
   if (!allowed) {
     return (
@@ -366,7 +375,7 @@ export function TrustAbusePage() {
                   </BlockStack>
                 </div>
                 <InlineStack gap="300">
-                  <Button variant="primary" onClick={() => setSelectedEvidenceTab(0)}>Review supporting evidence</Button>
+                  <Button variant="primary" onClick={() => focusEvidenceSection(0)}>Review supporting evidence</Button>
                   <Button onClick={() => navigateEmbedded("/app/settings")}>Open settings</Button>
                 </InlineStack>
               </BlockStack>
@@ -405,7 +414,8 @@ export function TrustAbusePage() {
         </Layout.Section>
 
         <Layout.Section>
-          <Card>
+          <div id="customer-order-evidence" ref={evidenceSectionRef}>
+            <Card>
             <BlockStack gap="300">
               <BlockStack gap="100">
                 <Text as="h2" variant="headingLg">Customer and order evidence</Text>
@@ -422,7 +432,7 @@ export function TrustAbusePage() {
                             <div key={signal.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
-                                  <Text as="p" variant="headingSm">{signal.email ?? `profile-${signal.id.slice(-4)}`}</Text>
+                                  <Text as="p" variant="headingSm">{signal.email ?? "Customer profile"}</Text>
                                   <Badge tone={signal.abuseScore >= 70 ? "critical" : "attention"}>{signal.abuseScore >= 70 ? "High risk" : "Needs review"}</Badge>
                                 </InlineStack>
                                 {signal.reasons.map((reason) => <Text key={reason} as="p" variant="bodySm" tone="subdued">{reason}</Text>)}
@@ -438,7 +448,7 @@ export function TrustAbusePage() {
                             <div key={signal.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
-                                  <Text as="p" variant="headingSm">{signal.email ?? `shopper-${signal.id.slice(-4)}`}</Text>
+                                  <Text as="p" variant="headingSm">{signal.email ?? "Customer profile"}</Text>
                                   <Badge tone={signal.likely ? "critical" : "warning"}>{signal.likely ? "High risk" : "Monitor"}</Badge>
                                 </InlineStack>
                                 <Text as="p" variant="bodySm" tone="subdued">{signal.totalRefunds} refunds across {signal.totalOrders} orders | {signal.refundRate}% refund rate</Text>
@@ -460,7 +470,7 @@ export function TrustAbusePage() {
                             <div key={match.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
-                                  <Text as="p" variant="headingSm">{match.orderId}</Text>
+                                  <Text as="p" variant="headingSm">{match.orderLabel}</Text>
                                   <Badge tone={match.repeatSignals >= 3 ? "critical" : "attention"}>{match.repeatSignals >= 3 ? "High risk" : "Needs review"}</Badge>
                                 </InlineStack>
                                 <Text as="p" tone="subdued">{match.reasons.join(" ")}</Text>
@@ -540,7 +550,8 @@ export function TrustAbusePage() {
                 </Box>
               </Tabs>
             </BlockStack>
-          </Card>
+            </Card>
+          </div>
         </Layout.Section>
 
         <Layout.Section>

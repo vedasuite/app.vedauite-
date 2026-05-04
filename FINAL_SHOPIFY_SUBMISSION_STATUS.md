@@ -1,87 +1,91 @@
 # Final Shopify Submission Status
 
-Timestamp: `2026-05-02T18:54:15.0043902+05:30`
+Timestamp: `2026-05-04T21:41:03.7474318+05:30`
 
-## Build status
+## Latest code state
 
+- Active app repo: `app-repo`
+- Latest pushed GitHub commit before this local blocker-fix batch: `da386d1`
+- Current status of this blocker-fix batch: local changes verified, not yet owner-live-QA verified
+
+## Local code verification
+
+- Status: PASS
 - Backend build: PASS
 - Frontend build: PASS
-
-## Test status
-
-- `node tests\\billing-capabilities.test.cjs`: PASS
-- `node tests\\feature-gating.test.cjs`: PASS
-- `node tests\\dashboardConsistency.test.cjs`: PASS
-- `node tests\\pricingProfitOverview.test.cjs`: PASS
-- `node tests\\trustAbuseOverview.test.cjs`: PASS
-- `node tests\\competitorService.test.cjs`: PASS
-- `node tests\\pricingEngineStateService.test.cjs`: PASS
-- `node tests\\readinessEngineService.test.cjs`: PASS
-- `node tests\\appStateService.test.cjs`: PASS
-- `node tests\\bootstrapService.test.cjs`: PASS
-- `node tests\\billingLifecycle.test.cjs`: PASS
-
-## Prisma status
-
 - Prisma validate: PASS
 - Prisma generate: PASS
 
-## Production URL readiness
+## Local regression test status
+
+Executed directly with `node tests\\*.test.cjs` because `node --test` in this local environment hits `spawn EPERM`.
+
+- `appStateRoutes.test.cjs`: PASS
+- `appStateService.test.cjs`: PASS
+- `billing-capabilities.test.cjs`: PASS
+- `billingLifecycle.test.cjs`: PASS
+- `bootstrapService.test.cjs`: PASS
+- `competitorService.test.cjs`: PASS
+- `dashboardConsistency.test.cjs`: PASS
+- `feature-gating.test.cjs`: PASS
+- `launch-smoke.test.cjs`: PASS
+- `merchantLabels.test.cjs`: PASS
+- `module-api-routes.test.cjs`: PASS
+- `pricingEngineStateService.test.cjs`: PASS
+- `pricingProfitOverview.test.cjs`: PASS
+- `pricingProfitRoutes.test.cjs`: PASS
+- `privacy-safety.test.cjs`: PASS
+- `readinessEngineService.test.cjs`: PASS
+- `shopify-connection-service.test.cjs`: PASS
+- `shopify-routes-auth.test.cjs`: PASS
+- `trustAbuseOverview.test.cjs`: PASS
+
+## Production deployment readiness
 
 - Active production app config: `app-repo/shopify.app.toml`
 - Production app URL: `https://app.vedasuite.in`
 - Embedded mode: enabled
 - OAuth callback URL: `https://app.vedasuite.in/auth/callback`
-- Legacy duplicate app tree: archived and no longer treated as the active deploy target
+- Production-safe backend deploy flow:
+  1. `npx prisma generate`
+  2. `npx prisma migrate deploy`
+  3. `npm run build`
+- Do not use `prisma db push --accept-data-loss` in production
 
-## Billing readiness
+## Blockers addressed in this pass
 
-- Backend-authoritative billing lifecycle model: PASS
-- Canonical Starter / Growth / Pro entitlement mapping: PASS
-- Starter fraud path: PASS in regression coverage
-- Starter competitor path: PASS in regression coverage
-- Billing reconciliation after confirmation/cancel: PASS in backend flow
-- Merchant-safe billing lifecycle labels: PASS
-- Live Shopify billing approval return manually verified in embedded dev store: NOT VERIFIED
+- Starter fraud vs Starter competitor entitlement switching
+- Backend and frontend canonical module-key alignment
+- Merchant-safe order labels with no synthetic Shopify-looking order IDs
+- Recent Insights cleanup for internal-looking shopper and order copy
+- Evidence CTA now leads to the evidence section instead of behaving like a dead click
+- Competitor locked state clears stale operational cache
+- Billing pending shell now renders a non-blank embedded fallback with retry guidance
 
-## Feature-gating readiness
+## Live Shopify QA
 
-- Canonical module keys aligned around `fraud`, `competitor`, `pricing`, and `profit`: PASS
-- Server-side `requireFeature(...)` gating: PASS
-- Frontend gate now mirrors backend access instead of inventing access: PASS
-- Sidebar badges and module pages now use canonical access mapping: PASS
+- Status: OWNER ACTION REQUIRED
+- Owner script: [LIVE_QA_OWNER_SCRIPT.md](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/LIVE_QA_OWNER_SCRIPT.md)
+- Evidence template: [LIVE_QA_EVIDENCE_TEMPLATE.md](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/LIVE_QA_EVIDENCE_TEMPLATE.md)
 
-## Data consistency readiness
+Owner must still verify in the deployed embedded app:
 
-- Dashboard pricing count equals pricing overview count: PASS
-- Dashboard profit count equals pricing/profit overview count: PASS
-- Fraud queue no longer exposes internal fallback order IDs: PASS
-- Pricing projected gain hidden when profit data is insufficient: PASS
-- Preview-only competitor connector rows no longer appear as live monitoring data: PASS
+1. Starter fraud unlocks fraud and locks competitor, pricing, and profit
+2. Starter competitor unlocks competitor and locks fraud, pricing, and profit
+3. Switching Starter fraud to Starter competitor updates access immediately after billing return
+4. Switching Starter competitor to Starter fraud updates access immediately after billing return
+5. Billing redirect and billing return never show a blank white screen
+6. Dashboard, fraud, and evidence views never expose internal order IDs
+7. Dashboard recent insights do not show synthetic shopper strings or internal-looking order labels
+8. Competitor locked state shows upgrade-only state instead of stale operational data
+9. Competitor unlocked but not-configured state shows setup guidance
+10. Pricing hides projected gain when data is insufficient
 
-## Loading and UX readiness
+## Final Shopify submission
 
-- App shell bootstrap states render non-blank loading/recovery UI: PASS
-- Dashboard preview banner prevents onboarding-complete overclaim: PASS
-- Dedicated automated browser regression for white-screen detection: NOT PRESENT
-
-## Known blockers
-
-1. Live manual QA in a Shopify dev store is still required for:
-   - install flow
-   - embedded reopen / reconnect flow
-   - Starter fraud selection
-   - Starter competitor selection
-   - billing approval return
-   - uninstall webhook cleanup
-   - privacy webhooks
-2. No browser-automated UI suite currently verifies zero blank-screen regressions inside Shopify Admin.
-
-## Final decision
-
-Ready for Shopify submission right now: **NO**
+- Status: NO
 
 Why:
 
-- The local codebase is now materially more stable and consistent: builds pass, Prisma passes, and the new regression coverage locks in the critical contradictions that were still failing.
-- The remaining blocker is live Shopify manual verification, not unresolved local approval-readiness code defects.
+- Local code verification is complete and passing.
+- Final Shopify submission must remain blocked until the owner completes live Shopify QA and records evidence for the remaining real-store flows.

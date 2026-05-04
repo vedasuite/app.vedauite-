@@ -1,14 +1,19 @@
 import { env } from "../config/env";
 import { getOnboardingState } from "./onboardingService";
 import { getStoreOperationalSnapshot } from "./storeOperationalStateService";
-import { getCurrentSubscription, resolveBillingState } from "./subscriptionService";
+import {
+  getCurrentSubscription,
+  resolveBillingState,
+  resolveEntitlements,
+} from "./subscriptionService";
 
 export async function getStoreReadinessState(shopDomain: string) {
-  const [subscription, billing, onboarding, operational] = await Promise.all([
+  const [subscription, billing, onboarding, operational, entitlements] = await Promise.all([
     getCurrentSubscription(shopDomain),
     resolveBillingState(shopDomain),
     getOnboardingState(shopDomain),
     getStoreOperationalSnapshot(shopDomain),
+    resolveEntitlements(shopDomain),
   ]);
 
   const hasOrders = operational.counts.orders > 0;
@@ -27,12 +32,12 @@ export async function getStoreReadinessState(shopDomain: string) {
       plan: billing.planName,
       isActive: billing.accessActive,
       isTrial: billing.planName === "TRIAL" && billing.accessActive,
-      starterModule: subscription.starterModule,
+      starterModule: entitlements.starterModule,
       enabledModules: {
-        fraud: subscription.enabledModules.fraud,
-        competitor: subscription.enabledModules.competitor,
-        pricing: subscription.enabledModules.pricing,
-        profit: subscription.enabledModules.profit,
+        fraud: entitlements.enabledModules.includes("fraud"),
+        competitor: entitlements.enabledModules.includes("competitor"),
+        pricing: entitlements.enabledModules.includes("pricing"),
+        profit: entitlements.enabledModules.includes("profit"),
         reports: subscription.enabledModules.reports,
         settings: subscription.enabledModules.settings,
       },

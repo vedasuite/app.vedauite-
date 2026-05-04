@@ -1,5 +1,5 @@
-import { Banner, Card, Frame, Navigation, Spinner, Text, Toast } from "@shopify/polaris";
-import { ReactNode, useCallback, useMemo, useState } from "react";
+import { Banner, Button, Card, Frame, Navigation, Spinner, Text, Toast } from "@shopify/polaris";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VedaLogo } from "../brand/VedaLogo";
 import { useAppState } from "../hooks/useAppState";
@@ -14,9 +14,11 @@ type Props = {
 function ShellLoadingState({
   title,
   description,
+  action,
 }: {
   title: string;
   description: string;
+  action?: React.ReactNode;
 }) {
   return (
     <Card>
@@ -41,9 +43,65 @@ function ShellLoadingState({
               {description}
             </Text>
           </div>
+          {action ? <div style={{ marginTop: "1rem" }}>{action}</div> : null}
         </div>
       </div>
     </Card>
+  );
+}
+
+function BillingRedirectState({
+  state,
+  onRetry,
+  onOpenBilling,
+}: {
+  state: "REDIRECTING_TO_SHOPIFY" | "RETURNED_FROM_SHOPIFY" | "CONFIRMING_BACKEND_STATE";
+  onRetry: () => void;
+  onOpenBilling: () => void;
+}) {
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    setTimedOut(false);
+    const timer = window.setTimeout(() => setTimedOut(true), 10000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  const copy =
+    state === "REDIRECTING_TO_SHOPIFY"
+      ? {
+          title: "Redirecting to Shopify billing...",
+          description: "Approve the selected plan in Shopify to continue.",
+        }
+      : state === "RETURNED_FROM_SHOPIFY"
+      ? {
+          title: "Returning to VedaSuite...",
+          description: "Restoring your embedded app session after Shopify approval.",
+        }
+      : {
+          title: "Waiting for Shopify approval...",
+          description: "VedaSuite is reconciling the confirmed plan before showing the updated access.",
+        };
+
+  return (
+    <ShellLoadingState
+      title={copy.title}
+      description={
+        timedOut
+          ? "Still working. You can retry the billing confirmation or reopen the billing page."
+          : copy.description
+      }
+      action={
+        timedOut ? (
+          <div style={{ display: "inline-flex", gap: "0.75rem", flexWrap: "wrap", justifyContent: "center" }}>
+            <Button variant="primary" onClick={onRetry}>
+              Retry confirmation
+            </Button>
+            <Button onClick={onOpenBilling}>Open billing page</Button>
+          </div>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -68,6 +126,7 @@ export function AppFrame({ children }: Props) {
     billingFlowState,
     billingMessage,
     billingError,
+    retryBillingConfirmation,
     dismissBillingMessage,
     clearBillingError,
   } = useSubscriptionPlan();
@@ -263,15 +322,14 @@ export function AppFrame({ children }: Props) {
 
   const billingFlowGate =
     billingFlowState === "RETURNED_FROM_SHOPIFY" ||
-    billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
-      <ShellLoadingState
-        title="Confirming your subscription..."
-        description="VedaSuite is waiting for Shopify billing confirmation before showing the updated plan."
-      />
-    ) : billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
-      <ShellLoadingState
-        title="Redirecting to Shopify billing..."
-        description="Approve the selected plan in Shopify to continue."
+    billingFlowState === "CONFIRMING_BACKEND_STATE" ||
+    billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
+      <BillingRedirectState
+        state={billingFlowState}
+        onRetry={() => {
+          void retryBillingConfirmation();
+        }}
+        onOpenBilling={() => navigateEmbedded("/app/billing")}
       />
     ) : null;
 

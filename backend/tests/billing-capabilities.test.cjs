@@ -35,15 +35,51 @@ test("starter competitor plan enables competitor only", async () => {
   const {
     buildCapabilities,
     buildModuleAccessFromCapabilities,
+    normalizeStarterModule,
+    resolveEntitlements,
   } = require(capabilitiesPath);
 
   const capabilities = buildCapabilities("STARTER", "competitor");
   const modules = buildModuleAccessFromCapabilities(capabilities);
+  const aliasCompetitor = normalizeStarterModule("competitorIntelligence");
+  const aliasFraud = normalizeStarterModule("trustAbuse");
+  const entitlements = resolveEntitlements({
+    plan: "STARTER",
+    billingStatus: "ACTIVE",
+    starterModule: "competitorIntelligence",
+  });
 
   assert.equal(modules.fraud, false);
   assert.equal(modules.competitor, true);
   assert.equal(modules.pricing, false);
   assert.equal(modules.profit, false);
+  assert.equal(aliasCompetitor, "competitor");
+  assert.equal(aliasFraud, "fraud");
+  assert.deepEqual(entitlements.enabledModules, ["competitor"]);
+  assert.ok(entitlements.lockedModules.includes("fraud"));
+  assert.ok(entitlements.lockedModules.includes("pricing"));
+  assert.ok(entitlements.lockedModules.includes("profit"));
+});
+
+test("switching starter modules swaps enabled modules immediately", async () => {
+  const { resolveEntitlements } = require(capabilitiesPath);
+
+  const fraudStarter = resolveEntitlements({
+    plan: "STARTER",
+    billingStatus: "ACTIVE",
+    starterModule: "fraud",
+  });
+  const competitorStarter = resolveEntitlements({
+    plan: "STARTER",
+    billingStatus: "ACTIVE",
+    starterModule: "competitor",
+  });
+
+  assert.deepEqual(fraudStarter.enabledModules, ["fraud"]);
+  assert.ok(fraudStarter.lockedModules.includes("competitor"));
+
+  assert.deepEqual(competitorStarter.enabledModules, ["competitor"]);
+  assert.ok(competitorStarter.lockedModules.includes("fraud"));
 });
 
 test("growth and pro capabilities separate baseline access from premium access", async () => {

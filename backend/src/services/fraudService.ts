@@ -1,27 +1,8 @@
 import { createHash } from "crypto";
 import { prisma } from "../db/prismaClient";
 import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
+import { formatMerchantOrderLabel } from "../lib/merchantLabels";
 import { tagShopifyOrder } from "./shopifyAdminService";
-
-function formatMerchantOrderLabel(order: {
-  shopifyOrderId: string;
-  orderName?: string | null;
-  shopifyLegacyOrderId?: string | null;
-}) {
-  if (order.orderName?.trim()) {
-    return order.orderName.trim();
-  }
-
-  if (order.shopifyLegacyOrderId?.trim()) {
-    return `Order #${order.shopifyLegacyOrderId.trim()}`;
-  }
-
-  if (/\.myshopify\.com-order-\d+$/i.test(order.shopifyOrderId)) {
-    return "Order pending sync";
-  }
-
-  return order.shopifyOrderId;
-}
 
 export type FraudSignalInput = {
   ipAddress?: string;
@@ -316,6 +297,9 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
         take: 50,
       },
       fraudSignals: {
+        include: {
+          order: true,
+        },
         orderBy: { createdAt: "desc" },
         take: 200,
       },
@@ -357,13 +341,13 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
 
       return {
         id: signal.id,
-        orderId: signal.orderId,
+        orderLabel: signal.order ? formatMerchantOrderLabel(signal.order) : "Order pending sync",
         customerId: signal.customerId,
         riskLevel: signal.riskLevel,
         repeatSignals,
         email: maskCustomerIdentity(
           signal.email,
-          `shopper-${(signal.customerId ?? signal.id).slice(-4)}`
+          "Customer profile"
         ),
         confidence,
         recommendedAction:
@@ -393,7 +377,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
 
       return {
         id: customer.id,
-        email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
+        email: maskCustomerIdentity(customer.email, "Customer profile"),
         wardrobingScore: score,
         refundRate: Number((customer.refundRate * 100).toFixed(1)),
         totalRefunds: customer.totalRefunds,
@@ -446,7 +430,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
     .slice(0, 5)
     .map((customer) => ({
       id: customer.id,
-      email: maskCustomerIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
+      email: maskCustomerIdentity(customer.email, "Customer profile"),
       abuseScore: Math.min(
         100,
         Math.round(customer.refundRate * 75 + customer.totalRefunds * 6)

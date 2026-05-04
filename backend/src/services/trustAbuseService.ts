@@ -10,39 +10,13 @@ import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
-
-function formatMerchantOrderLabel(order: {
-  shopifyOrderId: string;
-  orderName?: string | null;
-  shopifyLegacyOrderId?: string | null;
-}) {
-  if (order.orderName?.trim()) {
-    return order.orderName.trim();
-  }
-
-  if (order.shopifyLegacyOrderId?.trim()) {
-    return `Order #${order.shopifyLegacyOrderId.trim()}`;
-  }
-
-  if (/\.myshopify\.com-order-\d+$/i.test(order.shopifyOrderId)) {
-    return "Order pending sync";
-  }
-
-  return order.shopifyOrderId;
-}
+import {
+  formatMerchantOrderLabel,
+  maskMerchantCustomerLabel,
+} from "../lib/merchantLabels";
 
 function maskIdentity(value: string | null | undefined, fallback: string) {
-  if (!value) {
-    return fallback;
-  }
-
-  const [name] = value.split("@");
-  if (value.includes("@")) {
-    const visible = name.slice(0, 2);
-    return `${visible}***`;
-  }
-
-  return `${value.slice(0, 3)}***`;
+  return value ? maskMerchantCustomerLabel(value) : fallback;
 }
 
 export async function getTrustAbuseOverview(shopDomain: string) {
@@ -116,10 +90,8 @@ export async function getTrustAbuseOverview(shopDomain: string) {
             id: event.id,
             shopper:
               typeof metadata.customerEmail === "string"
-                ? maskIdentity(metadata.customerEmail, `shopper-${(event.customerId ?? event.id).slice(-4)}`)
-                : event.customerId
-                ? `shopper-${event.customerId.slice(-4)}`
-                : "Store-level signal",
+                ? maskIdentity(metadata.customerEmail, "Customer profile")
+                : "Customer profile",
             trustScore:
               typeof metadata.score === "number"
                 ? metadata.score
@@ -144,7 +116,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
         })
       : customers.slice(0, 6).map((customer) => ({
           id: customer.id,
-          shopper: maskIdentity(customer.email, `shopper-${customer.id.slice(-4)}`),
+          shopper: maskIdentity(customer.email, "Customer profile"),
           trustScore: customer.creditScore,
           tier: customer.creditCategory,
           refundRate: Number((customer.refundRate * 100).toFixed(1)),

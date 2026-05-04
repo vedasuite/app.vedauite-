@@ -210,12 +210,17 @@ export function normalizeStarterModule(value?: string | null): StarterModule {
     return value;
   }
 
-  if (value === "fraud" || value === "creditScore") {
+  if (
+    value === "trust" ||
+    value === "trustAbuse" ||
+    value === "fraudIntelligence" ||
+    value === "creditScore"
+  ) {
     return "fraud";
   }
 
-  if (value === "trustAbuse") {
-    return "fraud";
+  if (value === "competitorIntelligence" || value === "competitor_monitoring") {
+    return "competitor";
   }
 
   return null;

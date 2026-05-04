@@ -12,6 +12,7 @@ import {
   DEFAULT_TRIAL_DAYS,
   getPlanPrice,
   normalizePlanName,
+  resolveEntitlements as resolveEntitlementsForPlan,
   normalizeStarterModule,
   normalizeStarterModuleLabel,
   STARTER_MODULE_SWITCH_COOLDOWN_HOURS,
@@ -20,6 +21,7 @@ import {
   type StarterModule,
   type SubscriptionLifeCycleStatus,
 } from "../billing/capabilities";
+import { logEvent } from "./observabilityService";
 
 export type {
   BillingPlanName,
@@ -281,17 +283,20 @@ export function buildCanonicalEntitlements(input: {
     input.accessActive || (input.planName === "TRIAL" && input.trialActive)
       ? input.planName
       : "NONE";
-  const capabilities = buildCapabilities(effectivePlanName, input.starterModule, {
-    trialActive: input.trialActive,
+  const resolved = resolveEntitlementsForPlan({
+    plan: effectivePlanName,
+    billingStatus: input.accessActive ? "ACTIVE" : "INACTIVE",
+    starterModule: input.starterModule,
   });
-  const modules = buildModuleAccessFromCapabilities(capabilities);
-  const featureAccess = buildFeatureAccessFromCapabilities(capabilities);
+  const capabilities = resolved.capabilities;
+  const modules = resolved.moduleAccess;
+  const featureAccess = resolved.featureAccess;
   const tier = normalizeTier(effectivePlanName);
 
   return {
     tier,
     planName: effectivePlanName,
-    starterModule: effectivePlanName === "STARTER" ? input.starterModule : null,
+    starterModule: effectivePlanName === "STARTER" ? resolved.starterModule : null,
     accessActive: input.accessActive || (effectivePlanName === "TRIAL" && input.trialActive),
     verified: input.verified,
     modules,
@@ -839,10 +844,38 @@ export async function reconcileBillingState(shopDomain: string) {
     trialActive: billingState.planName === "TRIAL" && billingState.accessActive,
   });
 
+  logEvent("info", "billing.entitlements_resolved", {
+    shop: shopDomain,
+    planName: entitlements.planName,
+    starterModule: entitlements.starterModule,
+    enabledModules: Object.entries(entitlements.modules)
+      .filter(([key, value]) =>
+        ["fraud", "competitor", "pricing", "profit"].includes(key) && value
+      )
+      .map(([key]) => key),
+  });
+
   return {
     billingState,
     subscription,
     entitlements,
+  };
+}
+
+export async function resolveEntitlements(shopDomain: string) {
+  const { billingState, entitlements } = await reconcileBillingState(shopDomain);
+  const resolved = resolveEntitlementsForPlan({
+    plan: entitlements.planName,
+    billingStatus: billingState.normalizedBillingStatus,
+    starterModule: entitlements.starterModule,
+  });
+
+  return {
+    plan: entitlements.planName,
+    billingStatus: billingState.normalizedBillingStatus,
+    starterModule: entitlements.starterModule,
+    enabledModules: resolved.enabledModules,
+    lockedModules: resolved.lockedModules,
   };
 }
 

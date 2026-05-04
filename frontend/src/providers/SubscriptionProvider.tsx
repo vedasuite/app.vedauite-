@@ -14,6 +14,7 @@ import {
   normalizeStarterModule,
   normalizeSubscriptionInfo,
 } from "../lib/billingCapabilities";
+import { useAppState } from "../hooks/useAppState";
 
 const SUBSCRIPTION_CACHE_KEY = "subscription-plan";
 const BILLING_CONFIRMATION_TIMEOUT_MS = 45000;
@@ -32,7 +33,7 @@ type SubscriptionContextValue = {
   billingState: BillingState | null;
   entitlements: EntitlementState | null;
   loading: boolean;
-  refresh: (options?: { clearCache?: boolean }) => Promise<SubscriptionInfo>;
+  refresh: (options?: { clearCache?: boolean; syncAppState?: boolean }) => Promise<SubscriptionInfo>;
   billingFlowState: BillingFlowState;
   billingMessage: string | null;
   billingError: string | null;
@@ -60,6 +61,7 @@ function cleanupBillingQueryParams() {
 }
 
 export function SubscriptionProvider({ children }: Props) {
+  const { refresh: refreshAppState } = useAppState();
   const location = useLocation();
   const initialCachedSubscription = useMemo(() => {
     const rawCachedSubscription =
@@ -156,6 +158,7 @@ export function SubscriptionProvider({ children }: Props) {
 
         if (planMatches && starterMatches) {
           commitSubscription(nextSubscription, { clearCache: true });
+          await refreshAppState().catch(() => undefined);
           setBillingFlowState("CONFIRMED");
           setBillingMessage(
             billingParams.billingMessageFromUrl ?? "Plan updated successfully"
@@ -194,11 +197,14 @@ export function SubscriptionProvider({ children }: Props) {
   ]);
 
   const refresh = useCallback(
-    async (options?: { clearCache?: boolean }) => {
+    async (options?: { clearCache?: boolean; syncAppState?: boolean }) => {
       const nextSubscription = await fetchSubscription();
+      if (options?.syncAppState) {
+        await refreshAppState().catch(() => undefined);
+      }
       return commitSubscription(nextSubscription, options);
     },
-    [commitSubscription, fetchSubscription]
+    [commitSubscription, fetchSubscription, refreshAppState]
   );
 
   const startBillingRedirect = useCallback(() => {

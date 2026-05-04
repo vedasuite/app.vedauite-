@@ -1,5 +1,10 @@
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
+import {
+  formatMerchantOrderLabel,
+  formatMerchantInsightDetail,
+  formatMerchantInsightTitle,
+} from "../lib/merchantLabels";
 
 type StoreSnapshot = {
   id: string;
@@ -9,6 +14,8 @@ type StoreSnapshot = {
   orders: Array<{
     id: string;
     shopifyOrderId: string;
+    shopifyLegacyOrderId?: string | null;
+    orderName?: string | null;
     totalAmount: number;
     currency: string;
     status: string;
@@ -288,17 +295,24 @@ function buildTimelineEvents(store: StoreSnapshot) {
       orderId: null,
       category: "trust",
       eventType: "trust_profile_scored",
-          title: `Trust profile updated for shopper ${customer.id.slice(-4)}`,
-          detail: `Trust score ${trust.score} with ${customer.totalOrders} orders and ${customer.totalRefunds} refunds.`,
-          severity: trust.score >= 80 ? "success" : trust.score >= 55 ? "info" : "warning",
-          scoreImpact: trust.score - (customer.creditScore ?? 50),
-          metadataJson: JSON.stringify({
-            customerEmail: customer.email,
-            score: trust.score,
-            category: trust.category,
-            refundRate: trust.refundRate,
-            reasons: trust.reasons,
-          }),
+      title: formatMerchantInsightTitle({
+        category: "trust",
+        eventType: "trust_profile_scored",
+      }),
+      detail: formatMerchantInsightDetail({
+        category: "trust",
+        eventType: "trust_profile_scored",
+        detail: `Trust score ${trust.score} with ${customer.totalOrders} orders and ${customer.totalRefunds} refunds.`,
+      }),
+      severity: trust.score >= 80 ? "success" : trust.score >= 55 ? "info" : "warning",
+      scoreImpact: trust.score - (customer.creditScore ?? 50),
+      metadataJson: JSON.stringify({
+        customerEmail: customer.email,
+        score: trust.score,
+        category: trust.category,
+        refundRate: trust.refundRate,
+        reasons: trust.reasons,
+      }),
       createdAt: new Date(),
     });
 
@@ -310,8 +324,15 @@ function buildTimelineEvents(store: StoreSnapshot) {
         orderId: null,
         category: "abuse",
         eventType: "return_abuse_assessed",
-        title: `Return-abuse score refreshed for shopper ${customer.id.slice(-4)}`,
-        detail: `Return-abuse score ${abuse.score} based on refund behavior and recent claims.`,
+        title: formatMerchantInsightTitle({
+          category: "abuse",
+          eventType: "return_abuse_assessed",
+        }),
+        detail: formatMerchantInsightDetail({
+          category: "abuse",
+          eventType: "return_abuse_assessed",
+          detail: `Return-abuse score ${abuse.score} based on refund behavior and recent claims.`,
+        }),
         severity: abuse.score >= 70 ? "critical" : "warning",
         scoreImpact: -Math.round(abuse.score / 10),
         metadataJson: JSON.stringify({ score: abuse.score, reasons: abuse.reasons }),
@@ -322,18 +343,27 @@ function buildTimelineEvents(store: StoreSnapshot) {
 
   for (const order of store.orders.slice(0, 25)) {
     const risk = buildOrderRisk(order);
+    const orderLabel = formatMerchantOrderLabel(order);
     events.push({
       storeId: store.id,
       customerId: order.customerId,
       orderId: order.id,
       category: "orders",
       eventType: order.refundRequested ? "refund_requested" : "order_synced",
-      title: order.refundRequested
-        ? `Refund review on order ${order.shopifyOrderId}`
-        : `Order ${order.shopifyOrderId} synced`,
-      detail: order.refundRequested
-        ? `Refund-related activity plus risk score ${risk.score} triggered review guidance.`
-        : `Order amount ${order.totalAmount.toFixed(2)} ${order.currency} with ${risk.riskLevel.toLowerCase()} risk posture.`,
+      title: formatMerchantInsightTitle({
+        category: "orders",
+        eventType: order.refundRequested ? "refund_requested" : "order_synced",
+        orderLabel,
+        severity: risk.riskLevel,
+      }),
+      detail: formatMerchantInsightDetail({
+        category: "orders",
+        eventType: order.refundRequested ? "refund_requested" : "order_synced",
+        orderLabel,
+        detail: order.refundRequested
+          ? `Refund-related activity plus risk score ${risk.score} triggered review guidance.`
+          : `Order amount ${order.totalAmount.toFixed(2)} ${order.currency} with ${risk.riskLevel.toLowerCase()} risk posture.`,
+      }),
       severity:
         risk.riskLevel === "High"
           ? "critical"
@@ -342,6 +372,7 @@ function buildTimelineEvents(store: StoreSnapshot) {
           : "info",
       scoreImpact: risk.riskLevel === "High" ? -8 : risk.riskLevel === "Medium" ? -3 : 2,
       metadataJson: JSON.stringify({
+        orderLabel,
         riskScore: risk.score,
         riskLevel: risk.riskLevel,
         refunded: order.refunded,

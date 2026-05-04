@@ -21,6 +21,7 @@ import {
   resolveBillingState,
   updateStarterModuleSelection,
 } from "./subscriptionService";
+import { logEvent } from "./observabilityService";
 
 const MANAGED_PAID_PLANS: BillingPlanName[] = ["STARTER", "GROWTH", "PRO"];
 const BILLING_INTENT_TTL_MS = 60 * 60 * 1000;
@@ -346,6 +347,14 @@ export async function requestBillingPlanChange(input: {
     throw new Error("Starter plan requires selecting a starter module.");
   }
 
+  if (requestedPlan === "STARTER" && normalizedStarterModule) {
+    logEvent("info", "billing.starter_module_selected", {
+      shop: input.shopDomain,
+      starterModule: normalizedStarterModule,
+      requestedPlan,
+    });
+  }
+
   const [store, current] = await Promise.all([
     getStoreForBilling(input.shopDomain),
     getCurrentSubscription(input.shopDomain),
@@ -358,6 +367,7 @@ export async function requestBillingPlanChange(input: {
       current.starterModule !== normalizedStarterModule
     ) {
       await updateStarterModuleSelection(input.shopDomain, normalizedStarterModule);
+      await reconcileBillingState(input.shopDomain).catch(() => null);
       return {
         outcome: "UPDATED",
         message: `Starter now uses ${normalizeStarterModuleLabel(normalizedStarterModule)}.`,
@@ -585,6 +595,14 @@ export async function confirmBillingApprovalReturn(input: {
     await applyConfirmedStarterModule(input.shopDomain, confirmedStarterModule);
   }
 
+  logEvent("info", "billing.confirmation_received", {
+    shop: input.shopDomain,
+    intentId: intent?.id ?? null,
+    effectivePlan,
+    confirmedStarterModule,
+    shopifyChargeId: activeSubscription.id,
+  });
+
   if (intent) {
     await prisma.billingPlanIntent.update({
       where: { id: intent.id },
@@ -598,7 +616,14 @@ export async function confirmBillingApprovalReturn(input: {
     });
   }
 
-  return getBillingManagementState(input.shopDomain);
+  const state = await getBillingManagementState(input.shopDomain);
+  logEvent("info", "billing.app_state_refetched", {
+    shop: input.shopDomain,
+    planName: state.subscription.planName,
+    starterModule: state.subscription.starterModule,
+    pendingIntentStatus: state.pendingIntent?.status ?? null,
+  });
+  return state;
 }
 
 export async function cancelBillingPlan(

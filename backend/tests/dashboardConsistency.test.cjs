@@ -155,5 +155,7 @@ test("dashboard metrics stay consistent with persisted pricing and profit data",
   assert.equal(metrics.dashboardState.kpis.pricingOpportunities, 7);
   assert.equal(metrics.dashboardState.kpis.profitOpportunities, 4);
   assert.equal(metrics.dashboardState.recentInsights.length, 1);
+  assert.equal(metrics.dashboardState.recentInsights[0].title, "Pricing insight updated");
+  assert.doesNotMatch(metrics.dashboardState.recentInsights[0].title, /shopper/i);
   assert.equal(metrics.dashboardState.syncHealth.status, "READY_WITH_DATA");
 });

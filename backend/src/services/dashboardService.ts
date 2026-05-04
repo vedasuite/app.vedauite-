@@ -9,6 +9,10 @@ import {
 } from "./storeOperationalStateService";
 import { getTrustAbuseOverview } from "./trustAbuseService";
 import { toIsoString } from "./unifiedModuleStateService";
+import {
+  formatMerchantInsightDetail,
+  formatMerchantInsightTitle,
+} from "../lib/merchantLabels";
 
 function latestIsoTimestamp(...values: Array<Date | string | null | undefined>) {
   const timestamps = values
@@ -123,19 +127,44 @@ export async function getDashboardMetrics(shopDomain: string) {
     : null;
   const moduleStates = readiness?.moduleStates ?? null;
   const summaryTitle = buildDashboardSummaryTitle(syncState.status);
-  const recentInsights = store.timelineEvents.slice(0, 5).map((event) => ({
-    id: event.id,
-    title: event.title,
-    detail: event.detail,
-    severity: event.severity,
-    createdAt: event.createdAt.toISOString(),
-    route:
-      event.category === "competitor"
-        ? "/app/competitor-intelligence"
-        : event.category === "pricing" || event.category === "profit"
-        ? "/app/ai-pricing-engine"
-        : "/app/fraud-intelligence",
-  }));
+  const recentInsights = store.timelineEvents.slice(0, 5).map((event) => {
+    const metadata = (() => {
+      if (!event.metadataJson) {
+        return {};
+      }
+      try {
+        return JSON.parse(event.metadataJson) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })();
+    const orderLabel =
+      typeof metadata.orderLabel === "string" ? metadata.orderLabel : null;
+
+    return {
+      id: event.id,
+      title: formatMerchantInsightTitle({
+        category: event.category,
+        eventType: event.eventType,
+        orderLabel,
+        severity: event.severity,
+      }),
+      detail: formatMerchantInsightDetail({
+        category: event.category,
+        eventType: event.eventType,
+        orderLabel,
+        detail: event.detail,
+      }),
+      severity: event.severity,
+      createdAt: event.createdAt.toISOString(),
+      route:
+        event.category === "competitor"
+          ? "/app/competitor-intelligence"
+          : event.category === "pricing" || event.category === "profit"
+          ? "/app/ai-pricing-engine"
+          : "/app/fraud-intelligence",
+    };
+  });
   const quickAccess = readiness?.quickAccess ?? null;
   const syncHealthReason = readiness?.setup.summaryDescription ?? syncState.reason;
   const dashboardState = {

@@ -60,7 +60,20 @@ test("trust abuse overview does not expose internal fallback order ids", async (
     scoreBands: { low: "0-30", medium: "31-70", high: "71-100" },
     returnAbuseSignals: [],
     wardrobingSignals: [],
-    networkMatches: [],
+    networkMatches: [
+      {
+        id: "network-1",
+        orderLabel: "Order pending sync",
+        customerId: "customer-1",
+        riskLevel: "High",
+        repeatSignals: 2,
+        email: "cu***",
+        confidence: 78,
+        recommendedAction: "Manual review",
+        reasons: ["Fingerprint repeated."],
+        automationPosture: "Monitor",
+      },
+    ],
     chargebackCandidates: [],
     automationRules: [],
   });
@@ -117,4 +130,5 @@ test("trust abuse overview does not expose internal fallback order ids", async (
   const overview = await getTrustAbuseOverview("test-shop.myshopify.com");
 
   assert.equal(overview.fraudReviewQueue[0].shopifyOrderId, "Order pending sync");
+  assert.equal(overview.networkMatches[0].orderLabel, "Order pending sync");
 });

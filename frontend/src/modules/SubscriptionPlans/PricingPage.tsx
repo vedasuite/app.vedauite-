@@ -23,6 +23,7 @@ import type {
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useAppBridge } from "../../shopifyAppBridge";
+import { useAppState } from "../../hooks/useAppState";
 
 type BillingPlanCard = {
   planName: BillingPlanName;
@@ -234,6 +235,7 @@ function lifecycleLabel(value: BillingManagementState["billing"]["lifecycle"]) {
 
 export function PricingPage() {
   const { host } = useAppBridge();
+  const { refresh: refreshAppState } = useAppState();
   const {
     refresh,
     billingFlowState,
@@ -324,7 +326,9 @@ export function PricingPage() {
         }
 
         setManagement(response.result.state);
-        await refresh({ clearCache: true });
+        await refresh({ clearCache: true, syncAppState: true });
+        await refreshAppState().catch(() => undefined);
+        await loadBillingState();
         setToast(response.result.message);
       } catch (nextError) {
         setError(
@@ -353,7 +357,9 @@ export function PricingPage() {
       );
       setManagement(response.result);
       setConfirmCancel(false);
-      await refresh({ clearCache: true });
+      await refresh({ clearCache: true, syncAppState: true });
+      await refreshAppState().catch(() => undefined);
+      await loadBillingState();
       setToast("Subscription cancelled successfully.");
     } catch (nextError) {
       setError(
@@ -364,7 +370,7 @@ export function PricingPage() {
     } finally {
       setBusyAction(null);
     }
-  }, [refresh]);
+  }, [loadBillingState, refresh, refreshAppState]);
 
   const handleResumeApproval = useCallback(() => {
     if (management?.pendingIntent?.confirmationUrl) {
@@ -704,7 +710,7 @@ export function PricingPage() {
                           Choose Starter module
                         </Text>
                         <RadioButton
-                          label="Trust & Abuse Intelligence"
+                          label="Fraud Intelligence"
                           id="starter-trust-abuse"
                           name="starter-module"
                           checked={starterModule === "fraud"}

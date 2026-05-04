@@ -45,22 +45,20 @@ function request(server, pathname, options = {}) {
 test("pricing profit overview returns timeout code when compute exceeds route timeout", async () => {
   const routePath = path.resolve(__dirname, "../dist/routes/pricingProfitRoutes.js");
   const servicePath = path.resolve(__dirname, "../dist/services/pricingProfitService.js");
-  const subscriptionPath = path.resolve(
+  const featurePath = path.resolve(
     __dirname,
-    "../dist/services/subscriptionService.js"
+    "../dist/middleware/requireFeature.js"
   );
 
   resetModule(servicePath);
   require(servicePath).getPricingProfitOverview = async () =>
     new Promise(() => undefined);
-  resetModule(subscriptionPath);
-  require(subscriptionPath).getCurrentSubscription = async () => ({
-    planName: "PRO",
-    capabilities: {
-      "module.pricingProfit": true,
-    },
-  });
+  resetModule(featurePath);
+  require(featurePath).requireFeature = () => (_req, _res, next) => next();
 
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (handler, _timeout, ...args) =>
+    originalSetTimeout(handler, 5, ...args);
   resetModule(routePath);
   const { pricingProfitRouter } = require(routePath);
 
@@ -77,15 +75,16 @@ test("pricing profit overview returns timeout code when compute exceeds route ti
     assert.equal(response.statusCode, 504);
     assert.match(response.body, /PRICING_TIMEOUT/);
   } finally {
+    global.setTimeout = originalSetTimeout;
     await new Promise((resolve) => server.close(resolve));
   }
 });
 
 test("pricing profit overview returns access error when entitlement is denied", async () => {
   const routePath = path.resolve(__dirname, "../dist/routes/pricingProfitRoutes.js");
-  const capabilityPath = path.resolve(
+  const featurePath = path.resolve(
     __dirname,
-    "../dist/middleware/requireCapability.js"
+    "../dist/middleware/requireFeature.js"
   );
   const servicePath = path.resolve(__dirname, "../dist/services/pricingProfitService.js");
 
@@ -97,12 +96,12 @@ test("pricing profit overview returns access error when entitlement is denied", 
       description: "Should never be reached when access is denied.",
     },
   });
-  resetModule(capabilityPath);
-  require(capabilityPath).requireCapability = () => (_req, res) =>
+  resetModule(featurePath);
+  require(featurePath).requireFeature = () => (_req, res) =>
     res.status(403).json({
       error: {
-        code: "CAPABILITY_REQUIRED",
-        message: "Your current plan does not include module.pricingProfit.",
+        code: "FEATURE_LOCKED",
+        message: "This feature is not included in your current plan.",
       },
     });
 
@@ -120,7 +119,7 @@ test("pricing profit overview returns access error when entitlement is denied", 
   try {
     const response = await request(server, "/api/pricing-profit/overview");
     assert.equal(response.statusCode, 403);
-    assert.match(response.body, /CAPABILITY_REQUIRED/);
+    assert.match(response.body, /FEATURE_LOCKED/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -128,14 +127,14 @@ test("pricing profit overview returns access error when entitlement is denied", 
 
 test("pricing profit overview returns failure code when backend throws", async () => {
   const routePath = path.resolve(__dirname, "../dist/routes/pricingProfitRoutes.js");
-  const capabilityPath = path.resolve(
+  const featurePath = path.resolve(
     __dirname,
-    "../dist/middleware/requireCapability.js"
+    "../dist/middleware/requireFeature.js"
   );
   const servicePath = path.resolve(__dirname, "../dist/services/pricingProfitService.js");
 
-  resetModule(capabilityPath);
-  require(capabilityPath).requireCapability = () => (_req, _res, next) => next();
+  resetModule(featurePath);
+  require(featurePath).requireFeature = () => (_req, _res, next) => next();
 
   resetModule(servicePath);
   require(servicePath).getPricingProfitOverview = async () => {
