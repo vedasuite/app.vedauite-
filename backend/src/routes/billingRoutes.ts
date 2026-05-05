@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 import {
   normalizePlanName,
   normalizeStarterModule,
@@ -13,127 +13,11 @@ import {
   getBillingManagementState,
   requestBillingPlanChange,
 } from "../services/billingManagementService";
+import { buildCanonicalEntitlements } from "../services/subscriptionService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const billingRouter = Router();
 export const billingApiRouter = Router();
-
-function redirectTopLevel(res: Response, url: string) {
-  const safeUrl = JSON.stringify(url);
-  res.status(200).send(`<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VedaSuite billing redirect</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #f6f6f7;
-        color: #202223;
-      }
-      .shell {
-        width: min(520px, calc(100vw - 32px));
-        background: #ffffff;
-        border-radius: 18px;
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
-        padding: 32px 28px;
-        text-align: center;
-      }
-      .spinner {
-        width: 40px;
-        height: 40px;
-        margin: 0 auto 18px;
-        border-radius: 999px;
-        border: 4px solid #dfe3e8;
-        border-top-color: #008060;
-        animation: spin 0.9s linear infinite;
-      }
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-      h1 {
-        margin: 0 0 10px;
-        font-size: 22px;
-      }
-      p {
-        margin: 0 0 10px;
-        line-height: 1.5;
-        color: #5c5f62;
-      }
-      .actions {
-        margin-top: 18px;
-        display: inline-flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        justify-content: center;
-      }
-      a {
-        color: #ffffff;
-        background: #008060;
-        text-decoration: none;
-        border-radius: 10px;
-        padding: 10px 16px;
-        font-weight: 600;
-      }
-      .secondary {
-        background: #f1f2f4;
-        color: #202223;
-      }
-      .timeout {
-        display: none;
-        margin-top: 14px;
-      }
-    </style>
-    <script>
-      let redirected = false;
-      function continueToApp() {
-        if (redirected) return;
-        redirected = true;
-        if (window.top && window.top !== window) {
-          window.top.location.href = ${safeUrl};
-        } else {
-          window.location.href = ${safeUrl};
-        }
-      }
-      window.setTimeout(() => {
-        const timeout = document.getElementById("timeout-state");
-        if (timeout) {
-          timeout.style.display = "block";
-        }
-      }, 10000);
-      window.setTimeout(continueToApp, 150);
-      if (window.top && window.top !== window) {
-        window.top.location.href = ${safeUrl};
-      } else {
-        window.location.href = ${safeUrl};
-      }
-    </script>
-  </head>
-  <body>
-    <div class="shell">
-      <div class="spinner" aria-hidden="true"></div>
-      <h1>Returning to VedaSuite...</h1>
-      <p>Shopify has finished the billing step.</p>
-      <p>VedaSuite is restoring your embedded session and loading the updated plan.</p>
-      <div class="actions">
-        <a href=${safeUrl}>Continue</a>
-        <a class="secondary" href="javascript:void(0)" onclick="continueToApp()">Retry now</a>
-      </div>
-      <div class="timeout" id="timeout-state">
-        <p>Still working? Use Continue or Retry now to reopen the app.</p>
-      </div>
-    </div>
-  </body>
-</html>`);
-}
 
 function buildSubscriptionReturnUrl(params: {
   shop: string;
@@ -261,7 +145,20 @@ billingApiRouter.post("/confirm-return", async (req, res) => {
       shopDomain: shop,
       intentId: body.intentId ?? null,
     });
-    return res.json({ result });
+    const entitlements = buildCanonicalEntitlements({
+      planName: result.billing.planName,
+      starterModule: result.billing.starterModule,
+      accessActive: result.billing.accessActive,
+      verified: result.billing.verified,
+      trialActive:
+        result.billing.planName === "TRIAL" && result.billing.accessActive,
+    });
+    return res.json({
+      result,
+      subscription: result.subscription,
+      billingState: result.billing,
+      entitlements,
+    });
   } catch (error) {
     return res.status(400).json({
       error:
@@ -352,8 +249,7 @@ billingRouter.get("/start", async (req, res) => {
       return res.redirect(result.confirmationUrl);
     }
 
-    return redirectTopLevel(
-      res,
+    return res.redirect(
       buildSubscriptionReturnUrl({
         shop,
         host: host ?? null,
@@ -364,8 +260,7 @@ billingRouter.get("/start", async (req, res) => {
       })
     );
   } catch (error) {
-    return redirectTopLevel(
-      res,
+    return res.redirect(
       buildSubscriptionReturnUrl({
         shop,
         host: host ?? null,
@@ -398,8 +293,7 @@ billingRouter.get("/activate", async (req, res) => {
       intentId: intentId ?? null,
     });
 
-    return redirectTopLevel(
-      res,
+    return res.redirect(
       buildSubscriptionReturnUrl({
         shop,
         host: host ?? null,
@@ -410,8 +304,7 @@ billingRouter.get("/activate", async (req, res) => {
       })
     );
   } catch (error) {
-    return redirectTopLevel(
-      res,
+    return res.redirect(
       buildSubscriptionReturnUrl({
         shop,
         host: host ?? null,

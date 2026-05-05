@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { useOnboardingState } from "../../hooks/useOnboardingState";
@@ -190,7 +191,7 @@ type SyncActivitySummary = NonNullable<
 
 type DashboardPayload = {
   metrics: Metrics;
-  diagnostics: Diagnostics;
+  diagnostics: Diagnostics | null;
 };
 
 type DashboardRefreshResult = {
@@ -455,14 +456,14 @@ function buildDashboardSnapshot(
     syncHealth: {
       status:
         dashboardState?.syncHealth.status ??
-        payload.diagnostics.sync.syncHealth?.status ??
+        payload.diagnostics?.sync.syncHealth?.status ??
         payload.metrics.dataState ??
         null,
       title:
         dashboardState?.syncHealth.title ?? payload.metrics.summaryTitle ?? null,
       reason:
         dashboardState?.syncHealth.reason ??
-        payload.diagnostics.sync.syncHealth?.reason ??
+        payload.diagnostics?.sync.syncHealth?.reason ??
         payload.metrics.summaryDetail ??
         null,
     },
@@ -668,11 +669,17 @@ function deriveRefreshResult(args: {
 export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { host, shop } = useAppBridge();
+  const cachedDashboard = useMemo(
+    () => readModuleCache<DashboardPayload>("dashboard-overview") ?? null,
+    []
+  );
   const { subscription } = useSubscriptionPlan();
   const { onboarding, refresh: refreshOnboarding } = useOnboardingState();
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [metrics, setMetrics] = useState<Metrics | null>(cachedDashboard?.metrics ?? null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(
+    cachedDashboard?.diagnostics ?? null
+  );
+  const [loading, setLoading] = useState(!cachedDashboard?.metrics);
   const [syncing, setSyncing] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -687,25 +694,49 @@ export function DashboardPage() {
       }&returnTo=${encodeURIComponent("/app/dashboard")}`
     : null;
 
-  const loadDashboard = useCallback(async (): Promise<DashboardPayload> => {
-    const [metricsResponse, diagnosticsResponse] = await Promise.all([
-      embeddedShopRequest<Metrics>("/api/dashboard/metrics", { timeoutMs: 30000 }),
-      embeddedShopRequest<Diagnostics>("/api/shopify/diagnostics", {
-        timeoutMs: 20000,
-      }),
-    ]);
+  const fetchDashboardMetrics = useCallback(
+    async () =>
+      embeddedShopRequest<Metrics>("/api/dashboard/metrics", { timeoutMs: 20000 }),
+    []
+  );
 
-    return {
-      metrics: metricsResponse,
-      diagnostics: diagnosticsResponse,
-    };
-  }, []);
+  const fetchDashboardDiagnostics = useCallback(
+    async () =>
+      embeddedShopRequest<Diagnostics>("/api/shopify/diagnostics", {
+        timeoutMs: 12000,
+      }),
+    []
+  );
+
+  const loadDashboard = useCallback(
+    async (options?: { includeDiagnostics?: boolean }): Promise<DashboardPayload> => {
+      const metricsResponse = await fetchDashboardMetrics();
+      const diagnosticsResponse =
+        options?.includeDiagnostics === false
+          ? diagnostics ?? cachedDashboard?.diagnostics ?? null
+          : await fetchDashboardDiagnostics().catch(
+              () => diagnostics ?? cachedDashboard?.diagnostics ?? null
+            );
+
+      return {
+        metrics: metricsResponse,
+        diagnostics: diagnosticsResponse,
+      };
+    },
+    [cachedDashboard?.diagnostics, diagnostics, fetchDashboardDiagnostics, fetchDashboardMetrics]
+  );
 
   const applyDashboardPayload = useCallback((payload: DashboardPayload) => {
     setMetrics(payload.metrics);
-    setDiagnostics(payload.diagnostics);
+    if (payload.diagnostics) {
+      setDiagnostics(payload.diagnostics);
+    }
+    writeModuleCache("dashboard-overview", {
+      metrics: payload.metrics,
+      diagnostics: payload.diagnostics ?? diagnostics ?? null,
+    });
     setError(null);
-  }, []);
+  }, [diagnostics]);
 
   const loadVerifiedDashboardPayload = useCallback(
     async (
@@ -719,7 +750,7 @@ export function DashboardPage() {
       const jobFinishedAt = parseTimestamp(job?.finishedAt ?? null);
 
       for (let attempt = 0; attempt < 8; attempt += 1) {
-        const nextPayload = await loadDashboard();
+        const nextPayload = await loadDashboard({ includeDiagnostics: false });
         const nextSnapshot = buildDashboardSnapshot(nextPayload);
         const nextRefreshTime = parseTimestamp(
           nextPayload.metrics.lastRefreshedAt ?? null
@@ -742,18 +773,36 @@ export function DashboardPage() {
         await wait(1500);
       }
 
-      return loadDashboard();
+      return loadDashboard({ includeDiagnostics: false });
     },
     [loadDashboard]
   );
 
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
-    loadDashboard()
-      .then((payload) => {
+    if (!cachedDashboard?.metrics) {
+      setLoading(true);
+    }
+
+    fetchDashboardMetrics()
+      .then((metricsResponse) => {
         if (!mounted) return;
-        applyDashboardPayload(payload);
+        const basePayload = {
+          metrics: metricsResponse,
+          diagnostics: diagnostics ?? cachedDashboard?.diagnostics ?? null,
+        };
+        applyDashboardPayload(basePayload);
+        setLoading(false);
+
+        return fetchDashboardDiagnostics()
+          .then((diagnosticsResponse) => {
+            if (!mounted) return;
+            applyDashboardPayload({
+              metrics: metricsResponse,
+              diagnostics: diagnosticsResponse,
+            });
+          })
+          .catch(() => undefined);
       })
       .catch((nextError) => {
         if (!mounted) return;
@@ -762,16 +811,20 @@ export function DashboardPage() {
             ? nextError.message
             : "Unable to load the dashboard."
         );
-      })
-      .finally(() => {
-        if (!mounted) return;
         setLoading(false);
       });
 
     return () => {
       mounted = false;
     };
-  }, [applyDashboardPayload, loadDashboard]);
+  }, [
+    applyDashboardPayload,
+    cachedDashboard?.diagnostics,
+    cachedDashboard?.metrics,
+    diagnostics,
+    fetchDashboardDiagnostics,
+    fetchDashboardMetrics,
+  ]);
 
   const pollSyncJob = useCallback(
     async (jobId?: string | null) => {

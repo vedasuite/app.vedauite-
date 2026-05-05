@@ -17,7 +17,7 @@ export function useAppState() {
         errorMessage: null,
         reconnectUrl: null,
       },
-      refresh: async () => {
+      refresh: async (_options?: { silent?: boolean }) => {
         throw new Error("App state context is not available.");
       },
     };

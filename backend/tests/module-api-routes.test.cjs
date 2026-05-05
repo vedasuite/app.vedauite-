@@ -762,10 +762,10 @@ test("billing activation callback confirms the billing intent and redirects back
       server,
       "/billing/activate?shop=test-shop.myshopify.com&intentId=intent-1&host=embedded-host"
     );
-    assert.equal(response.statusCode, 200);
-    assert.match(response.body, /billingResult=confirmed/);
-    assert.match(response.body, /intentId=intent-1/);
-    assert.match(response.body, /plan=PRO/);
+    assert.equal(response.statusCode, 302);
+    assert.match(response.headers.location ?? "", /billingResult=confirmed/);
+    assert.match(response.headers.location ?? "", /intentId=intent-1/);
+    assert.match(response.headers.location ?? "", /plan=PRO/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

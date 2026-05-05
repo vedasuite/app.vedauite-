@@ -17,8 +17,8 @@ import {
 import { useAppState } from "../hooks/useAppState";
 
 const SUBSCRIPTION_CACHE_KEY = "subscription-plan";
-const BILLING_CONFIRMATION_TIMEOUT_MS = 45000;
-const BILLING_CONFIRMATION_POLL_MS = 1500;
+const BILLING_CONFIRMATION_TIMEOUT_MS = 12000;
+const BILLING_CONFIRMATION_POLL_MS = 1000;
 
 export type BillingFlowState =
   | "IDLE"
@@ -121,6 +121,20 @@ export function SubscriptionProvider({ children }: Props) {
     return nextSubscription;
   }, []);
 
+  const commitResolvedState = useCallback(
+    (payload: {
+      subscription?: SubscriptionInfo | null;
+      billingState?: BillingState | null;
+      entitlements?: EntitlementState | null;
+    }) => {
+      const nextSubscription = normalizeSubscriptionInfo(payload.subscription);
+      setBillingState(normalizeBillingState(payload.billingState));
+      setEntitlements(normalizeEntitlementState(payload.entitlements));
+      return commitSubscription(nextSubscription, { clearCache: true });
+    },
+    [commitSubscription]
+  );
+
   const confirmBillingReturn = useCallback(async () => {
     if (billingParams.billingResult !== "confirmed") {
       return;
@@ -136,13 +150,40 @@ export function SubscriptionProvider({ children }: Props) {
       setBillingFlowState("CONFIRMING_BACKEND_STATE");
 
       if (billingParams.intentId) {
-        await embeddedShopRequest("/api/billing/confirm-return", {
+        const confirmation = await embeddedShopRequest<{
+          result?: unknown;
+          subscription?: SubscriptionInfo | null;
+          billingState?: BillingState | null;
+          entitlements?: EntitlementState | null;
+        }>("/api/billing/confirm-return", {
           method: "POST",
           body: {
             intentId: billingParams.intentId,
           },
           timeoutMs: 45000,
-        }).catch(() => undefined);
+        });
+
+        if (confirmation.subscription) {
+          const confirmedSubscription = commitResolvedState(confirmation);
+          const planMatches =
+            !billingParams.expectedPlan ||
+            confirmedSubscription.planName === billingParams.expectedPlan;
+          const starterMatches =
+            billingParams.expectedPlan !== "STARTER" ||
+            !billingParams.expectedStarterModule ||
+            confirmedSubscription.starterModule ===
+              billingParams.expectedStarterModule;
+
+          if (planMatches && starterMatches) {
+            await refreshAppState({ silent: true }).catch(() => undefined);
+            setBillingFlowState("CONFIRMED");
+            setBillingMessage(
+              billingParams.billingMessageFromUrl ?? "Plan updated successfully"
+            );
+            cleanupBillingQueryParams();
+            return;
+          }
+        }
       }
 
       const startedAt = Date.now();
@@ -158,7 +199,7 @@ export function SubscriptionProvider({ children }: Props) {
 
         if (planMatches && starterMatches) {
           commitSubscription(nextSubscription, { clearCache: true });
-          await refreshAppState().catch(() => undefined);
+          await refreshAppState({ silent: true }).catch(() => undefined);
           setBillingFlowState("CONFIRMED");
           setBillingMessage(
             billingParams.billingMessageFromUrl ?? "Plan updated successfully"
@@ -192,15 +233,17 @@ export function SubscriptionProvider({ children }: Props) {
     billingParams.expectedPlan,
     billingParams.expectedStarterModule,
     billingParams.intentId,
+    commitResolvedState,
     commitSubscription,
     fetchSubscription,
+    refreshAppState,
   ]);
 
   const refresh = useCallback(
     async (options?: { clearCache?: boolean; syncAppState?: boolean }) => {
       const nextSubscription = await fetchSubscription();
       if (options?.syncAppState) {
-        await refreshAppState().catch(() => undefined);
+        await refreshAppState({ silent: true }).catch(() => undefined);
       }
       return commitSubscription(nextSubscription, options);
     },

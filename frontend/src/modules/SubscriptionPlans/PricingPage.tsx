@@ -342,7 +342,7 @@ export function PricingPage() {
 
         setManagement(response.result.state);
         await refresh({ clearCache: true, syncAppState: true });
-        await refreshAppState().catch(() => undefined);
+        await refreshAppState({ silent: true }).catch(() => undefined);
         await loadBillingState();
         setToast(response.result.message);
       } catch (nextError) {
@@ -383,7 +383,7 @@ export function PricingPage() {
       setManagement(response.result);
       setConfirmCancel(false);
       await refresh({ clearCache: true, syncAppState: true });
-      await refreshAppState().catch(() => undefined);
+      await refreshAppState({ silent: true }).catch(() => undefined);
       await loadBillingState();
       setToast("Subscription cancelled successfully.");
     } catch (nextError) {

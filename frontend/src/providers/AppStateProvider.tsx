@@ -150,7 +150,7 @@ type AppStateContextValue = {
   status: "loading" | "ready" | "error";
   error: string | null;
   bootstrap: BootstrapState;
-  refresh: () => Promise<CanonicalAppState>;
+  refresh: (options?: { silent?: boolean }) => Promise<CanonicalAppState>;
 };
 
 const CACHE_KEY = "app-state";
@@ -228,25 +228,34 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<BootstrapState>(INITIAL_BOOTSTRAP_STATE);
   const requestIdRef = useRef(0);
+  const appStateRef = useRef<CanonicalAppState | null>(cachedState);
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
+
+  const refresh = useCallback(async (options?: { silent?: boolean }) => {
     const requestId = ++requestIdRef.current;
     const { host, shop } = getEmbeddedContext();
+    const silent = options?.silent === true && !!appStateRef.current;
 
     logBootstrap("bootstrap.start");
-    setStatus("loading");
-    setError(null);
-    setBootstrap({
-      status: "validating_shopify_params",
-      shop: shop || null,
-      host: host || null,
-      errorCode: null,
-      errorMessage: null,
-      reconnectUrl: null,
-    });
+    if (!silent) {
+      setStatus("loading");
+      setError(null);
+      setBootstrap({
+        status: "validating_shopify_params",
+        shop: shop || null,
+        host: host || null,
+        errorCode: null,
+        errorMessage: null,
+        reconnectUrl: null,
+      });
+    }
     logBootstrap("shopify_params.parsed", {
       hostPresent: !!host,
       shop,
+      silent,
     });
 
     if (!shop) {
@@ -267,24 +276,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       throw new Error(errorMessage);
     }
 
-    setBootstrap({
-      status: "loading_session",
-      shop,
-      host: host || null,
-      errorCode: null,
-      errorMessage: null,
-      reconnectUrl: null,
-    });
+    if (!silent) {
+      setBootstrap({
+        status: "loading_session",
+        shop,
+        host: host || null,
+        errorCode: null,
+        errorMessage: null,
+        reconnectUrl: null,
+      });
+    }
     logBootstrap("session.loading", { shop, hostPresent: !!host });
 
-    setBootstrap({
-      status: "loading_installation_record",
-      shop,
-      host: host || null,
-      errorCode: null,
-      errorMessage: null,
-      reconnectUrl: null,
-    });
+    if (!silent) {
+      setBootstrap({
+        status: "loading_installation_record",
+        shop,
+        host: host || null,
+        errorCode: null,
+        errorMessage: null,
+        reconnectUrl: null,
+      });
+    }
     logBootstrap("installation.fetch.start", { shop });
 
     try {
