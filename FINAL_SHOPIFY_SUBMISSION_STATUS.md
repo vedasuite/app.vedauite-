@@ -1,6 +1,6 @@
 # Final Shopify Submission Status
 
-Timestamp: `2026-05-05T17:20:53.6046755+05:30`
+Timestamp: `2026-05-05T18:26:00+05:30`
 
 ## Latest code state
 
@@ -40,6 +40,8 @@ Executed directly with `node tests\\*.test.cjs` because `node --test` in this lo
 - `shopify-routes-auth.test.cjs`: PASS
 - `trustAbuseOverview.test.cjs`: PASS
 - `frontend/tests/backendModuleAccess.test.cjs`: PASS
+- `backend/tests/starterModuleRoutes.test.cjs`: PASS
+- `frontend/tests/starterModuleMutation.test.cjs`: PASS
 
 ## Starter switching verification
 
@@ -48,9 +50,9 @@ Executed directly with `node tests\\*.test.cjs` because `node --test` in this lo
 - Starter competitor path: PASS
   - Verified by `billing-capabilities.test.cjs` and `feature-gating.test.cjs`
 - Starter fraud -> competitor switch: PASS
-  - Verified by canonical entitlement swap test and frontend backend-entitlement helper test
+  - Verified by canonical entitlement swap test, starter-module route test, and frontend local-mutation decision test
 - Starter competitor -> fraud switch: PASS
-  - Verified by canonical entitlement swap test and frontend backend-entitlement helper test
+  - Verified by canonical entitlement swap test, starter-module route test, and frontend local-mutation decision test
 
 ## Production deployment readiness
 

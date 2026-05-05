@@ -174,7 +174,7 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       ? "failed"
       : "ready";
 
-  logEvent("info", "app_state.entitlements", {
+  logEvent("info", "app_state.entitlements_returned", {
     shop: shopDomain,
     plan: storeReadiness.billing.plan,
     starterModule: storeReadiness.billing.starterModule,

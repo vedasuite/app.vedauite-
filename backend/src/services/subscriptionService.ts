@@ -1012,6 +1012,12 @@ export async function updateStarterModuleSelection(
   shopDomain: string,
   starterModule: StarterModule
 ) {
+  logEvent("info", "starter_module.update_requested", {
+    shop: shopDomain,
+    requestedStarterModule: starterModule,
+    normalizedStarterModule: normalizeStarterModule(starterModule),
+  });
+
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
     ...storeWithSubscriptionArgs,
@@ -1063,6 +1069,12 @@ export async function updateStarterModuleSelection(
     previousStarterModule: store.subscription.starterModule,
     nextStarterModule: normalizedStarterModule,
     billingStatus: updated.billingStatus,
+  });
+
+  logEvent("info", "starter_module.db_updated", {
+    shop: shopDomain,
+    savedPlan: "STARTER",
+    savedStarterModule: normalizedStarterModule,
   });
 
   logSubscriptionSaved({

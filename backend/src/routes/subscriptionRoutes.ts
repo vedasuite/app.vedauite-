@@ -5,13 +5,16 @@ import {
   cancelSubscription,
   downgradeToTrial,
   getCurrentSubscription,
+  resolveEntitlements,
   resolveBillingState,
   updateStarterModuleSelection,
 } from "../services/subscriptionService";
+import { logEvent } from "../services/observabilityService";
 import { getBillingManagementState } from "../services/billingManagementService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const subscriptionRouter = Router();
+export const subscriptionDebugRouter = Router();
 
 subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), async (req, res) => {
   const shop = resolveAuthenticatedShop(req);
@@ -63,6 +66,41 @@ subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSele
   }
 
   const subscription = await updateStarterModuleSelection(shop, starterModule);
-  return res.json({ subscription });
+  const entitlements = await resolveEntitlements(shop);
+
+  logEvent("info", "starter_module.entitlements_returned", {
+    shop,
+    plan: entitlements.plan,
+    starterModule: entitlements.starterModule,
+    enabledModules: entitlements.enabledModules,
+    lockedModules: entitlements.lockedModules,
+  });
+
+  return res.json({
+    plan: entitlements.plan,
+    starterModule: entitlements.starterModule,
+    enabledModules: entitlements.enabledModules,
+    lockedModules: entitlements.lockedModules,
+    subscription,
+  });
+});
+
+subscriptionDebugRouter.get("/entitlements", requireCapability("billing.planManagement"), async (req, res) => {
+  const shop = resolveAuthenticatedShop(req);
+  if (!shop) {
+    return res.status(400).json({ error: "Missing shop." });
+  }
+
+  const billingState = await resolveBillingState(shop);
+  const entitlements = await resolveEntitlements(shop);
+
+  return res.json({
+    shop,
+    dbPlan: billingState.dbPlanName,
+    dbStarterModule: billingState.starterModule,
+    normalizedStarterModule: entitlements.starterModule,
+    enabledModules: entitlements.enabledModules,
+    lockedModules: entitlements.lockedModules,
+  });
 });
 
