@@ -7,11 +7,11 @@ const helperPath = pathToFileURL(
   path.resolve(__dirname, "../src/modules/SubscriptionPlans/starterModuleMutation.js")
 ).href;
 
-test("active starter competitor selection uses local starter-module mutation path", async () => {
-  const { shouldUseStarterModuleMutation } = await import(helperPath);
+test("active starter competitor selection requires Shopify billing approval", async () => {
+  const { shouldRequireStarterModuleBillingApproval } = await import(helperPath);
 
   assert.equal(
-    shouldUseStarterModuleMutation({
+    shouldRequireStarterModuleBillingApproval({
       currentPlanName: "STARTER",
       currentActive: true,
       requestedPlanName: "STARTER",
@@ -22,11 +22,11 @@ test("active starter competitor selection uses local starter-module mutation pat
   );
 });
 
-test("non-starter plan changes continue to use billing change-plan path", async () => {
-  const { shouldUseStarterModuleMutation } = await import(helperPath);
+test("non-starter plan changes do not trigger starter-specific reapproval helper", async () => {
+  const { shouldRequireStarterModuleBillingApproval } = await import(helperPath);
 
   assert.equal(
-    shouldUseStarterModuleMutation({
+    shouldRequireStarterModuleBillingApproval({
       currentPlanName: "GROWTH",
       currentActive: true,
       requestedPlanName: "STARTER",

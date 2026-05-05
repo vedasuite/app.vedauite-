@@ -7,9 +7,7 @@ import {
   getCurrentSubscription,
   resolveEntitlements,
   resolveBillingState,
-  updateStarterModuleSelection,
 } from "../services/subscriptionService";
-import { logEvent } from "../services/observabilityService";
 import { getBillingManagementState } from "../services/billingManagementService";
 import { resolveAuthenticatedShop } from "./routeShop";
 
@@ -55,33 +53,16 @@ subscriptionRouter.post("/downgrade-to-trial", requireCapability("billing.downgr
 });
 
 subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSelectionStarter"), async (req, res) => {
-  const body = req.body as {
-    starterModule?: "fraud" | "competitor";
-  };
   const shop = resolveAuthenticatedShop(req);
-  const starterModule = body.starterModule;
-
-  if (!shop || !starterModule) {
-    return res.status(400).json({ error: "Missing shop or starter module." });
+  if (!shop) {
+    return res.status(400).json({ error: "Missing shop." });
   }
-
-  const subscription = await updateStarterModuleSelection(shop, starterModule);
-  const entitlements = await resolveEntitlements(shop);
-
-  logEvent("info", "starter_module.entitlements_returned", {
-    shop,
-    plan: entitlements.plan,
-    starterModule: entitlements.starterModule,
-    enabledModules: entitlements.enabledModules,
-    lockedModules: entitlements.lockedModules,
-  });
-
-  return res.json({
-    plan: entitlements.plan,
-    starterModule: entitlements.starterModule,
-    enabledModules: entitlements.enabledModules,
-    lockedModules: entitlements.lockedModules,
-    subscription,
+  return res.status(409).json({
+    error: {
+      code: "STARTER_MODULE_REQUIRES_BILLING_APPROVAL",
+      message:
+        "Changing the Starter module now requires Shopify billing approval. Refresh the billing page and confirm the Starter module change there.",
+    },
   });
 });
 

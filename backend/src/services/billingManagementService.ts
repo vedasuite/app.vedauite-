@@ -4,7 +4,6 @@ import {
   getPlanPrice,
   normalizePlanName,
   normalizeStarterModule,
-  normalizeStarterModuleLabel,
   type BillingPlanName,
   type CurrentSubscription,
   type StarterModule,
@@ -19,7 +18,6 @@ import {
   reconcileBillingState,
   reconcileStoreSubscriptionFromWebhook,
   resolveBillingState,
-  updateStarterModuleSelection,
 } from "./subscriptionService";
 import { logEvent } from "./observabilityService";
 
@@ -245,6 +243,10 @@ function buildReturnPath(returnPath?: string | null) {
 }
 
 function buildActionType(current: CurrentSubscription, requestedPlan: BillingPlanName): BillingActionType {
+  if (current.planName === requestedPlan && requestedPlan === "STARTER") {
+    return "update_starter_module";
+  }
+
   if (current.planName === requestedPlan) {
     return "switch";
   }
@@ -362,21 +364,15 @@ export async function requestBillingPlanChange(input: {
     getCurrentSubscription(input.shopDomain),
   ]);
 
-  if (current.planName === requestedPlan && current.active) {
-    if (
+  if (
+    current.planName === requestedPlan &&
+    current.active &&
+    !(
       requestedPlan === "STARTER" &&
       normalizedStarterModule &&
       current.starterModule !== normalizedStarterModule
-    ) {
-      await updateStarterModuleSelection(input.shopDomain, normalizedStarterModule);
-      await reconcileBillingState(input.shopDomain).catch(() => null);
-      return {
-        outcome: "UPDATED",
-        message: `Starter now uses ${normalizeStarterModuleLabel(normalizedStarterModule)}.`,
-        state: await getBillingManagementState(input.shopDomain),
-      };
-    }
-
+    )
+  ) {
     return {
       outcome: "NOOP",
       message: `${requestedPlan} is already the active plan.`,
@@ -443,7 +439,7 @@ export async function requestBillingPlanChange(input: {
       name: `VedaSuite AI - ${requestedPlan}`,
       price: getPlanPrice(requestedPlan),
       returnUrl: returnUrl.toString(),
-      trialDays: requestedPlan === "STARTER" ? env.billing.trialDays : 0,
+      trialDays: 0,
       test: env.billing.testMode,
     });
 

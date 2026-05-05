@@ -24,7 +24,7 @@ import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { useAppState } from "../../hooks/useAppState";
-import { shouldUseStarterModuleMutation } from "./starterModuleMutation";
+import { shouldRequireStarterModuleBillingApproval } from "./starterModuleMutation";
 
 type BillingPlanCard = {
   planName: BillingPlanName;
@@ -108,14 +108,6 @@ type BillingChangeResponse = {
         pendingIntent: BillingManagementState["pendingIntent"];
         state: BillingManagementState;
       };
-};
-
-type StarterModuleMutationResponse = {
-  plan: BillingPlanName;
-  starterModule: StarterModule | null;
-  enabledModules: string[];
-  lockedModules: string[];
-  subscription: SubscriptionInfo;
 };
 
 type PlanCatalogEntry = {
@@ -313,36 +305,14 @@ export function PricingPage() {
       setError(null);
 
       try {
-        if (
-          shouldUseStarterModuleMutation({
+        const starterSwitchRequiresApproval =
+          shouldRequireStarterModuleBillingApproval({
             currentPlanName: management?.subscription.planName,
             currentActive: management?.subscription.active,
             requestedPlanName: planName,
             currentStarterModule: management?.subscription.starterModule ?? null,
             requestedStarterModule: starterModule,
-          })
-        ) {
-          const response = await embeddedShopRequest<StarterModuleMutationResponse>(
-            "/api/subscription/starter-module",
-            {
-              method: "POST",
-              body: {
-                starterModule,
-              },
-              timeoutMs: 45000,
-            }
-          );
-
-          await refresh({ clearCache: true, syncAppState: true });
-          await refreshAppState().catch(() => undefined);
-          const nextBillingState = await loadBillingState();
-          setManagement(nextBillingState);
-          setStarterModule(response.starterModule ?? starterModule);
-          setToast(
-            `Starter now uses ${starterLabel(response.starterModule ?? starterModule)}.`
-          );
-          return;
-        }
+          });
 
         const response = await embeddedShopRequest<BillingChangeResponse>(
           "/api/billing/change-plan",
@@ -360,6 +330,11 @@ export function PricingPage() {
 
         if (response.result.outcome === "REDIRECT_REQUIRED") {
           setManagement(response.result.state);
+          if (starterSwitchRequiresApproval) {
+            setToast(
+              `Confirm the ${starterLabel(starterModule)} Starter module in Shopify billing to activate it.`
+            );
+          }
           startBillingRedirect();
           redirectTopLevel(response.result.confirmationUrl);
           return;

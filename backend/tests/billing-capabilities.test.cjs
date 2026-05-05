@@ -82,6 +82,26 @@ test("switching starter modules swaps enabled modules immediately", async () => 
   assert.ok(competitorStarter.lockedModules.includes("fraud"));
 });
 
+test("trial and none plans keep paid modules locked until Shopify billing is approved", async () => {
+  const { resolveEntitlements } = require(capabilitiesPath);
+
+  const nonePlan = resolveEntitlements({
+    plan: "NONE",
+    billingStatus: "INACTIVE",
+    starterModule: null,
+  });
+  const trialPlan = resolveEntitlements({
+    plan: "TRIAL",
+    billingStatus: null,
+    starterModule: null,
+  });
+
+  assert.deepEqual(nonePlan.enabledModules, []);
+  assert.deepEqual(trialPlan.enabledModules, []);
+  assert.ok(nonePlan.lockedModules.includes("fraud"));
+  assert.ok(trialPlan.lockedModules.includes("competitor"));
+});
+
 test("growth and pro capabilities separate baseline access from premium access", async () => {
   const {
     buildCapabilities,
