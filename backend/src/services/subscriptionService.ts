@@ -15,7 +15,6 @@ import {
   resolveEntitlements as resolveEntitlementsForPlan,
   normalizeStarterModule,
   normalizeStarterModuleLabel,
-  STARTER_MODULE_SWITCH_COOLDOWN_HOURS,
   type BillingPlanName,
   type CurrentSubscription,
   type StarterModule,
@@ -463,15 +462,8 @@ function buildSubscriptionPayload(input: {
 }
 
 function getStarterModuleSwitchAvailableAt(moduleSwitchedAt?: Date | null) {
-  if (!moduleSwitchedAt) {
-    return null;
-  }
-
-  const availableAt = new Date(moduleSwitchedAt);
-  availableAt.setHours(
-    availableAt.getHours() + STARTER_MODULE_SWITCH_COOLDOWN_HOURS
-  );
-  return availableAt;
+  void moduleSwitchedAt;
+  return null;
 }
 
 async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreWithSubscription>) {
@@ -1031,20 +1023,6 @@ export async function updateStarterModuleSelection(
   const normalizedStarterModule = normalizeStarterModule(starterModule);
   if (!normalizedStarterModule) {
     throw new Error("Invalid Starter module selection.");
-  }
-
-  const availableAt = getStarterModuleSwitchAvailableAt(
-    store.subscription.moduleSwitchedAt
-  );
-
-  if (
-    availableAt &&
-    availableAt.getTime() > Date.now() &&
-    store.subscription.starterModule !== normalizedStarterModule
-  ) {
-    throw new Error(
-      `Starter module can be changed again after ${availableAt.toISOString()}.`
-    );
   }
 
   const updated = await prisma.storeSubscription.update({
