@@ -18,8 +18,10 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
+import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { resolveBackendEnabledModules, resolveBackendPlan } from "../../lib/backendModuleAccess";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
@@ -45,6 +47,7 @@ type SettingsSyncState = "live" | "cached" | "fallback";
 
 export function SettingsPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
+  const { appState } = useAppState();
   const { subscription } = useSubscriptionPlan();
   const cachedSettings = readModuleCache<Settings>(SETTINGS_CACHE_KEY);
   const initialSettings = cachedSettings ?? fallbackSettings;
@@ -63,11 +66,10 @@ export function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
-  const pricingProfitEnabled = !!(
-    subscription?.enabledModules?.pricing ?? subscription?.enabledModules?.pricingProfit
-  );
-  const fullProfitEngineEnabled = !!subscription?.featureAccess?.fullProfitEngine;
-  const competitorEnabled = !!subscription?.enabledModules?.competitor;
+  const backendModules = resolveBackendEnabledModules(appState);
+  const pricingProfitEnabled = backendModules.pricing;
+  const fullProfitEngineEnabled = backendModules.profit;
+  const competitorEnabled = backendModules.competitor;
   const connectedDomains = domainsInput
     .split(",")
     .map((domain) => domain.trim())
@@ -178,7 +180,7 @@ export function SettingsPage() {
       ? "Pricing automation can be more responsive, but still needs merchant guardrails."
       : "Balanced pricing posture is best for controlled approval-led automation."
     : "Pricing & Profit is not active on this plan, so AI pricing controls stay view-only.";
-  const activePlanLabel = subscription?.planName ?? "NONE";
+  const activePlanLabel = resolveBackendPlan(appState) ?? subscription?.planName ?? "NONE";
   const activePlanTone =
     activePlanLabel === "PRO"
       ? "success"

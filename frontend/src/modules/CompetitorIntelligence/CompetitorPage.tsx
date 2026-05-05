@@ -19,8 +19,10 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleGate } from "../../components/ModuleGate";
+import { useAppState } from "../../hooks/useAppState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
@@ -321,6 +323,7 @@ function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" 
 export function CompetitorPage() {
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
+  const { appState } = useAppState();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
   const [rows, setRows] = useState<CompetitorRow[]>(
     readModuleCache<CompetitorRow[]>("competitor-rows") ?? []
@@ -341,7 +344,7 @@ export function CompetitorPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [domainsInput, setDomainsInput] = useState("");
 
-  const allowed = !!subscription?.enabledModules?.competitor;
+  const allowed = isBackendModuleEnabled(appState, "competitor");
   const canSeeWeeklyReports =
     subscription?.capabilities?.["competitor.weeklyReports"] ?? false;
   const focus = searchParams.get("focus");
@@ -547,6 +550,7 @@ export function CompetitorPage() {
       subtitle="Track competitor pricing, promotions, stock posture, and response opportunities across key domains."
       requiredPlan="Starter, Growth, or Pro"
       allowed={allowed}
+      featureKey="competitor"
     >
       <Page
         title="Competitor Intelligence"

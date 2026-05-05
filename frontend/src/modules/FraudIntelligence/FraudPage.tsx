@@ -18,8 +18,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
+import { ModuleGate } from "../../components/ModuleGate";
+import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
+import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 
 type OrderRow = {
@@ -100,6 +103,7 @@ const resourceName = {
 
 export function FraudPage() {
   const api = useApiClient();
+  const { appState } = useAppState();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getOrderUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
@@ -111,8 +115,15 @@ export function FraudPage() {
   const [activeOrder, setActiveOrder] = useState<OrderRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
+  const allowed = isBackendModuleEnabled(appState, "fraud");
 
   const loadOrders = () => {
+    if (!allowed) {
+      setOrders([]);
+      setOverview(null);
+      return;
+    }
+
     Promise.all([
       api.get<{ orders: OrderRow[] }>("/api/fraud/orders"),
       api.get<{ overview: FraudOverview }>("/api/fraud/overview"),
@@ -131,7 +142,7 @@ export function FraudPage() {
 
   useEffect(() => {
     loadOrders();
-  }, [api]);
+  }, [allowed, api]);
 
   useEffect(() => {
     if (focus === "signals") {
@@ -226,10 +237,17 @@ export function FraudPage() {
   };
 
   return (
-    <Page
+    <ModuleGate
       title="Fraud & Return Abuse Intelligence"
       subtitle="Review payment risk, return abuse, chargeback exposure, and shopper trust signals."
+      requiredPlan="Starter, Growth, or Pro"
+      allowed={allowed}
+      featureKey="fraud"
     >
+      <Page
+        title="Fraud & Return Abuse Intelligence"
+        subtitle="Review payment risk, return abuse, chargeback exposure, and shopper trust signals."
+      >
       <Layout>
         <Layout.Section>
           <Banner title="Fraud queue is active" tone="warning">
@@ -651,7 +669,8 @@ export function FraudPage() {
         </Modal.Section>
       </Modal>
 
-      {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
-    </Page>
+        {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
+      </Page>
+    </ModuleGate>
   );
 }

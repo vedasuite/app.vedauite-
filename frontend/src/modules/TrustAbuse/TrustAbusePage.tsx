@@ -17,9 +17,10 @@ import {
 } from "@shopify/polaris";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import { useAppState } from "../../hooks/useAppState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
-import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
 
 type Overview = {
   subscription: { featureAccess: { supportCopilot: boolean; evidencePackExport: boolean } };
@@ -118,7 +119,7 @@ function EmptyState({ text }: { text: string }) {
 }
 
 export function TrustAbusePage() {
-  const { subscription } = useSubscriptionPlan();
+  const { appState } = useAppState();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getOrderUrl } = useShopifyAdminLinks();
   const [overview, setOverview] = useState<Overview>(createEmptyOverview());
@@ -128,9 +129,7 @@ export function TrustAbusePage() {
   const [activeOrder, setActiveOrder] = useState<Overview["fraudReviewQueue"][number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const evidenceSectionRef = useRef<HTMLDivElement | null>(null);
-  const allowed = !!(
-    subscription?.enabledModules?.fraud ?? subscription?.enabledModules?.trustAbuse
-  );
+  const allowed = isBackendModuleEnabled(appState, "fraud");
 
   const loadOverview = useCallback(async () => {
     if (!allowed) {

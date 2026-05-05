@@ -5,6 +5,11 @@ import { VedaLogo } from "../brand/VedaLogo";
 import { useAppState } from "../hooks/useAppState";
 import { useEmbeddedNavigation } from "../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
+import {
+  resolveBackendEnabledModules,
+  resolveBackendPlan,
+  resolveBackendStarterModule,
+} from "../lib/backendModuleAccess";
 import "./app-frame.css";
 
 type Props = {
@@ -134,36 +139,15 @@ export function AppFrame({ children }: Props) {
 
   const installState = appState?.install ?? null;
   const activePlan =
-    entitlements?.planName ?? appState?.billing.planName ?? subscription?.planName ?? "NONE";
-  const moduleStatus = {
-    fraud:
-      entitlements?.modules.fraud ??
-      appState?.entitlements.fraud ??
-      subscription?.enabledModules?.fraud ??
-      subscription?.enabledModules?.trustAbuse ??
-      false,
-    competitor:
-      entitlements?.modules.competitor ??
-      appState?.entitlements.competitor ??
-      subscription?.enabledModules?.competitor ??
-      false,
-    pricing:
-      entitlements?.modules.pricing ??
-      appState?.entitlements.pricing ??
-      subscription?.enabledModules?.pricing ??
-      subscription?.enabledModules?.pricingProfit ??
-      false,
-    reports:
-      entitlements?.modules.reports ??
-      appState?.entitlements.reports ??
-      subscription?.enabledModules?.reports ??
-      false,
-    settings:
-      entitlements?.modules.settings ??
-      appState?.entitlements.settings ??
-      subscription?.enabledModules?.settings ??
-      false,
-  };
+    resolveBackendPlan(appState) ??
+    entitlements?.planName ??
+    subscription?.planName ??
+    "NONE";
+  const moduleStatus = resolveBackendEnabledModules(appState);
+  const activeStarterModule =
+    resolveBackendStarterModule(appState) ??
+    entitlements?.starterModule ??
+    null;
 
   const dismissToast = useCallback(() => setToast(null), []);
 
@@ -218,12 +202,9 @@ export function AppFrame({ children }: Props) {
                 Commerce intelligence operating system for Shopify
               </p>
               <div className="vs-plan-pill">{activePlan} PLAN</div>
-              {activePlan === "STARTER" &&
-              (entitlements?.starterModule ?? subscription?.starterModule) ? (
+              {activePlan === "STARTER" && activeStarterModule ? (
                 <p className="vs-brand__subtitle">
-                  {starterModuleLabel(
-                    entitlements?.starterModule ?? subscription?.starterModule
-                  )}{" "}
+                  {starterModuleLabel(activeStarterModule)}{" "}
                   ACTIVE
                 </p>
               ) : null}

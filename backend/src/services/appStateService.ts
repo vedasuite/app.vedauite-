@@ -161,12 +161,30 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
 
   const install = deriveInstallState(health);
   const connection = deriveConnectionState(health);
+  const enabledModules = storeReadiness.billing.enabledModules;
+  const lockedModules = Object.entries(enabledModules)
+    .filter(([key, value]) =>
+      ["fraud", "competitor", "pricing", "profit"].includes(key) && !value
+    )
+    .map(([key]) => key);
   const appStatus =
     install.status !== "installed" || connection.status === "failed"
       ? "action_required"
       : dashboard.dashboardState.syncHealth.status === "FAILED"
       ? "failed"
       : "ready";
+
+  logEvent("info", "app_state.entitlements", {
+    shop: shopDomain,
+    plan: storeReadiness.billing.plan,
+    starterModule: storeReadiness.billing.starterModule,
+    enabledModules: Object.entries(enabledModules)
+      .filter(([key, value]) =>
+        ["fraud", "competitor", "pricing", "profit"].includes(key) && value
+      )
+      .map(([key]) => key),
+    lockedModules,
+  });
 
   return {
     appStatus,
@@ -193,14 +211,14 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       nextRoute: onboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding",
     },
     entitlements: {
-      fraud: subscription.enabledModules.fraud,
-      trustAbuse: subscription.enabledModules.trustAbuse,
-      competitor: subscription.enabledModules.competitor,
-      pricing: subscription.enabledModules.pricing,
-      pricingProfit: subscription.enabledModules.pricingProfit,
-      profit: subscription.enabledModules.profit,
-      reports: subscription.enabledModules.reports,
-      settings: subscription.enabledModules.settings,
+      fraud: enabledModules.fraud,
+      trustAbuse: enabledModules.fraud,
+      competitor: enabledModules.competitor,
+      pricing: enabledModules.pricing,
+      pricingProfit: enabledModules.pricing,
+      profit: enabledModules.profit,
+      reports: enabledModules.reports,
+      settings: enabledModules.settings,
     },
     modules: {
       fraud: {

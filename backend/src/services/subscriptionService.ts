@@ -387,6 +387,14 @@ async function recordBillingAuditLog(input: {
   });
 }
 
+function logSubscriptionSaved(input: {
+  shop: string;
+  savedPlan: BillingPlanName;
+  savedStarterModule: StarterModule | null;
+}) {
+  logEvent("info", "billing.subscription_saved", input);
+}
+
 async function ensureStoreTrialState(store: { id: string; trialStartedAt: Date | null; trialEndsAt: Date | null; }) {
   if (store.trialStartedAt && store.trialEndsAt) {
     return {
@@ -538,6 +546,12 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
       },
     });
   }
+
+  logSubscriptionSaved({
+    shop: store.shop,
+    savedPlan: planName,
+    savedStarterModule: starterModule,
+  });
 
   return nextSubscription;
 }
@@ -1051,6 +1065,12 @@ export async function updateStarterModuleSelection(
     billingStatus: updated.billingStatus,
   });
 
+  logSubscriptionSaved({
+    shop: shopDomain,
+    savedPlan: "STARTER",
+    savedStarterModule: normalizedStarterModule,
+  });
+
   return getCurrentSubscription(shopDomain);
 }
 
@@ -1121,6 +1141,12 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       },
     });
 
+    logSubscriptionSaved({
+      shop: input.shopDomain,
+      savedPlan: "NONE",
+      savedStarterModule: null,
+    });
+
     return {
       ...updated,
       plan: store.subscription.plan,
@@ -1184,6 +1210,12 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       shopifyChargeId: input.shopifyChargeId ?? null,
       currentPeriodEnd: input.currentPeriodEnd ?? null,
     },
+  });
+
+  logSubscriptionSaved({
+    shop: input.shopDomain,
+    savedPlan: planName,
+    savedStarterModule: normalizeStarterModule(updated.starterModule),
   });
 
   return updated;

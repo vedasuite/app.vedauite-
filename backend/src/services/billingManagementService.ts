@@ -350,8 +350,10 @@ export async function requestBillingPlanChange(input: {
   if (requestedPlan === "STARTER" && normalizedStarterModule) {
     logEvent("info", "billing.starter_module_selected", {
       shop: input.shopDomain,
-      starterModule: normalizedStarterModule,
       requestedPlan,
+      selectedStarterModule: input.starterModule ?? null,
+      normalizedStarterModule,
+      starterModule: normalizedStarterModule,
     });
   }
 
@@ -424,6 +426,11 @@ export async function requestBillingPlanChange(input: {
   });
 
   try {
+    logEvent("info", "billing.create_request", {
+      shop: input.shopDomain,
+      plan: requestedPlan,
+      starterModule: normalizedStarterModule,
+    });
     const returnUrl = new URL("/billing/activate", env.shopifyAppUrl);
     returnUrl.searchParams.set("shop", input.shopDomain);
     returnUrl.searchParams.set("intentId", createdIntent.id);
@@ -518,6 +525,12 @@ async function applyConfirmedStarterModule(
       lastBillingSubscriptionName: "STARTER",
     } as any,
   });
+
+  logEvent("info", "billing.subscription_saved", {
+    shop: shopDomain,
+    savedPlan: "STARTER",
+    savedStarterModule: starterModule,
+  });
 }
 
 export async function confirmBillingApprovalReturn(input: {
@@ -564,6 +577,18 @@ export async function confirmBillingApprovalReturn(input: {
     throw new Error("Shopify returned an unsupported billing plan.");
   }
 
+  logEvent("info", "billing.confirmation_received", {
+    shop: input.shopDomain,
+    chargeId: activeSubscription.id,
+    planFromRequest: normalizePlanName(intent?.requestedPlanName) ?? null,
+    starterModuleFromRequest: normalizeStarterModule(
+      intent?.requestedStarterModule ?? null
+    ),
+    existingDbStarterModule: normalizeStarterModule(
+      store.subscription?.starterModule ?? null
+    ),
+  });
+
   if (intent && effectivePlan !== normalizePlanName(intent.requestedPlanName)) {
     await prisma.billingPlanIntent.update({
       where: { id: intent.id },
@@ -594,14 +619,6 @@ export async function confirmBillingApprovalReturn(input: {
   if (effectivePlan === "STARTER" && confirmedStarterModule) {
     await applyConfirmedStarterModule(input.shopDomain, confirmedStarterModule);
   }
-
-  logEvent("info", "billing.confirmation_received", {
-    shop: input.shopDomain,
-    intentId: intent?.id ?? null,
-    effectivePlan,
-    confirmedStarterModule,
-    shopifyChargeId: activeSubscription.id,
-  });
 
   if (intent) {
     await prisma.billingPlanIntent.update({

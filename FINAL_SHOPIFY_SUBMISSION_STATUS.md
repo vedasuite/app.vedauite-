@@ -1,12 +1,12 @@
 # Final Shopify Submission Status
 
-Timestamp: `2026-05-04T21:41:03.7474318+05:30`
+Timestamp: `2026-05-05T17:20:53.6046755+05:30`
 
 ## Latest code state
 
 - Active app repo: `app-repo`
 - Latest pushed GitHub commit before this local blocker-fix batch: `da386d1`
-- Current status of this blocker-fix batch: local changes verified, not yet owner-live-QA verified
+- Current status of this Starter-switch fix batch: local changes verified, not yet owner-live-QA verified
 
 ## Local code verification
 
@@ -39,6 +39,18 @@ Executed directly with `node tests\\*.test.cjs` because `node --test` in this lo
 - `shopify-connection-service.test.cjs`: PASS
 - `shopify-routes-auth.test.cjs`: PASS
 - `trustAbuseOverview.test.cjs`: PASS
+- `frontend/tests/backendModuleAccess.test.cjs`: PASS
+
+## Starter switching verification
+
+- Starter fraud path: PASS
+  - Verified by `billing-capabilities.test.cjs` and `feature-gating.test.cjs`
+- Starter competitor path: PASS
+  - Verified by `billing-capabilities.test.cjs` and `feature-gating.test.cjs`
+- Starter fraud -> competitor switch: PASS
+  - Verified by canonical entitlement swap test and frontend backend-entitlement helper test
+- Starter competitor -> fraud switch: PASS
+  - Verified by canonical entitlement swap test and frontend backend-entitlement helper test
 
 ## Production deployment readiness
 
@@ -56,11 +68,8 @@ Executed directly with `node tests\\*.test.cjs` because `node --test` in this lo
 
 - Starter fraud vs Starter competitor entitlement switching
 - Backend and frontend canonical module-key alignment
-- Merchant-safe order labels with no synthetic Shopify-looking order IDs
-- Recent Insights cleanup for internal-looking shopper and order copy
-- Evidence CTA now leads to the evidence section instead of behaving like a dead click
-- Competitor locked state clears stale operational cache
-- Billing pending shell now renders a non-blank embedded fallback with retry guidance
+- Backend billing logs added for Starter-module request, confirmation, save, and app-state entitlement resolution
+- Frontend module access now prefers backend app-state entitlements instead of stale subscription fallbacks for Starter access
 
 ## Live Shopify QA
 

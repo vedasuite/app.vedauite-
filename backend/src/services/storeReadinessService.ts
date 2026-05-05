@@ -54,13 +54,13 @@ export async function getStoreReadinessState(shopDomain: string) {
       hasProfitData,
     },
     modules: {
-      fraudReady: subscription.enabledModules.fraud && hasOrders,
+      fraudReady: entitlements.enabledModules.includes("fraud") && hasOrders,
       competitorReady:
-        subscription.enabledModules.competitor &&
+        entitlements.enabledModules.includes("competitor") &&
         operational.counts.competitorDomains > 0 &&
         operational.counts.competitorRows > 0,
-      pricingReady: subscription.enabledModules.pricing && hasPricingData,
-      profitReady: subscription.enabledModules.profit && hasProfitData,
+      pricingReady: entitlements.enabledModules.includes("pricing") && hasPricingData,
+      profitReady: entitlements.enabledModules.includes("profit") && hasProfitData,
     },
     sampleMode: env.enableSampleData,
   };

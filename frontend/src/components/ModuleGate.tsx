@@ -10,7 +10,15 @@ import {
   Text,
 } from "@shopify/polaris";
 import { useEmbeddedNavigation } from "../hooks/useEmbeddedNavigation";
+import { useAppState } from "../hooks/useAppState";
 import { useSubscriptionPlan } from "../hooks/useSubscriptionPlan";
+import {
+  isBackendModuleEnabled,
+  resolveBackendPlan,
+  resolveBackendStarterModule,
+} from "../lib/backendModuleAccess";
+
+type FeatureKey = "fraud" | "competitor" | "pricing" | "profit";
 
 type Props = {
   title: string;
@@ -18,6 +26,7 @@ type Props = {
   requiredPlan: string;
   children: React.ReactNode;
   allowed: boolean;
+  featureKey?: FeatureKey;
 };
 
 export function ModuleGate({
@@ -26,16 +35,25 @@ export function ModuleGate({
   requiredPlan,
   children,
   allowed,
+  featureKey,
 }: Props) {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { subscription, billingState, entitlements } = useSubscriptionPlan();
+  const { appState } = useAppState();
 
-  if (allowed) {
+  const backendAllowed = featureKey
+    ? isBackendModuleEnabled(appState, featureKey)
+    : allowed;
+  const resolvedAllowed = featureKey ? backendAllowed : allowed;
+
+  if (resolvedAllowed) {
     return <>{children}</>;
   }
 
-  const currentPlan = entitlements?.planName ?? subscription?.planName ?? "NONE";
-  const currentStarterModule = entitlements?.starterModule ?? subscription?.starterModule;
+  const currentPlan =
+    resolveBackendPlan(appState) ?? entitlements?.planName ?? subscription?.planName ?? "NONE";
+  const currentStarterModule =
+    resolveBackendStarterModule(appState) ?? entitlements?.starterModule ?? null;
   const starterLabel =
     currentStarterModule === "fraud"
       ? "Fraud Intelligence"
