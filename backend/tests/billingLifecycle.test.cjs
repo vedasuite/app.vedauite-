@@ -123,7 +123,7 @@ test("frozen billing statuses resolve to frozen", () => {
   assert.equal(lifecycle, "frozen");
 });
 
-test("test charge lifecycle is explicit", () => {
+test("test billing mode still resolves paid plans as active for merchant-facing lifecycle", () => {
   const lifecycle = deriveCanonicalBillingLifecycle({
     uninstalled: false,
     pendingApproval: false,
@@ -133,5 +133,5 @@ test("test charge lifecycle is explicit", () => {
     isTestCharge: true,
   });
 
-  assert.equal(lifecycle, "test_charge");
+  assert.equal(lifecycle, "active");
 });

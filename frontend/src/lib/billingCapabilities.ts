@@ -169,10 +169,11 @@ export function normalizeBillingLifecycle(
     case "active":
     case "cancelled":
     case "frozen":
-    case "test_charge":
     case "uninstalled":
     case "unknown_error":
       return value;
+    case "test_charge":
+      return "active";
     default:
       return "no_subscription";
   }
@@ -472,9 +473,22 @@ export function normalizeBillingState(
   value: Partial<BillingState> | null | undefined
 ): BillingState {
   const subscription = normalizeSubscriptionInfo(value as Partial<SubscriptionInfo>);
+  const lifecycle = normalizeBillingLifecycle(value?.lifecycle);
+  const merchantTitle =
+    lifecycle === "active" && value?.merchantTitle?.toLowerCase().includes("test plan is active")
+      ? `${subscription.planName === "TRIAL" ? "Trial access" : `${subscription.planName} plan`} is active`
+      : value?.merchantTitle ?? "Billing status unavailable";
+  const merchantDescription =
+    lifecycle === "active" &&
+    value?.merchantDescription?.toLowerCase().includes("shopify test charge")
+      ? subscription.planName === "TRIAL"
+        ? "Your trial is active."
+        : "VedaSuite has verified the current plan and module access."
+      : value?.merchantDescription ??
+        "VedaSuite could not confirm the latest Shopify billing state yet.";
 
   return {
-    lifecycle: normalizeBillingLifecycle(value?.lifecycle),
+    lifecycle,
     planName: subscription.planName,
     planTier: normalizeEntitlementTier(value?.planTier),
     normalizedBillingStatus: value?.normalizedBillingStatus ?? subscription.billingStatus ?? null,
@@ -502,10 +516,8 @@ export function normalizeBillingState(
     pendingRequestedStarterModule: normalizeStarterModule(
       value?.pendingRequestedStarterModule
     ),
-    merchantTitle: value?.merchantTitle ?? "Billing status unavailable",
-    merchantDescription:
-      value?.merchantDescription ??
-      "VedaSuite could not confirm the latest Shopify billing state yet.",
+    merchantTitle,
+    merchantDescription,
     mismatchWarnings: Array.isArray(value?.mismatchWarnings)
       ? value.mismatchWarnings.filter((item): item is string => typeof item === "string")
       : [],

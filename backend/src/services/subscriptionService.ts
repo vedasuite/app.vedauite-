@@ -163,6 +163,8 @@ export function deriveCanonicalBillingLifecycle(input: {
   billingStatus: string | null;
   isTestCharge: boolean;
 }) {
+  void input.isTestCharge;
+
   if (input.uninstalled) {
     return "uninstalled" as const;
   }
@@ -177,10 +179,6 @@ export function deriveCanonicalBillingLifecycle(input: {
 
   if (isCancelledBillingStatus(input.billingStatus)) {
     return "cancelled" as const;
-  }
-
-  if (input.planName !== "NONE" && input.accessActive && input.isTestCharge) {
-    return "test_charge" as const;
   }
 
   if (
@@ -230,9 +228,9 @@ function buildMerchantBillingCopy(input: {
       };
     case "test_charge":
       return {
-        title: `${input.planName} test plan is active`,
+        title: `${input.planName} plan is active`,
         description:
-          "This store is using a Shopify test charge. Module access is available while the test subscription remains active.",
+          "VedaSuite has verified the current plan and module access.",
       };
     case "cancelled":
       return {
@@ -619,7 +617,7 @@ export async function resolveBillingState(
       planName,
       planTier: normalizeTier(planName),
       normalizedBillingStatus: subscription.billingStatus,
-      active: lifecycle === "active" || lifecycle === "test_charge",
+      active: lifecycle === "active",
       accessActive,
       verified: lifecycle !== "unknown_error",
       status: deriveLifecycleStatus({
@@ -631,12 +629,11 @@ export async function resolveBillingState(
       starterModule: normalizeStarterModule(subscription.starterModule),
       endsAt: subscription.endsAt?.toISOString() ?? null,
       renewalAt:
-        lifecycle === "active" || lifecycle === "test_charge" || (lifecycle === "cancelled" && accessActive)
+        lifecycle === "active" || (lifecycle === "cancelled" && accessActive)
           ? subscription.endsAt?.toISOString() ?? null
           : null,
       showRenewalDate:
         lifecycle === "active" ||
-        lifecycle === "test_charge" ||
         (lifecycle === "cancelled" && accessActive),
       showTrialDate: false,
       subscriptionId: subscription.id,

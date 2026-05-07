@@ -645,8 +645,7 @@ export function PricingPage() {
               <Banner
                 title={currentSummary.merchantTitle}
                 tone={
-                  management.billing.lifecycle === "active" ||
-                  management.billing.lifecycle === "test_charge"
+                  management.billing.lifecycle === "active"
                     ? "success"
                     : management.billing.lifecycle === "pending_approval"
                     ? "warning"

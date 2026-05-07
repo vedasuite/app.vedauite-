@@ -199,7 +199,7 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
     billing: {
       planName: billing.planName,
       status: billing.lifecycle,
-      active: billing.lifecycle === "active" || billing.lifecycle === "test_charge",
+      active: billing.lifecycle === "active",
       accessActive: billing.accessActive,
       endsAt: billing.showRenewalDate ? billing.renewalAt : null,
       trialEndsAt: billing.showTrialDate ? subscription.trialEndsAt : null,

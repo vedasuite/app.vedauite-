@@ -408,7 +408,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
   });
 
   const billingState =
-    billing.lifecycle === "active" || billing.lifecycle === "test_charge"
+    billing.lifecycle === "active"
       ? "ready"
       : billing.lifecycle === "pending_approval"
       ? "collecting_data"
