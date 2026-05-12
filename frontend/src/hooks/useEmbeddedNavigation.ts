@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getEmbeddedContext } from "../lib/shopifyEmbeddedContext";
 
@@ -5,7 +6,7 @@ export function useEmbeddedNavigation() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const buildEmbeddedPath = (targetPath: string) => {
+  const buildEmbeddedPath = useCallback((targetPath: string) => {
     const [pathname, search = ""] = targetPath.split("?");
     const currentParams = new URLSearchParams(location.search);
     const embeddedContext = getEmbeddedContext();
@@ -25,11 +26,11 @@ export function useEmbeddedNavigation() {
 
     const nextSearch = nextParams.toString();
     return nextSearch ? `${pathname}?${nextSearch}` : pathname;
-  };
+  }, [location.search]);
 
-  const navigateEmbedded = (targetPath: string) => {
+  const navigateEmbedded = useCallback((targetPath: string) => {
     navigate(buildEmbeddedPath(targetPath));
-  };
+  }, [buildEmbeddedPath, navigate]);
 
   return {
     buildEmbeddedPath,

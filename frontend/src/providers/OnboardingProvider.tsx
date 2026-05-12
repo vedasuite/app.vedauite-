@@ -225,21 +225,56 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const selectModule = useCallback(
+    (moduleKey: OnboardingModuleKey) =>
+      mutate("/api/dashboard/onboarding/select-module", { moduleKey }),
+    [mutate]
+  );
+
+  const markInsightViewed = useCallback(
+    (moduleKey?: OnboardingModuleKey | null) =>
+      mutate("/api/dashboard/onboarding/view-insight", { moduleKey: moduleKey ?? null }),
+    [mutate]
+  );
+
+  const confirmPlan = useCallback(
+    () => mutate("/api/dashboard/onboarding/confirm-plan"),
+    [mutate]
+  );
+
+  const complete = useCallback(
+    () => mutate("/api/dashboard/onboarding/complete"),
+    [mutate]
+  );
+
+  const dismiss = useCallback(
+    () => mutate("/api/dashboard/onboarding/dismiss"),
+    [mutate]
+  );
+
   const value = useMemo(
     () => ({
       onboarding,
       loading,
       error,
       refresh,
-      selectModule: (moduleKey: OnboardingModuleKey) =>
-        mutate("/api/dashboard/onboarding/select-module", { moduleKey }),
-      markInsightViewed: (moduleKey?: OnboardingModuleKey | null) =>
-        mutate("/api/dashboard/onboarding/view-insight", { moduleKey: moduleKey ?? null }),
-      confirmPlan: () => mutate("/api/dashboard/onboarding/confirm-plan"),
-      complete: () => mutate("/api/dashboard/onboarding/complete"),
-      dismiss: () => mutate("/api/dashboard/onboarding/dismiss"),
+      selectModule,
+      markInsightViewed,
+      confirmPlan,
+      complete,
+      dismiss,
     }),
-    [error, loading, mutate, onboarding, refresh]
+    [
+      complete,
+      confirmPlan,
+      dismiss,
+      error,
+      loading,
+      markInsightViewed,
+      onboarding,
+      refresh,
+      selectModule,
+    ]
   );
 
   return (

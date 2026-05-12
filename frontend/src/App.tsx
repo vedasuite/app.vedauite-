@@ -1,5 +1,5 @@
 import { Card, InlineStack, Page, Spinner, Text } from "@shopify/polaris";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { useAppState } from "./hooks/useAppState";
@@ -59,13 +59,16 @@ function InsightRoute({
   title?: string;
 }) {
   const { onboarding, markInsightViewed } = useOnboardingState();
+  const viewedModuleRef = useRef<OnboardingModuleKey | null>(null);
 
   useEffect(() => {
     if (
       onboarding &&
       !onboarding.canAccessDashboard &&
-      onboarding.selectedModule === moduleKey
+      onboarding.selectedModule === moduleKey &&
+      viewedModuleRef.current !== moduleKey
     ) {
+      viewedModuleRef.current = moduleKey;
       void markInsightViewed(moduleKey).catch(() => undefined);
     }
   }, [markInsightViewed, moduleKey, onboarding]);

@@ -15,7 +15,7 @@ import {
   Text,
   Toast,
 } from "@shopify/polaris";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -687,6 +687,12 @@ export function DashboardPage() {
   const [refreshResult, setRefreshResult] = useState<DashboardRefreshResult | null>(
     null
   );
+  const cachedDashboardRef = useRef<DashboardPayload | null>(cachedDashboard);
+  const diagnosticsRef = useRef<Diagnostics | null>(cachedDashboard?.diagnostics ?? null);
+
+  useEffect(() => {
+    diagnosticsRef.current = diagnostics;
+  }, [diagnostics]);
 
   const fallbackReauthorizeUrl = shop
     ? `/auth/reconnect?shop=${encodeURIComponent(shop)}${
@@ -713,9 +719,9 @@ export function DashboardPage() {
       const metricsResponse = await fetchDashboardMetrics();
       const diagnosticsResponse =
         options?.includeDiagnostics === false
-          ? diagnostics ?? cachedDashboard?.diagnostics ?? null
+          ? diagnosticsRef.current ?? cachedDashboardRef.current?.diagnostics ?? null
           : await fetchDashboardDiagnostics().catch(
-              () => diagnostics ?? cachedDashboard?.diagnostics ?? null
+              () => diagnosticsRef.current ?? cachedDashboardRef.current?.diagnostics ?? null
             );
 
       return {
@@ -723,20 +729,28 @@ export function DashboardPage() {
         diagnostics: diagnosticsResponse,
       };
     },
-    [cachedDashboard?.diagnostics, diagnostics, fetchDashboardDiagnostics, fetchDashboardMetrics]
+    [fetchDashboardDiagnostics, fetchDashboardMetrics]
   );
 
   const applyDashboardPayload = useCallback((payload: DashboardPayload) => {
-    setMetrics(payload.metrics);
+    setMetrics((current) => (equalJson(current, payload.metrics) ? current : payload.metrics));
     if (payload.diagnostics) {
-      setDiagnostics(payload.diagnostics);
+      diagnosticsRef.current = payload.diagnostics;
+      setDiagnostics((current) =>
+        equalJson(current, payload.diagnostics) ? current : payload.diagnostics
+      );
     }
-    writeModuleCache("dashboard-overview", {
+    const nextCachedPayload = {
       metrics: payload.metrics,
-      diagnostics: payload.diagnostics ?? diagnostics ?? null,
+      diagnostics: payload.diagnostics ?? diagnosticsRef.current ?? null,
+    };
+    cachedDashboardRef.current = nextCachedPayload;
+    writeModuleCache("dashboard-overview", {
+      metrics: nextCachedPayload.metrics,
+      diagnostics: nextCachedPayload.diagnostics,
     });
     setError(null);
-  }, [diagnostics]);
+  }, []);
 
   const loadVerifiedDashboardPayload = useCallback(
     async (
@@ -780,7 +794,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     let mounted = true;
-    if (!cachedDashboard?.metrics) {
+    if (!cachedDashboardRef.current?.metrics) {
       setLoading(true);
     }
 
@@ -789,7 +803,7 @@ export function DashboardPage() {
         if (!mounted) return;
         const basePayload = {
           metrics: metricsResponse,
-          diagnostics: diagnostics ?? cachedDashboard?.diagnostics ?? null,
+          diagnostics: diagnosticsRef.current ?? cachedDashboardRef.current?.diagnostics ?? null,
         };
         applyDashboardPayload(basePayload);
         setLoading(false);
@@ -819,9 +833,6 @@ export function DashboardPage() {
     };
   }, [
     applyDashboardPayload,
-    cachedDashboard?.diagnostics,
-    cachedDashboard?.metrics,
-    diagnostics,
     fetchDashboardDiagnostics,
     fetchDashboardMetrics,
   ]);
