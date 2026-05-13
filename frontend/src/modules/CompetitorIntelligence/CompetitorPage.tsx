@@ -349,6 +349,7 @@ export function CompetitorPage() {
     subscription?.capabilities?.["competitor.weeklyReports"] ?? false;
   const focus = searchParams.get("focus");
   const primaryState = overview.competitorState?.primaryState ?? "SETUP_INCOMPLETE";
+  const showOperationalPanels = primaryState !== "SETUP_INCOMPLETE";
 
   useEffect(() => {
     setSelectedTab(focus === "feed" ? 1 : focus === "strategy" ? 2 : 0);
@@ -593,25 +594,27 @@ export function CompetitorPage() {
             </Banner>
           </Layout.Section>
 
-          <Layout.Section>
-            <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
-              {summaryCards.map(([label, value]) => (
-                <Card key={String(label)}>
-                  <BlockStack gap="150">
-                    <Text as="h3" variant="headingMd">
-                      {String(label)}
-                    </Text>
-                    <Text as="p" variant="headingLg">
-                      {String(value)}
-                    </Text>
-                  </BlockStack>
-                </Card>
-              ))}
-            </InlineGrid>
-          </Layout.Section>
+          {showOperationalPanels ? (
+            <Layout.Section>
+              <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
+                {summaryCards.map(([label, value]) => (
+                  <Card key={String(label)}>
+                    <BlockStack gap="150">
+                      <Text as="h3" variant="headingMd">
+                        {String(label)}
+                      </Text>
+                      <Text as="p" variant="headingLg">
+                        {String(value)}
+                      </Text>
+                    </BlockStack>
+                  </Card>
+                ))}
+              </InlineGrid>
+            </Layout.Section>
+          ) : null}
 
           <Layout.Section>
-            <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+            <InlineGrid columns={{ xs: 1, md: showOperationalPanels ? 2 : 1 }} gap="400">
               <Card>
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
@@ -643,7 +646,8 @@ export function CompetitorPage() {
                 </BlockStack>
               </Card>
 
-              <Card>
+              {showOperationalPanels ? (
+                <Card>
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingMd">
                     Monitoring status
@@ -661,10 +665,12 @@ export function CompetitorPage() {
                     ))}
                   </BlockStack>
                 </BlockStack>
-              </Card>
+                </Card>
+              ) : null}
             </InlineGrid>
           </Layout.Section>
 
+          {showOperationalPanels ? (
           <Layout.Section>
             <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
               <Card>
@@ -728,7 +734,9 @@ export function CompetitorPage() {
               </Card>
             </InlineGrid>
           </Layout.Section>
+          ) : null}
 
+          {showOperationalPanels ? (
           <Layout.Section>
             <Card>
               <Tabs
@@ -935,7 +943,9 @@ export function CompetitorPage() {
               </Tabs>
             </Card>
           </Layout.Section>
+          ) : null}
 
+          {showOperationalPanels ? (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
@@ -985,6 +995,7 @@ export function CompetitorPage() {
               </BlockStack>
             </Card>
           </Layout.Section>
+          ) : null}
 
           {canSeeWeeklyReports &&
           (primaryState === "NO_CHANGES" || primaryState === "CHANGES_DETECTED") ? (

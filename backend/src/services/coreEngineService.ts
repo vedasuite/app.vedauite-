@@ -1,9 +1,9 @@
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
 import {
-  formatMerchantOrderLabel,
   formatMerchantInsightDetail,
   formatMerchantInsightTitle,
+  getMerchantOrderLabelOrNull,
 } from "../lib/merchantLabels";
 
 type StoreSnapshot = {
@@ -343,7 +343,7 @@ function buildTimelineEvents(store: StoreSnapshot) {
 
   for (const order of store.orders.slice(0, 25)) {
     const risk = buildOrderRisk(order);
-    const orderLabel = formatMerchantOrderLabel(order);
+    const orderLabel = getMerchantOrderLabelOrNull(order);
     events.push({
       storeId: store.id,
       customerId: order.customerId,

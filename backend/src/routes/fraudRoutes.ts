@@ -6,6 +6,7 @@ import {
   listRecentFraudOrders,
   scoreOrderFraud,
 } from "../services/fraudService";
+import { getMerchantOrderLabelOrNull } from "../lib/merchantLabels";
 import { resolveAuthenticatedShop } from "./routeShop";
 
 export const fraudRouter = Router();
@@ -17,7 +18,12 @@ fraudRouter.get("/orders", async (req, res) => {
     return res.status(400).json({ error: "Missing shop query parameter." });
   }
 
-  const orders = await listRecentFraudOrders(shop);
+  const orders = (await listRecentFraudOrders(shop))
+    .map((order) => ({
+      ...order,
+      shopifyOrderId: getMerchantOrderLabelOrNull(order),
+    }))
+    .filter((order) => !!order.shopifyOrderId);
   return res.json({ orders });
 });
 

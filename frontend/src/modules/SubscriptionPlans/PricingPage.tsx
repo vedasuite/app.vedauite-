@@ -271,7 +271,9 @@ export function PricingPage() {
     loadBillingState()
       .then((billingState) => {
         if (!mounted) return;
-        if (billingState.subscription.starterModule) {
+        if (billingState.pendingIntent?.requestedStarterModule) {
+          setStarterModule(billingState.pendingIntent.requestedStarterModule);
+        } else if (billingState.subscription.starterModule) {
           setStarterModule(billingState.subscription.starterModule);
         }
       })
@@ -294,10 +296,12 @@ export function PricingPage() {
   }, [loadBillingState, billingFlowState]);
 
   useEffect(() => {
-    if (management?.subscription.starterModule) {
+    if (management?.pendingIntent?.requestedStarterModule) {
+      setStarterModule(management.pendingIntent.requestedStarterModule);
+    } else if (management?.subscription.starterModule) {
       setStarterModule(management.subscription.starterModule);
     }
-  }, [management?.subscription.starterModule]);
+  }, [management?.pendingIntent?.requestedStarterModule, management?.subscription.starterModule]);
 
   const handlePlanChange = useCallback(
     async (planName: BillingPlanName) => {
@@ -681,7 +685,7 @@ export function PricingPage() {
               const catalog = PLAN_CATALOG[plan.planName as keyof typeof PLAN_CATALOG];
               const starterCardSelected =
                 plan.planName === "STARTER"
-                  ? management.subscription.starterModule ?? starterModule
+                  ? starterModule
                   : null;
 
               return (

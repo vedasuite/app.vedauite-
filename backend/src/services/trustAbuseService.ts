@@ -11,7 +11,7 @@ import {
   getStoreOperationalSnapshot,
 } from "./storeOperationalStateService";
 import {
-  formatMerchantOrderLabel,
+  getMerchantOrderLabelOrNull,
   maskMerchantCustomerLabel,
 } from "../lib/merchantLabels";
 
@@ -61,10 +61,11 @@ export async function getTrustAbuseOverview(shopDomain: string) {
         order.fraudScore >= 71 ||
         order.refundRequested
     )
+    .filter((order) => !!getMerchantOrderLabelOrNull(order))
     .slice(0, 6)
     .map((order) => ({
       id: order.id,
-      shopifyOrderId: formatMerchantOrderLabel(order),
+      shopifyOrderId: getMerchantOrderLabelOrNull(order)!,
       riskScore: order.fraudScore,
       riskLevel: order.fraudRiskLevel,
       status: order.status,
@@ -318,7 +319,9 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     fraudReviewQueue: queue,
     returnAbuseSignals: fraudOverview.returnAbuseSignals,
     wardrobingSignals: fraudOverview.wardrobingSignals,
-    networkMatches: fraudOverview.networkMatches,
+    networkMatches: fraudOverview.networkMatches.filter(
+      (match) => !!match.orderLabel && match.orderLabel !== "Order pending sync"
+    ),
     chargebackCandidates: fraudOverview.chargebackCandidates,
     policyEngine: trustLayer.policyRecommendations,
     refundOutcomeSimulator: {

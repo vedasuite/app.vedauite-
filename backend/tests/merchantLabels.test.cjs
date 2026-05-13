@@ -5,7 +5,7 @@ const path = require("node:path");
 const labelsPath = path.resolve(__dirname, "../dist/lib/merchantLabels.js");
 
 test("formatMerchantOrderLabel never exposes internal or synthetic order ids", async () => {
-  const { formatMerchantOrderLabel } = require(labelsPath);
+  const { formatMerchantOrderLabel, getMerchantOrderLabelOrNull } = require(labelsPath);
 
   assert.equal(
     formatMerchantOrderLabel({
@@ -27,5 +27,12 @@ test("formatMerchantOrderLabel never exposes internal or synthetic order ids", a
       shopifyOrderGid: "gid://shopify/Order/1002",
     }),
     "Order pending sync"
+  );
+  assert.equal(
+    getMerchantOrderLabelOrNull({
+      shopifyOrderId: "vedasuite-ai.myshopify.com-order-1002",
+      shopifyOrderGid: "gid://shopify/Order/1002",
+    }),
+    null
   );
 });

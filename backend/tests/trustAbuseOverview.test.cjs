@@ -129,6 +129,6 @@ test("trust abuse overview does not expose internal fallback order ids", async (
   const { getTrustAbuseOverview } = require(overviewPath);
   const overview = await getTrustAbuseOverview("test-shop.myshopify.com");
 
-  assert.equal(overview.fraudReviewQueue[0].shopifyOrderId, "Order pending sync");
-  assert.equal(overview.networkMatches[0].orderLabel, "Order pending sync");
+  assert.equal(overview.fraudReviewQueue.length, 0);
+  assert.equal(overview.networkMatches.length, 0);
 });

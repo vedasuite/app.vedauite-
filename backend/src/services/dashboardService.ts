@@ -12,6 +12,7 @@ import { toIsoString } from "./unifiedModuleStateService";
 import {
   formatMerchantInsightDetail,
   formatMerchantInsightTitle,
+  isInternalOrderLabel,
 } from "../lib/merchantLabels";
 
 function latestIsoTimestamp(...values: Array<Date | string | null | undefined>) {
@@ -139,7 +140,9 @@ export async function getDashboardMetrics(shopDomain: string) {
       }
     })();
     const orderLabel =
-      typeof metadata.orderLabel === "string" ? metadata.orderLabel : null;
+      typeof metadata.orderLabel === "string" && !isInternalOrderLabel(metadata.orderLabel)
+        ? metadata.orderLabel
+        : null;
 
     return {
       id: event.id,

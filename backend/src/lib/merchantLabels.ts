@@ -6,6 +6,8 @@ export type MerchantOrderLike = {
   shopifyOrderGid?: string | null;
 };
 
+const UNKNOWN_ORDER_LABEL = "Order pending sync";
+
 function cleanOrderToken(value?: string | number | null) {
   if (value == null) {
     return null;
@@ -20,6 +22,15 @@ function cleanOrderToken(value?: string | number | null) {
 }
 
 export function formatMerchantOrderLabel(order: MerchantOrderLike) {
+  const label = getMerchantOrderLabelOrNull(order);
+  return label ?? UNKNOWN_ORDER_LABEL;
+}
+
+export function getMerchantOrderLabelOrNull(order?: MerchantOrderLike | null) {
+  if (!order) {
+    return null;
+  }
+
   if (order.orderName?.trim()) {
     return order.orderName.trim();
   }
@@ -30,7 +41,7 @@ export function formatMerchantOrderLabel(order: MerchantOrderLike) {
     return `#${orderToken}`;
   }
 
-  return "Order pending sync";
+  return null;
 }
 
 export function isInternalOrderLabel(value?: string | null) {
@@ -39,6 +50,7 @@ export function isInternalOrderLabel(value?: string | null) {
   }
 
   return (
+    value === UNKNOWN_ORDER_LABEL ||
     /\.myshopify\.com-order-\d+$/i.test(value) ||
     value.startsWith("gid://shopify/") ||
     /^order-[a-z0-9]+$/i.test(value)

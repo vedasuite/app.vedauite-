@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { prisma } from "../db/prismaClient";
 import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
-import { formatMerchantOrderLabel } from "../lib/merchantLabels";
+import { formatMerchantOrderLabel, getMerchantOrderLabelOrNull } from "../lib/merchantLabels";
 import { tagShopifyOrder } from "./shopifyAdminService";
 
 export type FraudSignalInput = {
@@ -324,7 +324,8 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
     .filter(
       (signal) =>
         !!signal.sharedNetworkHash &&
-        (sharedHashCounts.get(signal.sharedNetworkHash) ?? 0) > 1
+        (sharedHashCounts.get(signal.sharedNetworkHash) ?? 0) > 1 &&
+        !!getMerchantOrderLabelOrNull(signal.order)
     )
     .slice(0, 5)
     .map((signal) => {
@@ -341,7 +342,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
 
       return {
         id: signal.id,
-        orderLabel: signal.order ? formatMerchantOrderLabel(signal.order) : "Order pending sync",
+        orderLabel: getMerchantOrderLabelOrNull(signal.order),
         customerId: signal.customerId,
         riskLevel: signal.riskLevel,
         repeatSignals,
@@ -407,6 +408,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
 
   const chargebackCandidates = store.orders
     .filter((order) => order.fraudScore >= 60 || order.refundRequested)
+    .filter((order) => !!getMerchantOrderLabelOrNull(order))
     .slice(0, 5)
     .map((order) => ({
       id: order.id,

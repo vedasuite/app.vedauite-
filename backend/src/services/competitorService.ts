@@ -272,10 +272,10 @@ function getCompetitorPrimaryStateCopy(args: {
       return {
         title: "Monitoring is active, but no comparable competitor products were found",
         description:
-          "The latest refresh completed successfully, but none of the monitored competitor pages matched your tracked products yet.",
+          "Monitoring ran successfully; no comparable products were found.",
         nextAction: "Review tracked products or add more competitor domains",
         coverageStatus: "No comparable matches found",
-        toastMessage: "Refresh completed. No comparable competitor products were found.",
+        toastMessage: "Monitoring ran successfully; no comparable products found.",
       };
     case "LOW_CONFIDENCE":
       return {
@@ -697,7 +697,9 @@ export async function getCompetitorOverview(shopDomain: string) {
     ? Number(((Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
     : null;
   const checkedDomainsCount =
-    latestCompetitorSummary?.domains ?? store.competitorDomains.length;
+    store.competitorDomains.length === 0
+      ? 0
+      : latestCompetitorSummary?.domains ?? store.competitorDomains.length;
   const monitoredProductsCount =
     latestCompetitorSummary?.products ?? eligibleProducts.eligible.length;
   const matchedProductsCount = comparableRecentRows.validMatchedProductsCount;
@@ -1145,7 +1147,7 @@ export async function getCompetitorOverview(shopDomain: string) {
             : primaryState === "AWAITING_FIRST_RUN"
             ? "Domains are configured. The next refresh will test those sites against your active catalog."
             : primaryState === "NO_MATCHES"
-            ? "Monitoring completed successfully, but none of the checked competitor pages overlapped your active monitored products."
+            ? "Monitoring ran successfully; no comparable products were found."
             : primaryState === "LOW_CONFIDENCE"
             ? "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable products yet."
             : primaryState === "CHANGES_DETECTED"
@@ -1349,6 +1351,9 @@ export async function updateCompetitorDomains(
   await prisma.competitorDomain.deleteMany({
     where: { storeId: store.id },
   });
+  await prisma.competitorData.deleteMany({
+    where: { storeId: store.id },
+  });
 
   if (normalizedDomains.length > 0) {
     await prisma.competitorDomain.createMany({
@@ -1509,7 +1514,7 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
           : ingested > 0 && lowConfidenceMatches === ingested
           ? "Refresh completed. Possible competitor pages were found, but the matches were too weak to rely on yet."
         : skipped > 0
-          ? "Refresh completed. No comparable competitor products were found."
+          ? "Monitoring ran successfully; no comparable products found."
           : "Refresh completed. No competitor changes detected.",
     };
 

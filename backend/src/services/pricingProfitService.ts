@@ -736,18 +736,18 @@ export async function getPricingProfitOverview(shopDomain: string) {
         expectedImpact,
         confidence,
         confidenceScore: item.approvalConfidence,
-        dataBasis: competitorReady ? "competitor-informed" : "store-baseline",
+        dataBasis: competitorReady ? "competitor-informed" : "Baseline estimate - review before applying",
         why:
           item.demandSignals[0] ??
           "Recommendation is based on synced pricing rows and current merchant pricing settings.",
         support:
           item.demandSignals[1] ??
-          "Review this recommendation before publishing a price change.",
+          "Baseline estimate - review before applying in Shopify.",
         inputsUsed,
         merchantActionNote:
           item.autoApprovalCandidate
             ? "Ready for merchant review."
-            : "Review before applying in Shopify.",
+            : "Baseline estimate - review before applying in Shopify.",
       };
     })
     .sort((a, b) => b.confidenceScore - a.confidenceScore)

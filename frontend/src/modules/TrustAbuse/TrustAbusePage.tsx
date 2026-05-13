@@ -128,6 +128,7 @@ export function TrustAbusePage() {
   const [selectedEvidenceTab, setSelectedEvidenceTab] = useState(0);
   const [activeOrder, setActiveOrder] = useState<Overview["fraudReviewQueue"][number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [evidenceHighlighted, setEvidenceHighlighted] = useState(false);
   const evidenceSectionRef = useRef<HTMLDivElement | null>(null);
   const allowed = isBackendModuleEnabled(appState, "fraud");
 
@@ -247,10 +248,13 @@ export function TrustAbusePage() {
 
   const focusEvidenceSection = useCallback((tabIndex = 0) => {
     setSelectedEvidenceTab(tabIndex);
+    setEvidenceHighlighted(true);
+    setToast("Supporting evidence is highlighted below.");
     window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}#customer-order-evidence`);
     window.setTimeout(() => {
       evidenceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
+    window.setTimeout(() => setEvidenceHighlighted(false), 2800);
   }, []);
 
   if (!allowed) {
@@ -413,7 +417,15 @@ export function TrustAbusePage() {
         </Layout.Section>
 
         <Layout.Section>
-          <div id="customer-order-evidence" ref={evidenceSectionRef}>
+          <div
+            id="customer-order-evidence"
+            ref={evidenceSectionRef}
+            style={{
+              border: evidenceHighlighted ? "2px solid #2c6ecb" : "2px solid transparent",
+              borderRadius: "8px",
+              transition: "border-color 180ms ease",
+            }}
+          >
             <Card>
             <BlockStack gap="300">
               <BlockStack gap="100">
