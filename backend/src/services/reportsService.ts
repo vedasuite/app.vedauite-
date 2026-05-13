@@ -214,15 +214,15 @@ export async function getWeeklyReport(shopDomain: string) {
     );
   } else if (syncState.status === "SYNC_REQUIRED") {
     recommendations.push(
-      "Run the first live sync so VedaSuite can build the weekly report from persisted Shopify records."
+      "Update store insights so VedaSuite can build the weekly report from Shopify activity."
     );
   } else if (syncState.status === "SYNC_IN_PROGRESS") {
     recommendations.push(
-      "Sync is currently running. Refresh this report after the job completes to review real store outputs."
+      "Store insights are updating. Refresh this report shortly to review the latest activity."
     );
   } else if (syncState.status === "SYNC_COMPLETED_PROCESSING_PENDING") {
     recommendations.push(
-      "Raw Shopify data has synced, but pricing, trust, and profit processing is still catching up."
+      "Store activity is being analyzed for pricing, trust, and profit insights."
     );
   } else if (fraudHighRisk > 0) {
     recommendations.push(
@@ -230,11 +230,11 @@ export async function getWeeklyReport(shopDomain: string) {
     );
   } else if (orders.length === 0) {
     recommendations.push(
-      "Run your first live sync so VedaSuite can generate fraud and abuse guidance."
+      "More Shopify order activity is needed before fraud and abuse guidance appears."
     );
   } else {
     recommendations.push(
-      "Fraud pressure is currently low; continue monitoring new orders and refund requests."
+      "Fraud pressure is currently low; continue reviewing new orders and refund requests."
     );
   }
 

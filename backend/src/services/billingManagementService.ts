@@ -102,11 +102,11 @@ export type BillingPlanChangeResult =
 function planSummary(planName: BillingPlanName) {
   switch (planName) {
     case "STARTER":
-      return "Starter includes one selected module plus reports and settings.";
+      return "Starter includes one selected feature plus reports and settings.";
     case "GROWTH":
       return "Growth includes Trust & Abuse, Competitor, and baseline Pricing & Profit coverage.";
     case "PRO":
-      return "Pro includes all core modules and the full profit engine.";
+      return "Pro includes all core features and the full profit engine.";
     case "TRIAL":
       return "Trial provides temporary evaluation access before a paid plan is selected.";
     default:
@@ -344,7 +344,7 @@ export async function requestBillingPlanChange(input: {
 
   const normalizedStarterModule = normalizeStarterModule(input.starterModule);
   if (requestedPlan === "STARTER" && !normalizedStarterModule) {
-    throw new Error("Starter plan requires selecting a starter module.");
+    throw new Error("Starter plan requires selecting a Starter feature.");
   }
 
   if (requestedPlan === "STARTER" && normalizedStarterModule) {

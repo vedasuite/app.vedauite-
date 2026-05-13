@@ -161,7 +161,7 @@ export function deriveSyncStatus(input: {
   if (latestStatus === "SUCCEEDED_PROCESSING_PENDING") {
     return {
       status: "SYNC_COMPLETED_PROCESSING_PENDING" as StoreSyncStatus,
-      reason: "Raw Shopify data synced, but derived processing outputs are not ready yet.",
+      reason: "Store activity is being analyzed. Insights will appear automatically.",
     };
   }
 
@@ -171,7 +171,7 @@ export function deriveSyncStatus(input: {
   ) {
     return {
       status: "READY_WITH_DATA" as StoreSyncStatus,
-      reason: "Shopify data and derived module outputs are available.",
+      reason: "Your store is connected and insights are ready.",
     };
   }
 
@@ -184,8 +184,8 @@ export function deriveSyncStatus(input: {
       status: "EMPTY_STORE_DATA" as StoreSyncStatus,
       reason:
         latestStatus === "SUCCEEDED_NO_DATA"
-          ? "Sync completed but the store did not return products, orders, or customers."
-          : "No synced Shopify data is stored yet.",
+          ? "More Shopify product, order, or customer activity is needed before insights appear."
+          : "More Shopify activity is needed before insights appear.",
     };
   }
 
@@ -196,20 +196,20 @@ export function deriveSyncStatus(input: {
   ) {
     return {
       status: "SYNC_COMPLETED_PROCESSING_PENDING" as StoreSyncStatus,
-      reason: "Raw Shopify data synced, but derived processing outputs are not ready yet.",
+      reason: "Store activity is being analyzed. Insights will appear automatically.",
     };
   }
 
   if (rawResourceCount > 0 && processedResourceCount > 0) {
     return {
       status: "READY_WITH_DATA" as StoreSyncStatus,
-      reason: "Shopify data and derived module outputs are available.",
+      reason: "Your store is connected and insights are ready.",
     };
   }
 
   return {
     status: "SYNC_REQUIRED" as StoreSyncStatus,
-    reason: "Run the first live sync to populate the store.",
+    reason: "Update store insights to begin analysis.",
   };
 }
 
@@ -226,8 +226,8 @@ export function deriveModuleReadiness(input: {
       processingState: "FAILED",
       readinessState: "FAILED",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
-      failureReason: input.failureReason ?? "The latest processing run failed.",
-      reason: input.failureReason ?? "The latest processing run failed.",
+      failureReason: input.failureReason ?? "The latest analysis needs attention.",
+      reason: input.failureReason ?? "The latest analysis needs attention.",
     };
   }
 
@@ -238,7 +238,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "NOT_CONNECTED",
       lastUpdatedAt: null,
       failureReason: input.failureReason ?? null,
-      reason: "Reconnect Shopify before running this module.",
+      reason: "Reconnect Shopify before opening this workflow.",
     };
   }
 
@@ -249,7 +249,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "SYNC_REQUIRED",
       lastUpdatedAt: null,
       failureReason: null,
-      reason: "Run the first live sync to populate this module.",
+      reason: "Update store insights to prepare this workflow.",
     };
   }
 
@@ -260,7 +260,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "SYNC_IN_PROGRESS",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
       failureReason: null,
-      reason: "Sync and processing are still running.",
+      reason: "Store activity is being analyzed.",
     };
   }
 
@@ -271,7 +271,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "EMPTY_STORE_DATA",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
       failureReason: null,
-      reason: "No store data was available for this module yet.",
+      reason: "More store activity is needed before insights appear.",
     };
   }
 
@@ -282,7 +282,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "SYNC_COMPLETED_PROCESSING_PENDING",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
       failureReason: null,
-      reason: "Data synced, but this module does not have enough processed output yet.",
+      reason: "More store activity is needed before this workflow has enough insight.",
     };
   }
 
@@ -292,6 +292,6 @@ export function deriveModuleReadiness(input: {
     readinessState: "READY_WITH_DATA",
     lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
     failureReason: null,
-    reason: "Module data is backed by persisted outputs.",
+    reason: "Insights are ready from available store activity.",
   };
 }

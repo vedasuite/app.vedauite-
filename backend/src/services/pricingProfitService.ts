@@ -400,7 +400,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       action:
         competitorResponse.summary.topPressureCount > 0
           ? "Coordinate pricing and response strategy"
-          : "Add competitor domains or continue monitoring",
+          : "Add competitor websites or review again later",
     },
   ];
 
@@ -562,10 +562,10 @@ export async function getPricingProfitOverview(shopDomain: string) {
             pricing: pricingDependencyStatus,
             fraud: fraudDependencyStatus,
           },
-          title: "Pricing data is still being processed",
+          title: "Pricing insights are being prepared",
           description:
-            "VedaSuite is updating pricing recommendations and profitability data in the background.",
-          nextAction: "Wait for processing to finish",
+            "VedaSuite is updating pricing recommendations and profitability insights.",
+          nextAction: "Check again shortly",
         })
       : syncState.status === "FAILED" || readiness.readinessState === "FAILED"
       ? createUnifiedModuleState({
@@ -583,8 +583,8 @@ export async function getPricingProfitOverview(shopDomain: string) {
           title: "Pricing data needs attention",
           description:
             readiness.reason ??
-            "VedaSuite could not complete the latest pricing refresh.",
-          nextAction: "Retry sync",
+            "VedaSuite could not complete the latest pricing analysis.",
+          nextAction: "Try again",
         })
       : isStaleTimestamp(operational.latestProcessingAt ?? operational.store.lastSyncAt)
       ? createUnifiedModuleState({
@@ -600,10 +600,10 @@ export async function getPricingProfitOverview(shopDomain: string) {
             pricing: pricingDependencyStatus,
             fraud: fraudDependencyStatus,
           },
-          title: "Pricing data is out of date",
+          title: "Pricing insights have not been updated recently",
           description:
-            "The latest pricing refresh is older than 24 hours. Run a new sync to review current recommendations.",
-          nextAction: "Refresh pricing data",
+            "Run a new analysis to review current recommendations.",
+          nextAction: "Update pricing insights",
         })
       : !hasPricingData && syncState.status === "EMPTY_STORE_DATA"
       ? createUnifiedModuleState({
@@ -618,10 +618,10 @@ export async function getPricingProfitOverview(shopDomain: string) {
             pricing: pricingDependencyStatus,
             fraud: fraudDependencyStatus,
           },
-          title: "Pricing is ready, but no opportunities were found yet",
+          title: "Pricing analysis completed",
           description:
-            "VedaSuite is working normally, but the latest refresh did not surface pricing opportunities from the current store data.",
-          nextAction: "Sync again after more store activity",
+            "No important pricing changes are recommended from the current store activity.",
+          nextAction: "Check again after more store activity",
         })
       : hasPricingData && competitorDependencyStatus === "missing"
       ? createUnifiedModuleState({
@@ -637,9 +637,9 @@ export async function getPricingProfitOverview(shopDomain: string) {
             pricing: pricingDependencyStatus,
             fraud: fraudDependencyStatus,
           },
-          title: "Pricing insights are available. Competitor data is still being processed.",
+          title: "Pricing insights are available",
           description:
-            "You can review pricing recommendations now while VedaSuite continues preparing competitor-based comparisons.",
+            "Baseline pricing recommendations are ready. Competitor-informed comparisons will improve after competitor websites are analyzed.",
           nextAction: "Review pricing insights",
         })
       : hasPricingData
@@ -874,11 +874,11 @@ export async function getPricingProfitOverview(shopDomain: string) {
       title: moduleState.title,
       description:
         primaryState === "PARTIAL_READINESS"
-          ? "Baseline recommendations are active from store, order, and margin signals. Competitor-informed pricing will improve after competitor monitoring completes."
+          ? "Baseline recommendations are active from store, order, and margin signals. Competitor-informed pricing will improve after competitor websites are analyzed."
           : primaryState === "READY"
-          ? "Recommendations and profit guidance are live from the latest synced store data."
+          ? "Recommendations and profit guidance are ready from recent store activity."
           : primaryState === "EMPTY_HEALTHY"
-          ? "The pricing engine ran successfully, but no important pricing changes are recommended right now."
+          ? "Pricing analysis completed, but no important pricing changes are recommended right now."
           : moduleState.description,
       nextAction: moduleState.nextAction,
     },

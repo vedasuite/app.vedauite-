@@ -265,7 +265,7 @@ export function TrustAbusePage() {
         <Layout>
           <Layout.Section>
             <Banner title="Upgrade required: Starter, Growth, or Pro" tone="info">
-              <p>Fraud Intelligence is available on Trial, Growth, Pro, or Starter when this is your selected core module.</p>
+              <p>Fraud Intelligence is available on Trial, Growth, Pro, or Starter when it is your selected Starter feature.</p>
             </Banner>
           </Layout.Section>
           <Layout.Section>
@@ -304,7 +304,7 @@ export function TrustAbusePage() {
         {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (
           <Layout.Section>
             <Banner title={overview.readiness?.readinessState === "FAILED" ? "Fraud intelligence needs attention" : "Fraud intelligence is still preparing data"} tone={overview.readiness?.readinessState === "FAILED" ? "critical" : "warning"}>
-              <p>{overview.readiness?.reason ?? "VedaSuite will populate this module after live sync and processing complete."}</p>
+              <p>{overview.readiness?.reason ?? "VedaSuite will show fraud insights after more order and refund activity is available."}</p>
             </Banner>
           </Layout.Section>
         ) : null}
@@ -340,7 +340,7 @@ export function TrustAbusePage() {
                 </InlineStack>
                 {actionQueue.length === 0 ? (
                   <Banner title="No urgent fraud reviews are open" tone="success">
-                    <p>The queue is currently clear. Keep monitoring return abuse and chargeback signals for new activity.</p>
+                    <p>No high-risk orders detected right now.</p>
                   </Banner>
                 ) : (
                   <BlockStack gap="200">
@@ -724,7 +724,7 @@ export function TrustAbusePage() {
         <Modal.Section>
           <BlockStack gap="300">
             <Text as="p" tone="subdued">
-              Evidence refreshed {formatTimestamp(overview.readiness?.lastUpdatedAt ?? null)}.
+              Evidence updated {formatTimestamp(overview.readiness?.lastUpdatedAt ?? null)}.
             </Text>
             <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
               <Card>

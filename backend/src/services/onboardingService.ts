@@ -435,9 +435,9 @@ export async function getOnboardingState(shopDomain: string) {
           {
             key: "competitor-sample",
             module: "Competitor Intelligence",
-            title: "Sample preview: Competitor changed price on a monitored product",
+            title: "Sample preview: Competitor changed price on a tracked product",
             detail:
-              "Sample preview only. Live competitor changes appear after domains are connected and the first monitoring run completes.",
+              "Sample preview only. Live competitor changes appear after competitor websites are connected and analysis completes.",
           },
           {
             key: "pricing-sample",
@@ -456,7 +456,7 @@ export async function getOnboardingState(shopDomain: string) {
         null,
       unlockedFeatures: [
         subscription.enabledModules.fraud ? "Fraud detection" : null,
-        subscription.enabledModules.competitor ? "Competitor tracking" : null,
+        subscription.enabledModules.competitor ? "Competitor analysis" : null,
         subscription.enabledModules.pricing ? "Pricing optimization" : null,
       ].filter((value): value is string => !!value),
       lockedFeatures: [

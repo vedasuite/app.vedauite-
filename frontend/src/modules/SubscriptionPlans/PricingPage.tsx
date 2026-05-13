@@ -115,7 +115,7 @@ type PlanCatalogEntry = {
   priceLabel: string;
   summary: string;
   featureBullets: string[];
-  moduleBullets: string[];
+  includedFeatureBullets: string[];
   idealFor: string;
   recommended?: boolean;
 };
@@ -130,7 +130,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Plan-based access managed through Shopify",
       "Billing and settings access",
     ],
-    moduleBullets: [
+    includedFeatureBullets: [
       "Choose Trust & Abuse Intelligence",
       "Or choose Competitor Intelligence",
     ],
@@ -139,13 +139,13 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   GROWTH: {
     planName: "GROWTH",
     priceLabel: "$49/month",
-    summary: "Growth unlocks the main operating modules for stores that need broader merchant intelligence.",
+    summary: "Growth unlocks the main workflows for stores that need broader merchant intelligence.",
     featureBullets: [
       "Trust & Abuse Intelligence",
       "Competitor Intelligence",
       "Pricing baseline and reports access",
     ],
-    moduleBullets: [
+    includedFeatureBullets: [
       "Trust & Abuse",
       "Competitor Intelligence",
       "Pricing & Profit",
@@ -163,7 +163,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Advanced pricing and profit features",
       "Full Pro-only automations and deeper strategy tooling",
     ],
-    moduleBullets: [
+    includedFeatureBullets: [
       "Trust & Abuse",
       "Competitor Intelligence",
       "Pricing & Profit",
@@ -457,7 +457,7 @@ export function PricingPage() {
   return (
     <Page
       title="Manage your plan and feature access"
-      subtitle="Choose a plan, compare module coverage, and manage Shopify billing without relying on redirect-only state."
+      subtitle="Choose a plan, compare included features, and manage Shopify billing."
     >
       <Layout>
         {error ? (
@@ -550,7 +550,7 @@ export function PricingPage() {
                 Choose the VedaSuite plan that fits your store
               </Text>
               <Text as="p" tone="subdued">
-                Pick the plan that matches the modules your team needs today.
+                Pick the plan that matches the workflows your team needs today.
                 Some recommendations become stronger as VedaSuite processes more
                 Shopify product and order history.
               </Text>
@@ -726,7 +726,7 @@ export function PricingPage() {
                         Modules included
                       </Text>
                       <List type="bullet">
-                        {catalog.moduleBullets.map((moduleName) => (
+                        {catalog.includedFeatureBullets.map((moduleName) => (
                           <List.Item key={moduleName}>{moduleName}</List.Item>
                         ))}
                       </List>
@@ -804,8 +804,8 @@ export function PricingPage() {
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Starter</Text>
-                  <Text as="p">One selected module</Text>
-                  <Text as="p">One selected module</Text>
+                  <Text as="p">One selected feature</Text>
+                  <Text as="p">One selected feature</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
@@ -845,7 +845,7 @@ export function PricingPage() {
               </Text>
               <List type="bullet">
                 <List.Item>
-                  Starter includes one selected module. Upgrade anytime if you need broader module coverage.
+                  Starter includes one selected feature. Upgrade anytime if you need broader coverage.
                 </List.Item>
                 <List.Item>
                   Growth is the clearest default choice for stores that want trust, competitor, pricing, and report coverage together.

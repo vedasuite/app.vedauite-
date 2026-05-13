@@ -1,18 +1,28 @@
 # Final Shopify Submission Status
 
-Timestamp: `2026-05-05T18:26:00+05:30`
+Timestamp: `2026-05-13T00:00:00+05:30`
 
 ## Latest code state
 
 - Active app repo: `app-repo`
 - Latest pushed GitHub commit before this local blocker-fix batch: `da386d1`
-- Current status of this Starter-switch fix batch: local changes verified, not yet owner-live-QA verified
+- Current status of this approval-readiness polish batch: merchant-facing copy updated and build/search verified locally
+
+## Final merchant experience polish
+
+- Dashboard noise reduced so synthetic-feeling recent insights are filtered and calm healthy/empty states are shown when there is no meaningful merchant action.
+- Fraud, competitor, pricing, profit, reports, onboarding, settings, and billing copy now uses merchant SaaS wording instead of debug/system language.
+- Competitor Intelligence copy now says competitor websites/analysis and hides operational language such as stale monitoring, domains checked, or setup incomplete from merchant-facing states.
+- Pricing recommendations are framed as baseline/example recommendations when store activity or demo catalog signals are limited.
+- Billing copy now emphasizes current plan, included features, active subscription, upgrade/downgrade, and plan approval without test/dev wording.
+- Supporting evidence UX remains an intentional drawer/section review flow with clearer empty-state language when evidence is not yet available.
+- Frontend wording search completed for `pending sync`, `setup incomplete`, `stale`, `entitlement`, `capability`, `monitoring`, `initialized`, and `processing`; remaining hits are implementation identifiers/status handling rather than merchant-facing copy.
 
 ## Local code verification
 
 - Status: PASS
-- Backend build: PASS
-- Frontend build: PASS
+- Backend build: PASS (`npm.cmd run build` in `backend`)
+- Frontend build: PASS (`npm.cmd run build` in `frontend`; rerun outside sandbox after local Vite config read was blocked)
 - Prisma validate: PASS
 - Prisma generate: PASS
 
@@ -98,5 +108,5 @@ Owner must still verify in the deployed embedded app:
 
 Why:
 
-- Local code verification is complete and passing.
-- Final Shopify submission must remain blocked until the owner completes live Shopify QA and records evidence for the remaining real-store flows.
+- Local code verification for this final polish pass is complete and passing.
+- Final Shopify submission must remain blocked until the owner completes live Shopify QA and records evidence for the remaining real-store flows after this polish is deployed.

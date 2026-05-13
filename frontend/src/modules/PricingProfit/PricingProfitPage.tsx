@@ -242,8 +242,8 @@ function StatusBanner({
       );
     case "syncing":
       return (
-        <Banner title="Refreshing pricing engine" tone="info">
-          <p>VedaSuite is processing synced store data and rebuilding pricing guidance.</p>
+        <Banner title="Updating pricing insights" tone="info">
+          <p>VedaSuite is gathering pricing insights from the latest store activity.</p>
         </Banner>
       );
     case "empty_no_data":
@@ -437,7 +437,7 @@ export function PricingProfitPage() {
       title="AI Pricing Engine"
       subtitle="Review the products that need pricing attention, why they were flagged, and what data supports each action."
       primaryAction={{
-        content: refreshing ? "Refreshing..." : "Refresh pricing view",
+        content: refreshing ? "Updating..." : "Update pricing insights",
         onAction: () => void loadOverview("refresh"),
         disabled: refreshing,
       }}
@@ -453,7 +453,7 @@ export function PricingProfitPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
                   {screenState.status === "syncing"
-                    ? "Pricing refresh is in progress"
+                    ? "Pricing insights are updating"
                     : "Preparing pricing inputs"}
                 </Text>
                 <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
@@ -488,7 +488,7 @@ export function PricingProfitPage() {
                 </Text>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => void loadOverview("retry")}>
-                    Retry pricing refresh
+                    Try again
                   </Button>
                   <Button onClick={() => navigateEmbedded("/app/dashboard")}>
                     Open dashboard
@@ -519,7 +519,7 @@ export function PricingProfitPage() {
                     <Text as="p">{processing?.salesOrders ?? 0}</Text>
                   </div>
                   <div className="vs-signal-stat">
-                    <Text as="p" variant="bodySm" tone="subdued">Competitor inputs checked</Text>
+                    <Text as="p" variant="bodySm" tone="subdued">Competitor insights</Text>
                     <Text as="p">{processing?.competitorInputs ?? 0}</Text>
                   </div>
                   <div className="vs-signal-stat">
@@ -535,7 +535,7 @@ export function PricingProfitPage() {
                 </Text>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => void loadOverview("refresh")}>
-                    Retry pricing refresh
+                    Try again
                   </Button>
                   <Button onClick={() => navigateEmbedded("/app/dashboard")}>
                     Open dashboard

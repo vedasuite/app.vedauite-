@@ -198,23 +198,22 @@ export function SettingsPage() {
 
   return (
     <Page
-      title="Configure sync, alerts, and app preferences"
-      subtitle="Manage store settings, sync preferences, module configuration, and operational controls."
+      title="Configure alerts and app preferences"
+      subtitle="Manage store preferences, connected workflows, and merchant controls."
     >
       <Layout>
         <Layout.Section>
           <Banner title="Merchant controls" tone="info">
             <p>
-              Settings stay available on every plan. The controls shown here adapt to the modules
-              currently enabled for the store.
+              Settings stay available on every plan. The controls shown here adapt to the features currently included for the store.
             </p>
           </Banner>
         </Layout.Section>
         {syncing ? (
           <Layout.Section>
-            <Banner title="Refreshing merchant controls" tone="info">
+            <Banner title="Loading merchant controls" tone="info">
               <p>
-                VedaSuite is syncing saved merchant preferences in the background. The page stays usable while live values load.
+                VedaSuite is loading saved merchant preferences. The page stays usable while values load.
               </p>
             </Banner>
           </Layout.Section>
@@ -253,7 +252,7 @@ export function SettingsPage() {
                   <Badge tone={activePlanTone}>{activePlanLabel}</Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  Settings remain available on every plan and adapt to active modules.
+                  Settings remain available on every plan and adapt to active features.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Operating profile: {operatingProfile}
@@ -398,9 +397,9 @@ export function SettingsPage() {
                 ) : selectedTab === 1 ? (
                   <BlockStack gap="300">
                     {!competitorEnabled ? (
-                      <Banner title="Competitor settings can be prepared ahead of activation" tone="info">
+                      <Banner title="Competitor websites can be prepared ahead of activation" tone="info">
                         <p>
-                          You can prepare tracked domains now. Live competitor monitoring will start the moment a plan with Competitor Intelligence is active.
+                          You can prepare competitor websites now. Competitor analysis starts when a plan with Competitor Intelligence is active.
                         </p>
                       </Banner>
                     ) : null}

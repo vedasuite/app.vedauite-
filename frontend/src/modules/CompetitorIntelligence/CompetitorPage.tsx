@@ -163,30 +163,30 @@ function createEmptyOverview(): CompetitorOverview {
       activePromotionsCount: 0,
       stockAlertsCount: 0,
       coverageStatus: "Add domains",
-      title: "Add competitor domains to begin monitoring",
+      title: "Add competitor websites to begin analysis",
       description:
-        "Add competitor domains before VedaSuite can monitor comparable competitor products.",
+        "Add competitor websites to begin tracking pricing and product trends.",
       confidenceExplanation:
-        "VedaSuite only shows comparable products after it finds strong live product evidence on the monitored competitor domains.",
+        "Comparable products appear after VedaSuite finds strong live product evidence on the selected competitor websites.",
       actionPanel: {
-        headline: "Complete monitoring setup",
+        headline: "Begin competitor analysis",
         explanation:
-          "Add domains, then run the first refresh so VedaSuite can look for real comparable products.",
-        actions: ["Add competitor domains", "Run the first refresh"],
+          "Add competitor websites, then run the first analysis so VedaSuite can look for comparable products.",
+        actions: ["Add competitor websites", "Run competitor analysis"],
       },
-      nextAction: "Add competitor domains",
-      toastMessage: "Add competitor domains before refreshing competitor monitoring.",
+      nextAction: "Add competitor websites",
+      toastMessage: "Add competitor websites before running competitor analysis.",
     },
     sourceBreakdown: { website: 0, googleShopping: 0, metaAds: 0 },
     moveFeed: [],
     actionSuggestions: [],
     weeklyReport: {
-      headline: "Add competitor domains to start the weekly brief",
+      headline: "Add competitor websites to start the weekly brief",
       whyItMatters:
-        "VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful.",
+        "VedaSuite needs a completed analysis with matched products before weekly reporting becomes useful.",
       merchantBrief:
-        "VedaSuite will build a weekly competitor brief after the first successful matched refresh.",
-      nextBestAction: "Add competitor domains and run your first refresh.",
+        "VedaSuite will build a weekly competitor brief after the first completed matched analysis.",
+      nextBestAction: "Add competitor websites and run your first analysis.",
     },
     lowConfidenceRows: [],
     productCoverage: {
@@ -199,7 +199,7 @@ function createEmptyOverview(): CompetitorOverview {
         missingPrice: 0,
       },
       explanation:
-        "Only active priced products are monitored for competitor overlap.",
+        "Only active priced products are reviewed for competitor overlap.",
     },
   };
 }
@@ -269,43 +269,43 @@ function getBannerTone(state: CompetitorPrimaryState) {
 function getPageSubtitle(state: CompetitorPrimaryState) {
   switch (state) {
     case "SETUP_INCOMPLETE":
-      return "Add competitor domains to begin monitoring competitor products.";
+      return "Add competitor websites to begin tracking pricing and product trends.";
     case "AWAITING_FIRST_RUN":
-      return "Domains are configured. Run the first refresh to begin competitor monitoring.";
+      return "Competitor websites are ready. Run the first analysis to begin.";
     case "NO_MATCHES":
-      return "Competitor monitoring completed. No comparable products were identified yet.";
+      return "Competitor analysis completed. No matching products were identified yet.";
     case "LOW_CONFIDENCE":
-      return "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable matches yet.";
+      return "Possible product matches were found, but they need stronger evidence before they are shown as recommendations.";
     case "NO_CHANGES":
-      return "Monitoring is active and ready to surface competitor changes when they appear.";
+      return "Competitor analysis is active and ready to surface changes when they appear.";
     case "CHANGES_DETECTED":
       return "Review competitor price moves, promotion changes, and recommended responses.";
     case "STALE":
-      return "Refresh competitor data before using it for decisions.";
+      return "Competitor analysis has not been updated recently.";
     case "FAILURE":
-      return "The latest competitor refresh needs attention before fresh monitoring can resume.";
+      return "The latest competitor analysis needs attention before new insights can appear.";
   }
 }
 
 function getPrimaryActionLabel(state: CompetitorPrimaryState) {
-  if (state === "SETUP_INCOMPLETE") return "Add competitor domains";
+  if (state === "SETUP_INCOMPLETE") return "Add competitor websites";
   if (state === "CHANGES_DETECTED") return "View changes";
   if (state === "LOW_CONFIDENCE") return "Review coverage";
-  return "Refresh monitoring";
+  return "Run analysis";
 }
 
 function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" | "strategy") {
   if (tab === "tracked") {
-    if (state === "SETUP_INCOMPLETE") return "Add competitor domains to build the tracked products table.";
-    if (state === "AWAITING_FIRST_RUN") return "Run the first refresh to build the tracked products table.";
-    if (state === "NO_MATCHES") return "Competitor monitoring completed. No comparable products were identified yet.";
-    if (state === "LOW_CONFIDENCE") return "Possible competitor pages were found, but they were excluded because the match confidence was too low.";
+    if (state === "SETUP_INCOMPLETE") return "Add competitor websites to begin tracking pricing and product trends.";
+    if (state === "AWAITING_FIRST_RUN") return "Run the first analysis to build the tracked products table.";
+    if (state === "NO_MATCHES") return "Competitor analysis completed. No matching products were identified yet.";
+    if (state === "LOW_CONFIDENCE") return "Possible competitor pages were found, but more evidence is needed before they appear here.";
     return "Tracked products will appear here after competitor data becomes available.";
   }
   if (tab === "feed") {
-    if (state === "NO_MATCHES") return "No move feed is available yet because VedaSuite has not found comparable competitor products.";
-    if (state === "LOW_CONFIDENCE") return "No move feed is available yet because the latest possible matches were too weak to trust.";
-    if (state === "NO_CHANGES") return "Monitoring is active. No price, stock, or promotion changes were detected in the latest refresh.";
+    if (state === "NO_MATCHES") return "No competitor actions are available yet because no matching products were identified.";
+    if (state === "LOW_CONFIDENCE") return "No competitor actions are available yet because more evidence is needed.";
+    if (state === "NO_CHANGES") return "Competitor analysis is active. No price, stock, or promotion changes were found.";
     return "The move feed will populate as competitor changes are detected.";
   }
   if (state === "LOW_CONFIDENCE") {
@@ -411,7 +411,7 @@ export function CompetitorPage() {
         setOverview(createEmptyOverview());
         setConnectors([]);
         setResponseEngine(createEmptyResponseEngine());
-        setToast("Competitor monitoring could not be loaded. Please try again.");
+        setToast("Competitor analysis could not be loaded. Please try again.");
       });
 
     return () => {
@@ -476,8 +476,8 @@ export function CompetitorPage() {
       });
       await refreshCompetitorState(
         domains.length > 0
-          ? "Competitor tracking domains updated."
-          : "Competitor tracking domains cleared."
+          ? "Competitor websites updated."
+          : "Competitor websites cleared."
       );
       setModalOpen(false);
     } catch {
@@ -493,7 +493,7 @@ export function CompetitorPage() {
       }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 });
       await refreshCompetitorState(ingestResponse.result.merchantMessage ?? null);
     } catch {
-      setToast("Competitor refresh failed. Please try again.");
+      setToast("Competitor analysis failed. Please try again.");
     } finally {
       setIngesting(false);
     }
@@ -521,19 +521,19 @@ export function CompetitorPage() {
     ["Active promotions", overview.competitorState?.activePromotionsCount ?? 0],
     ["Stock alerts", overview.competitorState?.stockAlertsCount ?? 0],
     ["Domains reviewed", overview.competitorState?.checkedDomainsCount ?? 0],
-    ["Monitoring freshness", overview.competitorState?.freshnessLabel ?? "Unknown"],
+    ["Analysis recency", overview.competitorState?.freshnessLabel ?? "Unknown"],
     ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
   ];
 
-  const monitoringStatusRows = [
+  const analysisStatusRows = [
     ["Primary state", overview.competitorState?.title ?? "Unknown"],
     [
-      "Last successful refresh",
+      "Last successful analysis",
       formatDateTime(overview.competitorState?.lastSuccessfulRunAt),
     ],
-    ["Last refresh attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
+    ["Last analysis attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
     ["Domains reviewed", String(overview.competitorState?.checkedDomainsCount ?? 0)],
-    ["Eligible products monitored", String(overview.competitorState?.monitoredProductsCount ?? overview.productCoverage?.eligibleProductsCount ?? 0)],
+    ["Eligible products reviewed", String(overview.competitorState?.monitoredProductsCount ?? overview.productCoverage?.eligibleProductsCount ?? 0)],
     ["Comparable matches", String(overview.competitorState?.validMatchedProductsCount ?? overview.competitorState?.matchedProductsCount ?? 0)],
     ["Low-confidence matches", String(overview.competitorState?.lowConfidenceMatchesCount ?? 0)],
     ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
@@ -566,15 +566,15 @@ export function CompetitorPage() {
         <Layout>
           {subscriptionLoading ? (
             <Layout.Section>
-              <Banner title="Loading competitor monitoring" tone="info">
-                <p>VedaSuite is loading competitor state, coverage, and response guidance.</p>
+              <Banner title="Loading competitor analysis" tone="info">
+                <p>VedaSuite is loading competitor insights and response guidance.</p>
               </Banner>
             </Layout.Section>
           ) : null}
 
           <Layout.Section>
             <Banner
-              title={overview.competitorState?.title ?? "Competitor monitoring"}
+              title={overview.competitorState?.title ?? "Competitor analysis"}
               tone={getBannerTone(primaryState)}
             >
               <BlockStack gap="200">
@@ -636,7 +636,7 @@ export function CompetitorPage() {
                         ? overview.competitorState.actionPanel.actions
                         : overview.actionSuggestions?.length
                         ? overview.actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
-                        : [overview.competitorState?.nextAction ?? "Review competitor monitoring state."]
+                        : [overview.competitorState?.nextAction ?? "Review competitor analysis."]
                     ).map((item) => (
                       <Text key={item} as="p">
                         - {item}
@@ -650,10 +650,10 @@ export function CompetitorPage() {
                 <Card>
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingMd">
-                    Monitoring status
+                    Analysis status
                   </Text>
                   <BlockStack gap="200">
-                    {monitoringStatusRows.map(([label, value]) => (
+                    {analysisStatusRows.map(([label, value]) => (
                       <InlineStack key={label} align="space-between" blockAlign="start">
                         <Text as="p" variant="bodySm" tone="subdued">
                           {label}
@@ -690,7 +690,7 @@ export function CompetitorPage() {
                   </Text>
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Excluded from monitoring
+                      Not included in analysis
                     </Text>
                     <Text as="p" variant="bodySm">
                       Archived: {overview.productCoverage?.excludedProducts.archived ?? 0}

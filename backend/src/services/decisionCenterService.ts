@@ -98,7 +98,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       automationPosture:
         riskyCustomer.creditScore < 50
           ? "Eligible for trust-based exception gates"
-          : "Advisory trust monitoring only",
+          : "Advisory trust review only",
     });
   }
 
@@ -115,7 +115,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       confidence: competitorSignal.promotion ? 82 : 68,
       recommendedAction: competitorSignal.promotion
         ? "Run a competitor response play"
-        : "Hold and monitor",
+        : "Hold current pricing",
       explanationPoints: [
         `Source: ${competitorSignal.source}.`,
         competitorSignal.stockStatus

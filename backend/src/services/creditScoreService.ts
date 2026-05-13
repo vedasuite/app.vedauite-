@@ -75,7 +75,7 @@ function mapCustomer(customer: {
         ? "Eligible for trusted-buyer fast-lane"
         : customer.creditScore < 50
         ? "Route into review-first trust controls"
-        : "Use standard handling with monitoring",
+        : "Use standard handling with periodic review",
     reasons,
   };
 }
@@ -169,7 +169,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
       title: "Normal buyer watch layer",
       audience: "Normal buyers (50-79)",
       recommendation:
-        "Maintain standard refund handling while monitoring for rising refund or fraud patterns.",
+        "Maintain standard refund handling and review rising refund or fraud patterns.",
       operationalAction: "Escalate only when fraud signals or refund frequency increase.",
       automationMode: "Advisory automation",
       confidence: 71,
@@ -200,7 +200,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
         ? "Review before refund exception"
         : customer.creditScore >= 80
         ? "Trusted handling candidate"
-        : "Standard monitoring",
+        : "Standard review",
     reasons: customer.reasons,
     confidence: customer.confidence,
     automationPosture: customer.automationPosture,

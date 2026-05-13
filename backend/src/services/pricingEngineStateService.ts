@@ -101,10 +101,10 @@ export function derivePricingEngineViewState(input: {
   ) {
     return {
       status: "syncing",
-      title: "Pricing data is still syncing",
+      title: "Pricing insights are being prepared",
       description:
-        "VedaSuite is still processing store data before it can publish a usable pricing view.",
-      nextAction: "Wait for processing to finish",
+        "VedaSuite is gathering pricing insights from the latest store activity.",
+      nextAction: "Check again shortly",
       emptyReason: null,
       processingSummary,
       timedOutSources: input.timedOutSources,
@@ -122,10 +122,10 @@ export function derivePricingEngineViewState(input: {
   ) {
     return {
       status: "empty_no_data",
-      title: "Pricing data has not been prepared yet",
+      title: "Pricing insights will appear automatically",
       description:
-        "Run the first Shopify sync so VedaSuite can load catalog data and start building pricing recommendations.",
-      nextAction: "Run live sync",
+        "More store activity is needed before advanced pricing recommendations are available.",
+      nextAction: "Update store insights",
       emptyReason: "no_catalog_data",
       processingSummary,
       timedOutSources: input.timedOutSources,
@@ -137,10 +137,10 @@ export function derivePricingEngineViewState(input: {
   if (input.productsCount === 0) {
     return {
       status: "empty_no_data",
-      title: "No catalog data is available yet",
+      title: "More catalog activity is needed",
       description:
-        "VedaSuite needs synced Shopify products before it can analyze pricing opportunities.",
-      nextAction: "Sync products",
+        "Pricing insights will appear after Shopify products are available.",
+      nextAction: "Update product insights",
       emptyReason: "no_catalog_data",
       processingSummary,
       timedOutSources: input.timedOutSources,
@@ -170,8 +170,8 @@ export function derivePricingEngineViewState(input: {
       title: "Pricing recommendations are ready",
       description:
         input.competitorCount === 0
-          ? "Baseline pricing recommendations are ready. Competitor-informed comparisons will improve after competitor data is synced."
-          : "Pricing recommendations are ready from the latest synced store data.",
+          ? "Baseline recommendations are ready. Review before applying."
+          : "Pricing insights are ready from the latest store activity.",
       nextAction: "Review recommendations",
       emptyReason: null,
       processingSummary,
@@ -184,10 +184,10 @@ export function derivePricingEngineViewState(input: {
   if (input.competitorCount === 0) {
     return {
       status: "empty_no_data",
-      title: "No competitor input is available yet",
+      title: "Competitor-informed pricing will appear later",
       description:
-        "Pricing baselines are loaded, but competitor-informed pricing is not available until competitor monitoring collects data.",
-      nextAction: "Set up competitor monitoring",
+        "Baseline pricing is available. Add competitor websites when you want market comparisons.",
+      nextAction: "Add competitor websites",
       emptyReason: "no_competitor_input",
       processingSummary,
       timedOutSources: input.timedOutSources,
@@ -198,10 +198,10 @@ export function derivePricingEngineViewState(input: {
 
   return {
     status: "empty_no_data",
-    title: "No pricing recommendations yet",
+    title: "More activity is needed for pricing recommendations",
     description:
-      "VedaSuite processed the latest data, but the pricing engine did not find strong recommendations to publish right now.",
-    nextAction: "Refresh after the next sync",
+      "Pricing analysis completed, but no strong recommendations are available right now.",
+    nextAction: "Check again after more store activity",
     emptyReason: "no_recommendations",
     processingSummary,
     timedOutSources: input.timedOutSources,

@@ -221,18 +221,18 @@ function buildSetupSummary(input: {
     input.billing.ready ? null : input.billing.description,
     input.selectedModuleState === "ready"
       ? null
-      : "Choose a module with enough data before marking setup complete.",
+      : "Choose a workflow with enough activity before marking the store ready.",
   ].filter((value): value is string => !!value);
 
   const nextAction =
     !input.connection.ready
       ? { label: "Reconnect Shopify", route: "/app/onboarding" }
       : !input.sync.ready
-      ? { label: "Sync store data", route: "/app/onboarding" }
+      ? { label: "Update store insights", route: "/app/onboarding" }
       : !input.billing.ready
       ? { label: "Review billing", route: "/app/billing" }
       : input.selectedModuleState !== "ready"
-      ? { label: "Open onboarding", route: "/app/onboarding" }
+      ? { label: "Choose workflow", route: "/app/onboarding" }
       : { label: "Open dashboard", route: "/app/dashboard" };
 
   const allCoreModulesReady =
@@ -246,20 +246,20 @@ function buildSetupSummary(input: {
   const summaryTitle = !input.connection.ready
     ? "Shopify connection needs attention"
     : !input.sync.ready
-    ? "Store sync still needs to finish"
+    ? "Store insights are being prepared"
     : !input.billing.ready
     ? "Billing still needs confirmation"
     : !minimumComplete
-    ? "Setup is still in progress"
+    ? "Complete setup to begin receiving insights"
     : allCoreModulesReady
-    ? "Store setup is complete"
-    : "Core setup is complete";
+    ? "Your store is connected and ready"
+    : "Your store is connected and ready";
 
   const summaryDescription = !minimumComplete
-    ? blockers[0] ?? "Complete the remaining setup steps before the store is marked ready."
+    ? blockers[0] ?? "Complete the remaining steps before insights appear."
     : allCoreModulesReady
-    ? "Connection, sync, billing, and all core modules are ready for normal use."
-    : "Connection, sync, and billing are ready. Some features are still preparing results.";
+    ? "Connection, billing, and core insights are ready for normal use."
+    : "Connection and billing are ready. Additional insights will appear as store activity grows.";
 
   return {
     minimumComplete,
@@ -362,7 +362,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       ? "Shopify connection verified"
       : "Shopify connection needs attention",
     description: connectionHealth.healthy
-      ? "Store access, embedded authentication, and webhook coverage are available."
+      ? "VedaSuite is connected to Shopify and ready to support store insights."
       : connectionHealth.message,
     nextAction: connectionHealth.healthy ? "Continue setup" : "Reconnect Shopify",
     route: "/app/onboarding",
@@ -377,21 +377,21 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     state: initialSyncState,
     title:
       syncStatus.status === "READY_WITH_DATA"
-        ? "Initial Shopify sync is complete"
+        ? "Shopify store data is ready"
         : syncStatus.status === "SYNC_IN_PROGRESS"
-        ? "Shopify sync is running"
+        ? "Store insights are updating"
         : syncStatus.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-        ? "Store data is still being processed"
+        ? "Store insights are being prepared"
         : syncStatus.status === "FAILED"
-        ? "Sync needs attention"
-        : "Run the first sync",
+        ? "Store connection needs attention"
+        : "Update store insights",
     description: syncStatus.reason,
     nextAction:
       initialSyncState === "ready"
         ? "Continue setup"
         : initialSyncState === "error"
-        ? "Retry sync"
-        : "Sync store data",
+        ? "Try again"
+        : "Update store insights",
     route: "/app/onboarding",
     freshnessAt: toIsoString(operational.store.lastSyncAt),
     detail: {
@@ -419,12 +419,12 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     state: billingState,
     title:
       billingState === "ready"
-        ? `${billing.planName} access is verified`
+        ? `Your ${billing.planName} subscription is active`
         : billingState === "collecting_data"
-        ? "Billing approval is still being confirmed"
+        ? "Billing approval is waiting in Shopify"
         : billingState === "error"
         ? "Billing needs attention"
-        : "Choose a plan to unlock modules",
+        : "Choose a plan to unlock included features",
     description: billing.merchantDescription,
     nextAction:
       billingState === "ready"
@@ -464,17 +464,17 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     description:
       !subscription.enabledModules.fraud
         ? "Upgrade the current plan to unlock Fraud Intelligence."
-        : operational.counts.timelineEvents > 0
-        ? "Risk checks and refund-abuse signals are available from the latest synced data."
-        : syncStatus.status === "FAILED"
-        ? "The latest sync failed before fraud checks could finish."
-        : "Sync more orders and customers so VedaSuite can build fraud and refund-abuse signals.",
+      : operational.counts.timelineEvents > 0
+        ? "Risk checks and refund-abuse signals are available from recent store activity."
+      : syncStatus.status === "FAILED"
+        ? "Store data needs attention before fraud checks can finish."
+        : "More order and customer activity is needed before advanced fraud insights appear.",
     nextAction:
       !subscription.enabledModules.fraud
         ? "Open billing"
-        : operational.counts.timelineEvents > 0
+      : operational.counts.timelineEvents > 0
         ? "Open Fraud Intelligence"
-        : "Sync store data",
+        : "Update store insights",
     route: subscription.enabledModules.fraud ? "/app/fraud-intelligence" : "/app/billing",
     freshnessAt: lastProcessingAt,
     detail: {
@@ -502,17 +502,17 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     !subscription.enabledModules.competitor
       ? "Upgrade the current plan to unlock Competitor Intelligence."
       : !competitorHasSetup
-      ? "Add competitor domains before VedaSuite can compare products and pricing."
+      ? "Add competitor websites to begin tracking pricing and product trends."
       : competitorFailed
       ? operational.latestCompetitorIngestJob?.errorMessage ??
-        "The latest competitor refresh failed."
+        "The latest competitor analysis needs attention."
       : operational.counts.competitorRows > 0
       ? isStaleTimestamp(operational.latestCompetitorAt)
-        ? "Refresh competitor results before using them for decisions."
-        : "Comparable competitor products were matched and monitoring outputs are available."
+        ? "Competitor analysis has not been updated recently."
+        : "Comparable competitor products were matched and analysis is available."
       : competitorCollecting
-      ? "Competitor monitoring is checking your selected domains."
-      : "Competitor monitoring completed. No comparable products were identified yet.";
+      ? "Competitor analysis is reviewing your selected websites."
+      : "Competitor analysis completed. No matching products were identified yet.";
   const competitorReadiness = createReadinessItem({
     state:
       competitorState === "ready" && isStaleTimestamp(operational.latestCompetitorAt)
@@ -522,21 +522,21 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.competitor
         ? "Competitor Intelligence is locked"
         : !competitorHasSetup
-        ? "Add competitor domains to begin monitoring"
+        ? "Add competitor websites to begin analysis"
         : operational.counts.competitorRows > 0 && !isStaleTimestamp(operational.latestCompetitorAt)
-        ? "Competitor monitoring active"
+        ? "Competitor analysis is active"
         : competitorCollecting
-        ? "Competitor monitoring is running"
-        : "Add competitor domains to begin monitoring",
+        ? "Competitor analysis is updating"
+        : "Add competitor websites to begin analysis",
     description: competitorDescription,
     nextAction:
       !subscription.enabledModules.competitor
         ? "Open billing"
-        : !competitorHasSetup
-        ? "Add competitor domains"
-        : operational.counts.competitorRows > 0
+      : !competitorHasSetup
+        ? "Add competitor websites"
+      : operational.counts.competitorRows > 0
         ? "Open Competitor Intelligence"
-        : "Review domains and tracked products",
+        : "Review competitor websites and tracked products",
     route: subscription.enabledModules.competitor
       ? "/app/competitor-intelligence"
       : "/app/billing",
@@ -575,8 +575,8 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
           ? "ready"
           : "missing",
     },
-    title: "Pricing readiness",
-    description: "Pricing readiness is being derived from persisted store data.",
+    title: "Pricing insights",
+    description: "Pricing insights are based on available store activity.",
   });
   const pricingViewState = derivePricingEngineViewState({
     syncStatus: syncStatus.status,
@@ -612,14 +612,14 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "AI Pricing Engine needs attention"
         : pricingViewState.status === "syncing"
         ? "Pricing analysis is updating"
-        : "Sync product and order history to prepare pricing analysis",
+        : "More store activity is needed before pricing analysis is ready",
     description: pricingViewState.description,
     nextAction:
       !subscription.enabledModules.pricing
         ? "Open billing"
         : pricingViewState.status === "ready"
         ? "Open AI Pricing Engine"
-        : pricingViewState.nextAction ?? "Sync store data",
+        : pricingViewState.nextAction ?? "Update store insights",
     route: subscription.enabledModules.pricing ? "/app/ai-pricing-engine" : "/app/billing",
     freshnessAt: pricingViewState.lastSuccessfulRunAt,
     detail: {

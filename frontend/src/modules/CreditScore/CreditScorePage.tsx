@@ -238,7 +238,7 @@ export function CreditScorePage() {
                       50-79
                     </Text>
                     <Text as="p" tone="subdued">
-                      Mixed behavior that usually needs standard merchant handling and monitoring.
+                      Mixed behavior that usually needs standard merchant handling and periodic review.
                     </Text>
                   </BlockStack>
                 </Card>

@@ -1,6 +1,28 @@
 # Approval Readiness Fix Report
 
-Final verification timestamp: `2026-05-04T21:41:03.7474318+05:30`
+Final verification timestamp: `2026-05-13T00:00:00+05:30`
+
+## 2026-05-13 final merchant experience polish
+
+This pass is intentionally limited to wording, merchant-facing copy, empty states, dashboard simplification, and Shopify approval polish. It does not rewrite backend architecture, billing logic, database models, or entitlement systems.
+
+### Merchant-facing improvements
+
+- Replaced system/debug wording such as pending sync, setup incomplete, stale monitoring, processing, entitlement, capability, and webhook language where it could appear in merchant UI.
+- Dashboard Recent Insights now favors real actionable events and calm empty/healthy messages instead of synthetic-looking alert noise.
+- Fraud and Trust Abuse empty states now communicate that no high-risk orders are currently detected instead of implying missing data.
+- Competitor Intelligence now uses competitor websites and competitor analysis language, with success copy such as `Competitor analysis completed. No matching products were identified yet.`
+- Pricing and profit copy now frames limited outputs as baseline/example recommendations and avoids exaggerated certainty for Shopify sample catalog products.
+- Billing copy now emphasizes `Current plan`, `Included features`, `Upgrade`, `Downgrade`, `Active subscription`, and Shopify approval without developer/test wording.
+- Reports, onboarding, settings, and app readiness copy now use connected/ready/available/insights language instead of sync/module/system language.
+
+### Verification note
+
+- Required frontend search was run for: `pending sync`, `setup incomplete`, `stale`, `entitlement`, `capability`, `monitoring`, `initialized`, and `processing`.
+- Remaining frontend hits are internal identifiers/status enum handling such as `entitlements`, `processingSummary`, and `stale`/`processing` status branches, not merchant-facing display copy.
+- Frontend build passed with `npm.cmd run build` in `frontend` after rerunning outside the sandbox because Vite/esbuild could not read its config inside the sandbox.
+- Backend build passed with `npm.cmd run build` in `backend`.
+- Targeted backend regression tests passed for merchant labels, dashboard consistency, competitor service, pricing engine state, pricing/profit overview, readiness engine, and trust abuse overview.
 
 ## Scope of this stabilization pass
 

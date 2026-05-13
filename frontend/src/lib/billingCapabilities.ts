@@ -443,7 +443,7 @@ export function normalizeEntitlementState(
       featureAccess: buildFeatureAccess("NONE", null),
       capabilities: buildCapabilities("NONE", null),
       title: "Limited access",
-      description: "Paid modules are locked until a verified plan is active.",
+      description: "Choose a plan to unlock included features.",
     };
   }
 

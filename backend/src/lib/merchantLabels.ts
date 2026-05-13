@@ -89,7 +89,7 @@ export function formatMerchantInsightTitle(input: {
   }
 
   if (input.category === "competitor") {
-    return "Competitor monitoring updated";
+    return "Competitor analysis is ready";
   }
 
   if (input.eventType === "refund_requested") {
@@ -132,11 +132,11 @@ export function formatMerchantInsightDetail(input: {
   }
 
   if (input.category === "trust") {
-    return "Customer trust signals were refreshed from the latest synced Shopify history.";
+    return "Customer trust signals were updated from recent Shopify activity.";
   }
 
   if (input.category === "abuse") {
-    return "Refund and return behavior signals were refreshed from the latest synced Shopify history.";
+    return "Refund and return behavior signals were updated from recent Shopify activity.";
   }
 
   return input.detail;

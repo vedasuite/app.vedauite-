@@ -67,7 +67,7 @@ export function ModuleGate({
         <Layout.Section>
           <Banner title={`Upgrade required: ${requiredPlan}`} tone="info">
             <p>
-              Upgrade to {requiredPlan} to unlock this module for your store.
+              Upgrade to {requiredPlan} to unlock this workflow for your store.
             </p>
           </Banner>
         </Layout.Section>

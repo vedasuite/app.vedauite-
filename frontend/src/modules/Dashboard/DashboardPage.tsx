@@ -253,19 +253,19 @@ function toneForReadiness(value?: string | null) {
 function labelForReadiness(value?: string | null) {
   switch (value) {
     case "READY_WITH_DATA":
-      return "Ready with data";
+      return "Ready";
     case "SYNC_IN_PROGRESS":
       return "Analyzing store";
     case "SYNC_COMPLETED_PROCESSING_PENDING":
-      return "Limited insights";
+      return "Insights preparing";
     case "EMPTY_STORE_DATA":
-      return "No store data";
+      return "Waiting for store activity";
     case "FAILED":
       return "Needs attention";
     case "NOT_CONNECTED":
       return "Reconnect Shopify";
     default:
-      return "Sync required";
+      return "Connect store";
   }
 }
 
@@ -290,15 +290,15 @@ function labelForDataStatus(value?: string | null) {
     case "ready":
       return "Ready";
     case "partial":
-      return "Partial";
+      return "Limited insights";
     case "empty":
-      return "Empty";
+      return "Waiting for activity";
     case "stale":
-      return "Stale";
+      return "Update recommended";
     case "failed":
       return "Failed";
     case "processing":
-      return "Processing";
+      return "Preparing insights";
     default:
       return "Unknown";
   }
@@ -329,7 +329,23 @@ function toneForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | 
 }
 
 function labelForQuickAccessStatus(value?: DashboardQuickAccessStatus | string | null) {
-  return value ?? "Unknown";
+  switch (value) {
+    case "Collecting data":
+      return "Preparing insights";
+    case "Stale":
+      return "Update recommended";
+    case "Setup needed":
+    case "Needs setup":
+      return "Action needed";
+    case "Not refreshed":
+      return "Ready after next analysis";
+    case "Refreshing":
+      return "Updating";
+    case "Error":
+      return "Needs attention";
+    default:
+      return value ?? "Available";
+  }
 }
 
 function deriveQuickAccessDisplay(args: {
@@ -349,7 +365,7 @@ function deriveQuickAccessDisplay(args: {
   switch (args.processing.status) {
     case "not_refreshed":
       return {
-        status: "Not refreshed",
+        status: "Ready after next analysis",
         reason: args.processing.reason,
         freshnessAt: args.baseFreshnessAt ?? null,
       };
@@ -605,23 +621,23 @@ function deriveRefreshResult(args: {
   ].filter((value): value is string => !!value);
   const summary =
     refreshStatus === "failure"
-      ? "Refresh failed. Retry the sync to update dashboard data."
+      ? "Update failed. Try again to refresh your store insights."
       : metricDiffs.length > 0
-      ? `Refresh completed. ${metricDiffs.join(". ")}.`
+      ? `Analysis completed. ${metricDiffs.join(". ")}.`
       : recentInsightsChanged && !quickAccessChanged && !syncHealthChanged
-      ? "Refresh completed. Recent insights were updated. KPI values were unchanged."
+      ? "Analysis completed. Recent insights were updated."
       : quickAccessChanged && !recentInsightsChanged && !kpiChanged
-      ? "Refresh completed. Module readiness statuses were re-evaluated after refresh. KPI values were unchanged."
+      ? "Analysis completed. Feature readiness was updated."
       : syncHealthChanged && !recentInsightsChanged && !quickAccessChanged && !kpiChanged
-      ? "Refresh completed. Sync health was rechecked. KPI values were unchanged."
+      ? "Analysis completed. Store connection was rechecked."
       : visibleDataChanged
-      ? `Refresh completed${refreshStatus === "partial" ? " with partial updates" : ""}. Updated ${changedSections
+      ? `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Updated ${changedSections
           .filter((section) => section !== "Last refreshed")
           .join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} remained unchanged.` : ""}`
-      : `Refresh completed${refreshStatus === "partial" ? " with partial updates" : ""}. No visible dashboard changes were detected.`;
+      : `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Everything looks healthy right now.`;
   const noChangeExplanation =
     !kpiChanged && activitySummary?.noChangeReasons?.length
-      ? `No changes were detected because ${activitySummary.noChangeReasons.join(", ")}.`
+      ? `Everything looks healthy because ${activitySummary.noChangeReasons.join(", ")}.`
       : null;
 
   return {
@@ -1013,12 +1029,12 @@ export function DashboardPage() {
       });
       const nextPayload = await loadDashboard();
       applyDashboardPayload(nextPayload);
-      setToast("Shopify webhooks verified successfully.");
+      setToast("Shopify connection verified successfully.");
     } catch (nextError) {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Unable to register webhooks."
+          : "Unable to verify the Shopify connection."
       );
     } finally {
       setRegisteringWebhooks(false);
@@ -1098,9 +1114,9 @@ export function DashboardPage() {
   return (
     <Page
       title="Your store intelligence overview"
-      subtitle="Key monitoring metrics, readiness status, recent alerts, and direct access to each VedaSuite intelligence workflow."
+      subtitle="Key alerts, recommendations, and direct access to each VedaSuite workflow."
       primaryAction={{
-        content: "Sync Data",
+        content: "Update insights",
         onAction: () => void syncLiveStoreData(),
         loading: syncing,
         disabled: syncing,
@@ -1120,9 +1136,7 @@ export function DashboardPage() {
             <Banner title="Dashboard preview until onboarding is complete" tone="info">
               <BlockStack gap="200">
                 <p>
-                  VedaSuite is still guiding this store through setup. The metrics
-                  below are a preview only until onboarding, billing, and the first
-                  module review are complete.
+                  VedaSuite is still preparing this store. The view below stays simple until connection, billing, and the first workflow are ready.
                 </p>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => navigateEmbedded("/app/onboarding")}>
@@ -1153,7 +1167,7 @@ export function DashboardPage() {
                     Reconnect Shopify
                   </Button>
                   <Button onClick={() => void registerWebhooks()} loading={registeringWebhooks}>
-                    Verify webhooks
+                    Verify Shopify connection
                   </Button>
                 </InlineStack>
               </BlockStack>
@@ -1179,13 +1193,13 @@ export function DashboardPage() {
                 </p>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => void syncLiveStoreData()} loading={syncing}>
-                    Sync Data
+                    Update insights
                   </Button>
                   {!diagnostics?.webhooks.liveStatus ||
                   diagnostics.webhooks.liveStatus.registeredCount <
                     diagnostics.webhooks.liveStatus.totalTracked ? (
                     <Button onClick={() => void registerWebhooks()} loading={registeringWebhooks}>
-                      Fix webhooks
+                      Fix Shopify connection
                     </Button>
                   ) : null}
                 </InlineStack>
@@ -1199,12 +1213,12 @@ export function DashboardPage() {
             <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
               <BlockStack gap="100">
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Last refreshed
+                  Last updated
                 </Text>
                 <Text as="p" variant="headingMd">
                   {dashboardLastRefreshedAt
                     ? formatRelativeTimestamp(dashboardLastRefreshedAt)
-                    : "Not refreshed yet"}
+                    : "Ready after first analysis"}
                 </Text>
               </BlockStack>
               <BlockStack gap="100">
@@ -1235,10 +1249,10 @@ export function DashboardPage() {
             <Banner
               title={
                 refreshResult.refreshStatus === "success"
-                  ? "Dashboard refresh completed"
+                  ? "Store analysis completed"
                   : refreshResult.refreshStatus === "partial"
-                  ? "Dashboard refresh completed with partial updates"
-                  : "Dashboard refresh failed"
+                  ? "Store analysis completed with partial updates"
+                  : "Store analysis needs attention"
               }
               tone={
                 refreshResult.refreshStatus === "success"
@@ -1263,7 +1277,7 @@ export function DashboardPage() {
                         {refreshResult.activitySummary.customersEvaluated} customers evaluated
                       </List.Item>
                       <List.Item>
-                        {refreshResult.activitySummary.competitorPagesChecked} competitor pages checked
+                        {refreshResult.activitySummary.competitorPagesChecked} competitor pages reviewed
                       </List.Item>
                       <List.Item>
                         {refreshResult.activitySummary.pricingRecordsAnalyzed} pricing records analyzed
@@ -1275,8 +1289,8 @@ export function DashboardPage() {
                       </List.Item>
                       <List.Item>
                         {refreshResult.visibleDataChanged
-                          ? "Visible dashboard changes were verified after refresh."
-                          : "No KPI changes detected."}
+                          ? "New dashboard insights are ready."
+                          : "Everything looks healthy right now."}
                       </List.Item>
                     </List>
                   </BlockStack>
@@ -1288,13 +1302,13 @@ export function DashboardPage() {
                 ) : null}
                 <InlineStack gap="300">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Fraud: {refreshResult.moduleRefreshResults.fraud}
+                    Fraud: {labelForQuickAccessStatus(refreshResult.moduleRefreshResults.fraud)}
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Competitor: {refreshResult.moduleRefreshResults.competitor}
+                    Competitor: {labelForQuickAccessStatus(refreshResult.moduleRefreshResults.competitor)}
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Pricing: {refreshResult.moduleRefreshResults.pricing}
+                    Pricing: {labelForQuickAccessStatus(refreshResult.moduleRefreshResults.pricing)}
                   </Text>
                 </InlineStack>
               </BlockStack>
@@ -1425,7 +1439,7 @@ export function DashboardPage() {
                         </Badge>
                         {fraudQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(fraudQuickAccessDisplay.freshnessAt)}
+                            Last updated: {formatRelativeTimestamp(fraudQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>
@@ -1463,7 +1477,7 @@ export function DashboardPage() {
                         </Badge>
                         {competitorQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(competitorQuickAccessDisplay.freshnessAt)}
+                            Last updated: {formatRelativeTimestamp(competitorQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>
@@ -1501,7 +1515,7 @@ export function DashboardPage() {
                         </Badge>
                         {pricingQuickAccessDisplay.freshnessAt ? (
                           <Text as="p" variant="bodySm" tone="subdued">
-                            Last module refresh: {formatRelativeTimestamp(pricingQuickAccessDisplay.freshnessAt)}
+                            Last updated: {formatRelativeTimestamp(pricingQuickAccessDisplay.freshnessAt)}
                           </Text>
                         ) : null}
                       </BlockStack>

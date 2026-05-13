@@ -29,26 +29,26 @@ function latestIsoTimestamp(...values: Array<Date | string | null | undefined>) 
 
 function buildDashboardSummaryTitle(status: string) {
   if (status === "READY_WITH_DATA") {
-    return "Store data and module outputs are ready";
+    return "Your store is connected and ready";
   }
 
   if (status === "SYNC_COMPLETED_PROCESSING_PENDING") {
-    return "Sync completed, processing is still catching up";
+    return "Your store activity is being analyzed";
   }
 
   if (status === "EMPTY_STORE_DATA") {
-    return "Sync completed, but the store returned no usable data";
+    return "More store activity is needed for insights";
   }
 
   if (status === "FAILED") {
-    return "Latest sync failed";
+    return "Store connection needs attention";
   }
 
   if (status === "SYNC_IN_PROGRESS") {
-    return "Shopify sync is running";
+    return "Updating store insights";
   }
 
-  return "Run first sync to populate store signals";
+  return "Connect store activity to begin insights";
 }
 
 function isActionableDashboardEvent(input: {

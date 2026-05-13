@@ -252,76 +252,76 @@ function getCompetitorPrimaryStateCopy(args: {
   switch (args.primaryState) {
     case "SETUP_INCOMPLETE":
       return {
-        title: "Add competitor domains to begin monitoring",
+        title: "Add competitor websites to begin analysis",
         description:
-          "Add competitor domains before VedaSuite checks live competitor websites for comparable products.",
-        nextAction: "Add competitor domains",
-        coverageStatus: "Add domains",
-        toastMessage: "Add competitor domains before refreshing competitor monitoring.",
+          "Add competitor websites to begin tracking pricing and product trends.",
+        nextAction: "Add competitor websites",
+        coverageStatus: "Add competitor websites",
+        toastMessage: "Add competitor websites before running competitor analysis.",
       };
     case "AWAITING_FIRST_RUN":
       return {
-        title: "Configured, awaiting first successful run",
+        title: "Competitor websites are ready",
         description:
-          "Domains are configured, but VedaSuite has not completed its first successful competitor refresh yet.",
-        nextAction: "Run competitor monitoring",
-        coverageStatus: "Awaiting first run",
-        toastMessage: "Refresh started. VedaSuite is preparing the first competitor monitoring run.",
+          "Run the first competitor analysis to compare selected websites with your catalog.",
+        nextAction: "Run competitor analysis",
+        coverageStatus: "Ready for first analysis",
+        toastMessage: "Competitor analysis started.",
       };
     case "NO_MATCHES":
       return {
-        title: "Monitoring is active, but no comparable competitor products were found",
+        title: "Competitor analysis completed",
         description:
-          "Competitor monitoring completed. No comparable products were identified yet.",
-        nextAction: "Review tracked products or add more competitor domains",
-        coverageStatus: "No comparable matches found",
-        toastMessage: "Competitor monitoring completed. No comparable products were identified yet.",
+          "Competitor analysis completed. No matching products were identified yet.",
+        nextAction: "Review tracked products or add more competitor websites",
+        coverageStatus: "No matching products yet",
+        toastMessage: "Competitor analysis completed. No matching products were identified yet.",
       };
     case "LOW_CONFIDENCE":
       return {
         title: "Possible competitor matches need review",
         description:
           "VedaSuite found possible competitor pages, but the captured signals were too weak to treat them as reliable comparable products.",
-        nextAction: "Review domains, product overlap, or run another refresh",
+        nextAction: "Review websites, product overlap, or run another analysis",
         coverageStatus: "Low-confidence matches only",
         toastMessage:
-          "Refresh completed. Possible competitor matches were found, but they were not reliable enough to use yet.",
+          "Analysis completed. Possible competitor matches were found, but they need stronger evidence.",
       };
     case "NO_CHANGES":
       return {
-        title: "Monitoring is active. No competitor changes detected",
+        title: "Competitor analysis is active",
         description:
-          "Comparable products were matched successfully, but the latest refresh did not detect any new price, promotion, or stock changes.",
-        nextAction: "Review tracked products or refresh again later",
+          "Comparable products were reviewed successfully. No new price, promotion, or stock changes need attention.",
+        nextAction: "Review tracked products or run analysis again later",
         coverageStatus: "Healthy with no changes",
-        toastMessage: "Refresh completed. No competitor changes detected.",
+        toastMessage: "Competitor analysis completed. No changes need attention.",
       };
     case "CHANGES_DETECTED":
       return {
         title: "Competitor changes were detected across matched products",
-        description: `The latest refresh checked ${args.checkedDomainsCount} domains, matched ${args.validMatchedProductsCount} comparable products, and found ${args.changesDetected} live competitor changes.`,
+        description: `The latest analysis reviewed ${args.checkedDomainsCount} websites, matched ${args.validMatchedProductsCount} comparable products, and found ${args.changesDetected} competitor changes.`,
         nextAction: "View changes",
         coverageStatus: "Changes detected",
-        toastMessage: "Refresh completed. New competitor changes detected.",
+        toastMessage: "Competitor analysis completed. New competitor changes were detected.",
       };
     case "STALE":
       return {
-        title: "Competitor monitoring is stale",
-        description: `Competitor data is older than the freshness threshold. ${args.freshnessLabel}.`,
-        nextAction: "Refresh competitor monitoring",
-        coverageStatus: "Stale: refresh recommended",
-        toastMessage: "Competitor data is stale. Run a refresh to update monitoring.",
+        title: "Competitor analysis has not been updated recently",
+        description: `Run a new analysis to review the latest competitor pricing and product trends. ${args.freshnessLabel}.`,
+        nextAction: "Update competitor analysis",
+        coverageStatus: "Update recommended",
+        toastMessage: "Competitor analysis has not been updated recently.",
       };
     case "FAILURE":
     default:
       return {
-        title: "Competitor refresh failed",
+        title: "Competitor analysis needs attention",
         description:
           args.latestError ??
-          "VedaSuite could not complete the latest competitor refresh.",
-        nextAction: "Retry refresh",
-        coverageStatus: "Refresh failed",
-        toastMessage: "Competitor refresh failed. Please try again.",
+          "VedaSuite could not complete the latest competitor analysis.",
+        nextAction: "Try again",
+        coverageStatus: "Needs attention",
+        toastMessage: "Competitor analysis could not be completed. Please try again.",
       };
   }
 }
@@ -333,7 +333,7 @@ function normalizeCompetitorName(domain: string, label?: string | null) {
 function formatSourceLabel(source: string) {
   if (source === "google_shopping") return "Google Shopping (limited preview)";
   if (source === "meta_ads") return "Ad-library import (limited preview)";
-  if (source.startsWith("website")) return "Website monitoring";
+  if (source.startsWith("website")) return "Competitor website";
   return source;
 }
 
@@ -475,7 +475,7 @@ function buildStrategyDetections(rows: OverviewRow[]) {
     detections.push({
       strategy: "Inventory pressure",
       signalStrength: stockAlerts >= 6 ? "Strong" : "Moderate",
-      why: "Low-stock and out-of-stock signals are clustering in the live monitoring feed.",
+      why: "Low-stock and out-of-stock signals are clustering in the latest competitor analysis.",
       implication: "Pressure may ease without a broad pricing response if the competitor is supply constrained.",
       recommendedMove: "Hold price on hero SKUs and watch availability before reacting.",
     });
@@ -496,7 +496,7 @@ function buildStrategyDetections(rows: OverviewRow[]) {
       strategy: "Price watch only",
       signalStrength: "Early",
       why: "Current competitor coverage is mostly pricing-only and does not yet suggest a larger strategy pattern.",
-      implication: "Keep monitoring until promotion, stock, or ad signals strengthen the picture.",
+      implication: "Continue analysis until promotion, stock, or ad signals strengthen the picture.",
       recommendedMove: "Wait and monitor rather than making a reactive pricing change.",
     });
   }
@@ -758,7 +758,7 @@ export async function getCompetitorOverview(shopDomain: string) {
       : "READY";
   const freshnessFailureReason =
     freshnessHours != null && freshnessHours > 72
-      ? `Competitor monitoring is stale. The last successful refresh was ${getCompetitorFreshnessLabel(
+      ? `Competitor analysis has not been updated recently. The last successful analysis was ${getCompetitorFreshnessLabel(
           freshnessHours,
           lastSuccessAt
         ).toLowerCase()}.`
@@ -819,14 +819,14 @@ export async function getCompetitorOverview(shopDomain: string) {
       primaryState === "CHANGES_DETECTED"
         ? `${recentChanges} competitor signals detected in the last 24 hours`
         : primaryState === "NO_CHANGES"
-        ? "Monitoring is active with no new competitor changes"
+        ? "Competitor analysis is active with no new changes"
         : primaryState === "LOW_CONFIDENCE"
         ? "Possible competitor overlap was found, but confidence is still low"
         : primaryState === "NO_MATCHES"
-        ? "Monitoring is active, but no comparable matches were found"
+        ? "Competitor analysis completed, but no comparable matches were found"
         : store.competitorDomains.length > 0
-        ? "Competitor monitoring is not ready for a brief yet"
-        : "Competitor monitoring needs setup",
+        ? "Competitor analysis is not ready for a brief yet"
+        : "Add competitor websites to begin analysis",
     whyItMatters:
       primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor observations are available for pricing, promotion, stock, and visibility review."
@@ -835,24 +835,24 @@ export async function getCompetitorOverview(shopDomain: string) {
         : primaryState === "NO_MATCHES"
         ? "Your domains were refreshed successfully, but VedaSuite did not find overlapping competitor products to compare yet."
         : store.competitorDomains.length > 0
-        ? "Domains are configured, but VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful."
-        : "Add monitored domains to start capturing competitor pricing and promotion data.",
+        ? "Competitor websites are configured. Matched products are needed before weekly reporting becomes useful."
+        : "Add competitor websites to begin tracking pricing and promotion trends.",
     suggestedActions:
       actionSuggestions.length > 0
         ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
         : primaryState === "LOW_CONFIDENCE"
         ? [
-            "Review domain relevance and ensure competitor product handles overlap your active catalog.",
-            "Refresh again after refining monitored domains.",
+            "Review website relevance and ensure competitor products overlap your active catalog.",
+            "Run analysis again after refining competitor websites.",
           ]
         : primaryState === "NO_MATCHES"
         ? [
-            "Review tracked products and competitor domains for overlap.",
-            "Add more competitor domains and run another refresh.",
+            "Review tracked products and competitor websites for overlap.",
+            "Add more competitor websites and run another analysis.",
           ]
         : store.competitorDomains.length > 0
-        ? ["Run competitor ingestion.", "Review the move feed after the first live pull."]
-        : ["Add competitor domains.", "Run your first ingestion."],
+        ? ["Run competitor analysis.", "Review changes after the first analysis."]
+        : ["Add competitor websites.", "Run your first analysis."],
     reportReadiness:
       primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES"
         ? "Live competitor report available"
@@ -862,7 +862,7 @@ export async function getCompetitorOverview(shopDomain: string) {
         ? "Waiting for matched products"
         : lastSuccessAt
         ? "Waiting for matched competitor products"
-        : "Awaiting first sync",
+        : "Ready for first analysis",
     biggestMoves: moveFeed.slice(0, 3).map((item) => ({
       headline: item.headline,
       impactScore: item.impactScore,
@@ -871,21 +871,21 @@ export async function getCompetitorOverview(shopDomain: string) {
     merchantBrief:
       strategyDetections[0]?.implication ??
       ((primaryState === "CHANGES_DETECTED" || primaryState === "NO_CHANGES")
-        ? "No dominant competitor strategy has been inferred yet from the current live data."
+        ? "No dominant competitor strategy stands out from the current competitor evidence yet."
         : primaryState === "LOW_CONFIDENCE"
         ? "VedaSuite needs stronger comparable-product confirmation before it can build a reliable competitor brief."
         : primaryState === "NO_MATCHES"
         ? "VedaSuite needs comparable competitor product matches before it can build a reliable weekly brief."
-        : "VedaSuite will build a weekly competitor brief after the first successful matched refresh."),
+        : "VedaSuite will build a weekly competitor brief after the first successful matched analysis."),
     nextBestAction:
       actionSuggestions[0]?.suggestion ??
       (primaryState === "LOW_CONFIDENCE"
-        ? "Review domains and prioritize competitor sites with clearer product overlap."
+        ? "Review websites and prioritize competitor sites with clearer product overlap."
         : primaryState === "NO_MATCHES"
-        ? "Review tracked products and add more relevant competitor domains."
+        ? "Review tracked products and add more relevant competitor websites."
         : store.competitorDomains.length > 0
-        ? "Run ingestion to populate the move feed."
-        : "Add competitor domains and start monitoring."),
+        ? "Run analysis to populate competitor changes."
+        : "Add competitor websites and begin analysis."),
   };
   const moduleState =
     primaryState === "SETUP_INCOMPLETE"
@@ -918,7 +918,7 @@ export async function getCompetitorOverview(shopDomain: string) {
             pricing: pricingDependencyState,
             fraud: fraudDependencyState,
           },
-          title: "Competitor monitoring is refreshing",
+          title: "Competitor analysis is updating",
           description:
             "VedaSuite is checking competitor domains and updating matched products.",
           nextAction: "Wait for refresh to finish",
@@ -1131,51 +1131,51 @@ export async function getCompetitorOverview(shopDomain: string) {
       actionPanel: {
         headline:
           primaryState === "SETUP_INCOMPLETE"
-            ? "Complete monitoring setup"
+            ? "Add competitor websites"
             : primaryState === "AWAITING_FIRST_RUN"
-            ? "Run the first monitored refresh"
+            ? "Run the first analysis"
             : primaryState === "NO_MATCHES"
             ? "Improve comparable-product coverage"
             : primaryState === "LOW_CONFIDENCE"
             ? "Strengthen match confidence"
             : primaryState === "CHANGES_DETECTED"
             ? "Review competitor changes"
-            : "Keep monitoring active",
+            : "Keep competitor analysis active",
         explanation:
           primaryState === "SETUP_INCOMPLETE"
-            ? "Add relevant competitor domains before VedaSuite can check live competitor products."
+            ? "Add relevant competitor websites before VedaSuite can compare live competitor products."
             : primaryState === "AWAITING_FIRST_RUN"
-            ? "Domains are configured. The next refresh will test those sites against your active catalog."
+            ? "Competitor websites are configured. The next analysis will compare those sites with your active catalog."
             : primaryState === "NO_MATCHES"
-            ? "Competitor monitoring completed. No comparable products were identified yet."
+            ? "Competitor analysis completed. No matching products were identified yet."
             : primaryState === "LOW_CONFIDENCE"
-            ? "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable products yet."
+            ? "Analysis found possible overlap, but the captured competitor pages need stronger evidence."
             : primaryState === "CHANGES_DETECTED"
             ? "Prioritize the products with live price, promotion, or stock changes first."
-            : "Monitoring is working normally. No urgent competitor action is required right now.",
+            : "Competitor analysis is active. No urgent competitor action is required right now.",
         actions:
           primaryState === "SETUP_INCOMPLETE"
-            ? ["Add competitor domains", "Refresh monitoring"]
+            ? ["Add competitor websites", "Run analysis"]
             : primaryState === "AWAITING_FIRST_RUN"
-            ? ["Run competitor monitoring", "Review active catalog coverage"]
+            ? ["Run competitor analysis", "Review active catalog coverage"]
             : primaryState === "NO_MATCHES"
             ? [
-                "Review active products for overlap with monitored competitors",
-                "Add more relevant competitor domains",
-                "Refresh monitoring again",
+                "Review active products for overlap with competitor websites",
+                "Add more relevant competitor websites",
+                "Run analysis again",
               ]
             : primaryState === "LOW_CONFIDENCE"
             ? [
-                "Review domain quality and product overlap",
+                "Review website quality and product overlap",
                 "Prioritize competitors with clearer product pages",
-                "Refresh monitoring again",
+                "Run analysis again",
               ]
             : primaryState === "CHANGES_DETECTED"
             ? [
                 "Open the move feed and review changed products",
                 "Use response guidance for highest-pressure products",
               ]
-            : ["Refresh again later", "Review tracked products"],
+            : ["Run analysis again later", "Review tracked products"],
       },
       nextAction: primaryStateCopy.nextAction,
       toastMessage: primaryStateCopy.toastMessage,
@@ -1243,7 +1243,7 @@ export async function getCompetitorOverview(shopDomain: string) {
       excludedProducts: eligibleProducts.excluded,
       explanation:
         eligibleProducts.excludedCount > 0
-          ? `Draft, archived, gift-card-like, or price-missing products are excluded from competitor monitoring to keep matches useful.`
+          ? `Draft, archived, gift-card-like, or price-missing products are excluded from competitor analysis to keep matches useful.`
           : "Only active catalog products with usable pricing are monitored for competitor overlap.",
     },
     strategyDetections,
@@ -1252,7 +1252,7 @@ export async function getCompetitorOverview(shopDomain: string) {
     coverageSummary: {
       domainsConfigured: store.competitorDomains.length,
       channelsReady: [
-        store.competitorDomains.length > 0 ? "Website monitoring" : null,
+        store.competitorDomains.length > 0 ? "Competitor website" : null,
         sourceBreakdown.googleShopping > 0 ? "Google Shopping" : null,
         sourceBreakdown.metaAds > 0 ? "Meta Ad Library" : null,
       ].filter((item): item is string => item !== null),
@@ -1425,8 +1425,8 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
         status: "SUCCEEDED_NO_DATA",
         reason:
           sourceProducts.excludedCount > 0
-            ? "No eligible active products were available for competitor monitoring after draft, archived, gift-card-like, and price-missing products were excluded."
-            : "No active priced products were available for competitor monitoring yet.",
+            ? "No eligible active products were available for competitor analysis after draft, archived, gift-card-like, and price-missing products were excluded."
+            : "No active priced products were available for competitor analysis yet.",
         merchantMessage:
           "Refresh completed, but there were no eligible active products available for competitor matching yet.",
         excludedProducts: sourceProducts.excluded,
@@ -1510,11 +1510,11 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
           : "Competitor pages were fetched, but no live competitor snapshots were captured for the monitored products.",
       merchantMessage:
         ingested > 0 && lowConfidenceMatches === 0
-          ? "Competitor monitoring refreshed successfully."
+          ? "Competitor analysis completed successfully."
           : ingested > 0 && lowConfidenceMatches === ingested
           ? "Refresh completed. Possible competitor pages were found, but the matches were too weak to rely on yet."
         : skipped > 0
-          ? "Competitor monitoring completed. No comparable products were identified yet."
+          ? "Competitor analysis completed. No matching products were identified yet."
           : "Refresh completed. No competitor changes detected.",
     };
 
@@ -1605,7 +1605,7 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
         executionHint:
           pressureScore >= 70
             ? "Prioritize this SKU in pricing review this week."
-            : "Keep monitoring this SKU until stronger live signals appear.",
+            : "Continue analysis for this SKU until stronger live signals appear.",
       };
     })
     .slice(0, 5);

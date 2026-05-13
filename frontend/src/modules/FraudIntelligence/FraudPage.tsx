@@ -195,13 +195,13 @@ export function FraudPage() {
       },
       {
         title: "Refund & Wardrobing Watch",
-        body: "Review return-abuse profiles, likely wardrobing behavior, and chargeback candidates from one module.",
+        body: "Review return-abuse profiles, likely wardrobing behavior, and chargeback candidates in one place.",
         cta: "Review signals",
         action: () => setSelectedTab(1),
       },
       {
         title: "Store control actions",
-        body: "Move into dashboard and reconnect Shopify sync if you want fresh orders and webhook coverage reflected here.",
+        body: "Open the dashboard to update Shopify data and keep order coverage current.",
         cta: "Open dashboard",
         action: () => navigateEmbedded("/"),
       },
@@ -385,7 +385,7 @@ export function FraudPage() {
                           <Card>
                             <BlockStack gap="200">
                               <Text as="h4" variant="headingSm">
-                                What this module covers
+                                What this workflow covers
                               </Text>
                               <Text as="p" tone="subdued">
                                 Payment fraud detection, stolen-card watch patterns, chargeback pressure, serial refunders, return abuse, and wardrobing detection AI.

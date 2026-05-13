@@ -211,12 +211,12 @@ export function OnboardingPage() {
         timeoutMs: 90000,
       });
       await refresh();
-      setToast("Required Shopify webhooks are now registered.");
+      setToast("Shopify connection is ready.");
     } catch (nextError) {
       setActionError(
         nextError instanceof Error
           ? nextError.message
-          : "Unable to register required Shopify webhooks."
+          : "Unable to verify the Shopify connection."
       );
     } finally {
       setBusyAction(null);
@@ -228,12 +228,12 @@ export function OnboardingPage() {
     setActionError(null);
     try {
       await selectModule(pendingModule);
-      setToast("Starting module selected.");
+      setToast("Starting workflow selected.");
     } catch (nextError) {
       setActionError(
         nextError instanceof Error
           ? nextError.message
-          : "Unable to select the starting module."
+          : "Unable to select the starting workflow."
       );
     } finally {
       setBusyAction(null);
@@ -324,7 +324,7 @@ export function OnboardingPage() {
     onboarding?.canAccessDashboard
       ? "Open dashboard"
       : onboarding?.primaryAction.key === "CHOOSE_MODULE"
-      ? "Activate selected module"
+      ? "Open selected workflow"
       : onboarding?.primaryAction.label ?? "Start setup";
 
   const runPrimaryAction = async () => {
@@ -370,7 +370,7 @@ export function OnboardingPage() {
               <BlockStack gap="200">
                 <p>{actionError}</p>
                 <InlineStack gap="300">
-                  <Button onClick={() => void refresh()}>Refresh state</Button>
+                  <Button onClick={() => void refresh()}>Try again</Button>
                   {reauthorizeUrl ? (
                     <Button variant="primary" onClick={() => redirectTopLevel(reauthorizeUrl)}>
                       Reconnect Shopify
@@ -473,7 +473,7 @@ export function OnboardingPage() {
                               onClick={() => void registerWebhooks()}
                               loading={busyAction === "REGISTER_WEBHOOKS"}
                             >
-                              Fix webhooks
+                              Verify Shopify connection
                             </Button>
                           ) : null}
                         </InlineStack>
@@ -494,7 +494,7 @@ export function OnboardingPage() {
                   What VedaSuite helps with
                 </Text>
                 <Text as="p" tone="subdued">
-                  Each module has its own page after setup. This summary is here to help you decide which workflow to start with first.
+                  Each workflow has its own page. This summary helps you decide where to start first.
                 </Text>
                 <BlockStack gap="250">
                   {onboarding.moduleOverview.map((module) => (
@@ -530,10 +530,10 @@ export function OnboardingPage() {
               <div id="module-selection" />
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  Choose your starting module
+                  Choose your starting workflow
                 </Text>
                 <Text as="p" tone="subdued">
-                  Pick one workflow to review first after setup finishes. This keeps the first experience focused instead of opening every module at once.
+                  Pick one workflow to review first. This keeps the first experience focused.
                 </Text>
                 <BlockStack gap="200">
                   {onboarding.moduleOverview.map((module) => (
@@ -545,7 +545,7 @@ export function OnboardingPage() {
                       helpText={
                         module.available
                           ? module.summary
-                          : module.lockReason ?? "This module is unavailable on the current plan."
+                          : module.lockReason ?? "This workflow is unavailable on the current plan."
                       }
                       checked={pendingModule === module.key}
                       disabled={!module.available}
@@ -575,7 +575,7 @@ export function OnboardingPage() {
                 </Text>
                 <List type="bullet">
                   <List.Item>
-                    Products support competitor monitoring and pricing recommendations.
+                    Products support competitor analysis and pricing recommendations.
                   </List.Item>
                   <List.Item>
                     Customers and orders help detect refund abuse and risky behavior.
@@ -591,10 +591,10 @@ export function OnboardingPage() {
                   </div>
                   <div className="vs-signal-stat">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Webhooks
+                      Shopify connection
                     </Text>
                     <Text as="p">
-                      {onboarding.dataReadiness.webhooksReady ? "Registered" : "Action needed"}
+                      {onboarding.dataReadiness.webhooksReady ? "Connected" : "Action needed"}
                     </Text>
                   </div>
                 </InlineGrid>
@@ -611,7 +611,7 @@ export function OnboardingPage() {
                     onClick={() => void registerWebhooks()}
                     loading={busyAction === "REGISTER_WEBHOOKS"}
                   >
-                    Fix webhooks
+                    Verify Shopify connection
                   </Button>
                 ) : null}
               </BlockStack>
@@ -658,7 +658,7 @@ export function OnboardingPage() {
                 <List type="number">
                   <List.Item>Connect Shopify and confirm sync health.</List.Item>
                   <List.Item>Sync products, customers, and orders.</List.Item>
-                  <List.Item>Choose the first module to review.</List.Item>
+                  <List.Item>Choose the first workflow to review.</List.Item>
                   <List.Item>Confirm the current plan and open the dashboard.</List.Item>
                 </List>
               </BlockStack>

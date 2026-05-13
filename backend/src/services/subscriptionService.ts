@@ -210,8 +210,8 @@ function buildMerchantBillingCopy(input: {
           ? `${input.pendingRequestedPlanName} approval is waiting in Shopify`
           : "Plan approval is waiting in Shopify",
         description: input.planName !== "NONE" && input.accessActive
-          ? `Your current ${input.planName} access stays available until Shopify confirms the requested change.`
-          : "Open Shopify billing and approve the requested plan before VedaSuite updates access.",
+          ? `Your current ${input.planName} subscription stays active until Shopify confirms the requested change.`
+          : "Open Shopify billing and approve the requested plan before VedaSuite updates your subscription.",
       };
     case "active":
       return {
@@ -224,13 +224,13 @@ function buildMerchantBillingCopy(input: {
             ? input.trialEndsAt
               ? `Your trial is active until ${input.trialEndsAt.toLocaleString()}.`
               : "Your trial is active."
-            : "VedaSuite has verified the current plan and included features.",
+            : "Your subscription is active and included features are available.",
       };
     case "test_charge":
       return {
         title: `${input.planName} plan is active`,
         description:
-          "VedaSuite has verified the current plan and included features.",
+          "Your subscription is active and included features are available.",
       };
     case "cancelled":
       return {
@@ -239,7 +239,7 @@ function buildMerchantBillingCopy(input: {
           : "The subscription has been cancelled",
         description:
           input.accessActive && input.endsAt
-            ? `VedaSuite access remains available until ${input.endsAt.toLocaleString()}.`
+            ? `Included features remain available until ${input.endsAt.toLocaleString()}.`
             : "Choose a plan in billing if you want to restore paid features.",
       };
     case "frozen":
@@ -258,7 +258,7 @@ function buildMerchantBillingCopy(input: {
       return {
         title: "No paid plan is active",
         description:
-          "Choose a plan in billing to unlock paid modules. Until then, only non-paid access is available.",
+          "Choose a plan in billing to unlock included features.",
       };
     default:
       return {
@@ -309,8 +309,8 @@ export function buildCanonicalEntitlements(input: {
       effectivePlanName === "STARTER" && input.starterModule
         ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`
         : effectivePlanName === "NONE"
-        ? "Paid modules are locked until a verified plan is active."
-        : "Module access is based on the verified current plan.",
+        ? "Choose a plan to unlock included features."
+        : "Included features are based on the active subscription.",
   };
 }
 

@@ -161,8 +161,8 @@ export function ReportsPage() {
   const reportReason =
     report.readiness?.reason ??
     (reportState === "READY_WITH_DATA"
-      ? "The report below is built from persisted synced records and module outputs."
-      : "Run sync and processing before relying on this report for merchant decisions.");
+      ? "The report below is built from available store records and VedaSuite insights."
+      : "More store activity is needed before this report is ready for merchant decisions.");
 
   useEffect(() => {
     setLoading(true);
@@ -227,7 +227,7 @@ export function ReportsPage() {
                   : reportState === "FAILED"
                   ? "Weekly report needs attention"
                   : reportState === "SYNC_COMPLETED_PROCESSING_PENDING"
-                  ? "Weekly report is waiting for processing outputs"
+                  ? "Weekly report will appear as insights become available"
                   : "Weekly report is waiting for real store data"
               }
               tone={
@@ -250,7 +250,7 @@ export function ReportsPage() {
                       Executive summary
                     </Text>
                     <Badge tone={report.sync?.latestStatus === "SUCCEEDED" ? "success" : "attention"}>
-                      {reportState === "READY_WITH_DATA" ? "Persisted data" : "Setup or processing"}
+                      {reportState === "READY_WITH_DATA" ? "Store data ready" : "Insights preparing"}
                     </Badge>
                   </InlineStack>
                   <Text as="p" tone="subdued">
@@ -380,7 +380,7 @@ export function ReportsPage() {
                     Continue from report
                   </Text>
                   <Text as="p" tone="subdued">
-                    Jump into the exact module that needs attention this week.
+                    Jump into the exact workflow that needs attention this week.
                   </Text>
                   <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
                     <Button
@@ -509,7 +509,7 @@ export function ReportsPage() {
                       <Card>
                         <Text as="p">
                           {report.recommendations[2] ??
-                            "Additional report guidance appears after more processed module output is available."}
+                            "Additional report guidance appears after more store activity is available."}
                         </Text>
                       </Card>
                       <Card>
@@ -518,7 +518,7 @@ export function ReportsPage() {
                             {reportReason}
                           </Text>
                           <Badge tone={reportState === "READY_WITH_DATA" ? "success" : "attention"}>
-                            {reportState === "READY_WITH_DATA" ? "Persisted data" : "Setup or processing"}
+                            {reportState === "READY_WITH_DATA" ? "Store data ready" : "Insights preparing"}
                           </Badge>
                         </InlineStack>
                       </Card>

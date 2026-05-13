@@ -28,8 +28,8 @@ function buildSyncActivitySummary(params: {
   const competitorRows = params.operational.counts.competitorRows;
   const competitorReason =
     competitorRows > 0
-      ? "Competitor monitoring runs separately from store data sync."
-      : "Competitor monitoring runs separately from store data sync. Run it from Competitor Intelligence to check domains and matches.";
+      ? "Competitor analysis is managed from Competitor Intelligence."
+      : "Open Competitor Intelligence to add competitor websites and run analysis.";
 
   return {
     ordersProcessed: params.syncResult.ordersSynced,
@@ -43,8 +43,8 @@ function buildSyncActivitySummary(params: {
     noChangeReasons: [
       "no new fraud signals were triggered",
       competitorRows > 0
-        ? "competitor monitoring runs separately from store data sync"
-        : "no competitor checks ran during this sync",
+        ? "competitor analysis is managed separately"
+        : "no competitor analysis ran during this update",
       "pricing signals remained stable",
     ],
     moduleProcessing: {
@@ -73,7 +73,7 @@ function buildSyncActivitySummary(params: {
         reason:
           params.recomputeResult.productOutputsUpdated > 0
             ? "Pricing records were analyzed during this sync."
-            : "Pricing checks ran, but no pricing records changed.",
+            : "Pricing insights were reviewed, but no pricing records changed.",
       },
     },
   };

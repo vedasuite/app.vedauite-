@@ -126,7 +126,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
               ? "Trusted handling history with low refund pressure."
               : customer.creditScore < 50
               ? "Escalating trust concerns from refund and fraud signals."
-              : "Normal trust posture with moderate monitoring.",
+              : "Normal trust posture with periodic review.",
           occurredAt: null,
         }));
 
@@ -139,7 +139,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     {
       tier: "Standard",
       count: trustLayer.segments.normal,
-      policy: "Normal monitoring with policy recommendations.",
+      policy: "Standard review with policy recommendations.",
     },
     {
       tier: "Review",
