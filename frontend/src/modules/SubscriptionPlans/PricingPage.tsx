@@ -124,11 +124,11 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   STARTER: {
     planName: "STARTER",
     priceLabel: "$19/month",
-    summary: "Starter includes one selected module for merchants beginning with a single high-priority workflow.",
+    summary: "Starter includes one selected feature area for merchants beginning with a single high-priority workflow.",
     featureBullets: [
-      "One selected Starter module",
-      "Backend-enforced feature gating",
-      "Billing management and settings access",
+      "One selected Starter feature",
+      "Plan-based access managed through Shopify",
+      "Billing and settings access",
     ],
     moduleBullets: [
       "Choose Trust & Abuse Intelligence",
@@ -336,7 +336,7 @@ export function PricingPage() {
           setManagement(response.result.state);
           if (starterSwitchRequiresApproval) {
             setToast(
-              `Confirm the ${starterLabel(starterModule)} Starter module in Shopify billing to activate it.`
+              `Confirm ${starterLabel(starterModule)} in Shopify billing to activate it.`
             );
           }
           startBillingRedirect();
@@ -498,7 +498,7 @@ export function PricingPage() {
                 </p>
                 {management.pendingIntent.requestedStarterModule ? (
                   <p>
-                    Selected Starter module:{" "}
+                    Selected Starter feature:{" "}
                     <strong>
                       {starterLabel(management.pendingIntent.requestedStarterModule)}
                     </strong>
@@ -641,7 +641,7 @@ export function PricingPage() {
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Starter module
+                    Included Starter feature
                   </Text>
                   <Text as="p">{starterLabel(currentSummary.starterModule)}</Text>
                 </div>
@@ -735,7 +735,7 @@ export function PricingPage() {
                     {plan.requiresStarterModule ? (
                       <BlockStack gap="200">
                         <Text as="h4" variant="headingSm">
-                          Choose Starter module
+                          Choose Starter feature
                         </Text>
                         <RadioButton
                           label="Fraud Intelligence"
@@ -752,7 +752,7 @@ export function PricingPage() {
                           onChange={() => setStarterModule("competitor")}
                         />
                         <Text as="p" tone="subdued">
-                          Selected Starter module: {starterLabel(starterCardSelected)}
+                          Selected Starter feature: {starterLabel(starterCardSelected)}
                         </Text>
                       </BlockStack>
                     ) : null}
@@ -774,7 +774,7 @@ export function PricingPage() {
                           disabled={billingBusy || busyAction === "STARTER"}
                           onClick={() => handlePlanChange("STARTER")}
                         >
-                          Update Starter module
+                          Update Starter feature
                         </Button>
                       ) : null}
                     </InlineStack>
@@ -799,7 +799,7 @@ export function PricingPage() {
                   <Text as="p">Pricing recommendations</Text>
                   <Text as="p">Profit optimization</Text>
                   <Text as="p">Advanced automation</Text>
-                  <Text as="p">Starter module choice</Text>
+                  <Text as="p">Starter feature choice</Text>
                   <Text as="p">Ideal merchant type</Text>
                 </div>
                 <div className="vs-signal-stat">

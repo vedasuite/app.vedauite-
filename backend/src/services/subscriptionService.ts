@@ -224,13 +224,13 @@ function buildMerchantBillingCopy(input: {
             ? input.trialEndsAt
               ? `Your trial is active until ${input.trialEndsAt.toLocaleString()}.`
               : "Your trial is active."
-            : "VedaSuite has verified the current plan and module access.",
+            : "VedaSuite has verified the current plan and included features.",
       };
     case "test_charge":
       return {
         title: `${input.planName} plan is active`,
         description:
-          "VedaSuite has verified the current plan and module access.",
+          "VedaSuite has verified the current plan and included features.",
       };
     case "cancelled":
       return {
@@ -240,7 +240,7 @@ function buildMerchantBillingCopy(input: {
         description:
           input.accessActive && input.endsAt
             ? `VedaSuite access remains available until ${input.endsAt.toLocaleString()}.`
-            : "Choose a plan in billing if you want to restore paid module access.",
+            : "Choose a plan in billing if you want to restore paid features.",
       };
     case "frozen":
       return {
@@ -252,7 +252,7 @@ function buildMerchantBillingCopy(input: {
       return {
         title: "VedaSuite is disconnected from Shopify",
         description:
-          "Reconnect the app in Shopify before billing and module access can be verified again.",
+          "Reconnect the app in Shopify before billing and included features can be verified again.",
       };
     case "no_subscription":
       return {
@@ -1014,12 +1014,12 @@ export async function updateStarterModuleSelection(
 
   if (!store) throw new Error("Store not found");
   if (!store.subscription || store.subscription.plan.name !== "STARTER") {
-    throw new Error("Starter module selection can only be changed on the STARTER plan.");
+    throw new Error("Starter feature selection can only be changed on the STARTER plan.");
   }
 
   const normalizedStarterModule = normalizeStarterModule(starterModule);
   if (!normalizedStarterModule) {
-    throw new Error("Invalid Starter module selection.");
+    throw new Error("Invalid Starter feature selection.");
   }
 
   const updated = await prisma.storeSubscription.update({

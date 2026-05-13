@@ -170,7 +170,7 @@ export function SettingsPage() {
     settings.sharedFraudNetwork && settings.fraudSensitivity === "high"
       ? "Review-first automation is ready for repeated fraud patterns."
       : settings.sharedFraudNetwork
-      ? "Shared network is collecting evidence for stronger fraud rules."
+      ? "Shared network is building evidence for stronger fraud rules."
       : "Fraud automation is local-only until shared network is enabled.";
 
   const pricingAutomationPosture = pricingProfitEnabled

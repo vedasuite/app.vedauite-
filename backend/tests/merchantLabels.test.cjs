@@ -26,7 +26,7 @@ test("formatMerchantOrderLabel never exposes internal or synthetic order ids", a
       shopifyOrderId: "vedasuite-ai.myshopify.com-order-1002",
       shopifyOrderGid: "gid://shopify/Order/1002",
     }),
-    "Order pending sync"
+    "Waiting for Shopify order data"
   );
   assert.equal(
     getMerchantOrderLabelOrNull({

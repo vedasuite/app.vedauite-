@@ -320,7 +320,10 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     returnAbuseSignals: fraudOverview.returnAbuseSignals,
     wardrobingSignals: fraudOverview.wardrobingSignals,
     networkMatches: fraudOverview.networkMatches.filter(
-      (match) => !!match.orderLabel && match.orderLabel !== "Order pending sync"
+      (match) =>
+        !!match.orderLabel &&
+        match.orderLabel !== "Order pending sync" &&
+        match.orderLabel !== "Waiting for Shopify order data"
     ),
     chargebackCandidates: fraudOverview.chargebackCandidates,
     policyEngine: trustLayer.policyRecommendations,

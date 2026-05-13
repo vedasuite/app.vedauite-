@@ -1381,9 +1381,9 @@ export function DashboardPage() {
                       </div>
                     ))
                   ) : (
-                    <Banner title="Analyzing store" tone="info">
+                    <Banner title="No urgent alerts right now" tone="success">
                       <p>
-                        VedaSuite is still preparing real insights for this dashboard. Use the module shortcuts below while sync and processing continue.
+                        No refund reviews, pricing actions, or competitor alerts currently require attention.
                       </p>
                     </Banner>
                   )}

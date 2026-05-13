@@ -317,7 +317,7 @@ export async function getOnboardingState(shopDomain: string) {
       ? {
           key: "SYNC_LIVE_DATA" as const,
           label:
-            readiness.initialSync.state === "collecting_data" ? "Analyzing store" : "Sync Data",
+            readiness.initialSync.state === "collecting_data" ? "Preparing results" : "Sync Data",
           route: "/app/onboarding",
         }
       : stage === "MODULE_SELECTION"

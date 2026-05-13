@@ -61,7 +61,7 @@ subscriptionRouter.post("/starter-module", requireCapability("billing.moduleSele
     error: {
       code: "STARTER_MODULE_REQUIRES_BILLING_APPROVAL",
       message:
-        "Changing the Starter module now requires Shopify billing approval. Refresh the billing page and confirm the Starter module change there.",
+        "Changing the Starter feature now requires Shopify billing approval. Refresh billing and confirm the change there.",
     },
   });
 });

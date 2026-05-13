@@ -252,11 +252,11 @@ function getCompetitorPrimaryStateCopy(args: {
   switch (args.primaryState) {
     case "SETUP_INCOMPLETE":
       return {
-        title: "Competitor setup is incomplete",
+        title: "Add competitor domains to begin monitoring",
         description:
-          "Add competitor domains before VedaSuite can check live competitor websites for comparable products.",
+          "Add competitor domains before VedaSuite checks live competitor websites for comparable products.",
         nextAction: "Add competitor domains",
-        coverageStatus: "Setup required",
+        coverageStatus: "Add domains",
         toastMessage: "Add competitor domains before refreshing competitor monitoring.",
       };
     case "AWAITING_FIRST_RUN":
@@ -272,14 +272,14 @@ function getCompetitorPrimaryStateCopy(args: {
       return {
         title: "Monitoring is active, but no comparable competitor products were found",
         description:
-          "Monitoring ran successfully; no comparable products were found.",
+          "Competitor monitoring completed. No comparable products were identified yet.",
         nextAction: "Review tracked products or add more competitor domains",
         coverageStatus: "No comparable matches found",
-        toastMessage: "Monitoring ran successfully; no comparable products found.",
+        toastMessage: "Competitor monitoring completed. No comparable products were identified yet.",
       };
     case "LOW_CONFIDENCE":
       return {
-        title: "Monitoring ran, but only low-confidence matches were found",
+        title: "Possible competitor matches need review",
         description:
           "VedaSuite found possible competitor pages, but the captured signals were too weak to treat them as reliable comparable products.",
         nextAction: "Review domains, product overlap, or run another refresh",
@@ -836,7 +836,7 @@ export async function getCompetitorOverview(shopDomain: string) {
         ? "Your domains were refreshed successfully, but VedaSuite did not find overlapping competitor products to compare yet."
         : store.competitorDomains.length > 0
         ? "Domains are configured, but VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful."
-        : "Add monitored domains to start collecting competitor pricing and promotion data.",
+        : "Add monitored domains to start capturing competitor pricing and promotion data.",
     suggestedActions:
       actionSuggestions.length > 0
         ? actionSuggestions.map((item) => `${item.productHandle}: ${item.suggestion}`)
@@ -1147,7 +1147,7 @@ export async function getCompetitorOverview(shopDomain: string) {
             : primaryState === "AWAITING_FIRST_RUN"
             ? "Domains are configured. The next refresh will test those sites against your active catalog."
             : primaryState === "NO_MATCHES"
-            ? "Monitoring ran successfully; no comparable products were found."
+            ? "Competitor monitoring completed. No comparable products were identified yet."
             : primaryState === "LOW_CONFIDENCE"
             ? "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable products yet."
             : primaryState === "CHANGES_DETECTED"
@@ -1514,7 +1514,7 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
           : ingested > 0 && lowConfidenceMatches === ingested
           ? "Refresh completed. Possible competitor pages were found, but the matches were too weak to rely on yet."
         : skipped > 0
-          ? "Monitoring ran successfully; no comparable products found."
+          ? "Competitor monitoring completed. No comparable products were identified yet."
           : "Refresh completed. No competitor changes detected.",
     };
 

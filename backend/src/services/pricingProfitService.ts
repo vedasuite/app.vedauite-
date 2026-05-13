@@ -24,6 +24,13 @@ type PricingPrimaryState =
   | "PROCESSING"
   | "FAILED";
 
+const SHOPIFY_DEMO_PRODUCT_PATTERN =
+  /\bsnowboard\b|\bgift[-\s]?card\b|\bthe-collection\b|\bhydrogen\b/i;
+
+function isShopifyDemoProduct(handle: string) {
+  return SHOPIFY_DEMO_PRODUCT_PATTERN.test(handle);
+}
+
 function deriveRecommendationAction(currentPrice: number, recommendedPrice: number) {
   const delta = recommendedPrice - currentPrice;
   if (Math.abs(delta) < 0.5) return "Hold price";
@@ -702,6 +709,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       : "competitor_informed";
   const prioritizedRecommendations = pricingRecommendations
     .map((item, index) => {
+      const exampleCatalogProduct = isShopifyDemoProduct(item.productHandle);
       const actionLabel = deriveRecommendationAction(
         item.currentPrice,
         item.recommendedPrice
@@ -720,7 +728,9 @@ export async function getPricingProfitOverview(shopDomain: string) {
         fraudDependencyStatus === "ready" ? "return pressure" : null,
       ].filter((value): value is string => value !== null);
       const expectedImpact =
-        item.expectedProfitGain != null && item.expectedProfitGain > 0
+        exampleCatalogProduct
+          ? "Example recommendation based on the current catalog - review before applying."
+          : item.expectedProfitGain != null && item.expectedProfitGain > 0
           ? projectedGainStatus === "available"
             ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
             : `Baseline estimated gain of $${Math.round(item.expectedProfitGain)}`
@@ -736,17 +746,27 @@ export async function getPricingProfitOverview(shopDomain: string) {
         expectedImpact,
         confidence,
         confidenceScore: item.approvalConfidence,
-        dataBasis: competitorReady ? "competitor-informed" : "Baseline estimate - review before applying",
+        dataBasis: exampleCatalogProduct
+          ? "Example recommendation based on current catalog"
+          : competitorReady
+          ? "competitor-informed"
+          : "Baseline estimate - review before applying",
         why:
-          item.demandSignals[0] ??
+          exampleCatalogProduct
+            ? "This store appears to include Shopify sample catalog products, so the recommendation is presented as an example for merchant review."
+            : item.demandSignals[0] ??
           "Recommendation is based on synced pricing rows and current merchant pricing settings.",
         support:
-          item.demandSignals[1] ??
+          exampleCatalogProduct
+            ? "Review the product, margin, and merchant strategy before applying any price change."
+            : item.demandSignals[1] ??
           "Baseline estimate - review before applying in Shopify.",
         inputsUsed,
         merchantActionNote:
           item.autoApprovalCandidate
             ? "Ready for merchant review."
+            : exampleCatalogProduct
+            ? "Example recommendation - review before applying in Shopify."
             : "Baseline estimate - review before applying in Shopify.",
       };
     })

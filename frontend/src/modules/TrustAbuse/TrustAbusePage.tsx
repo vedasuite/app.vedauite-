@@ -129,6 +129,7 @@ export function TrustAbusePage() {
   const [activeOrder, setActiveOrder] = useState<Overview["fraudReviewQueue"][number] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [evidenceHighlighted, setEvidenceHighlighted] = useState(false);
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const evidenceSectionRef = useRef<HTMLDivElement | null>(null);
   const allowed = isBackendModuleEnabled(appState, "fraud");
 
@@ -249,6 +250,7 @@ export function TrustAbusePage() {
   const focusEvidenceSection = useCallback((tabIndex = 0) => {
     setSelectedEvidenceTab(tabIndex);
     setEvidenceHighlighted(true);
+    setEvidenceModalOpen(true);
     setToast("Supporting evidence is highlighted below.");
     window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}#customer-order-evidence`);
     window.setTimeout(() => {
@@ -701,6 +703,49 @@ export function TrustAbusePage() {
               {getOrderUrl(activeOrder.shopifyOrderId) ? <Button url={getOrderUrl(activeOrder.shopifyOrderId) ?? undefined} external>Open Shopify order</Button> : null}
             </BlockStack>
           ) : null}
+        </Modal.Section>
+      </Modal>
+
+      <Modal
+        open={evidenceModalOpen}
+        onClose={() => setEvidenceModalOpen(false)}
+        title="Supporting evidence review"
+        primaryAction={{
+          content: "Review full evidence",
+          onAction: () => {
+            setEvidenceModalOpen(false);
+            window.setTimeout(() => {
+              evidenceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 50);
+          },
+        }}
+        secondaryActions={[{ content: "Close", onAction: () => setEvidenceModalOpen(false) }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="300">
+            <Text as="p" tone="subdued">
+              Evidence refreshed {formatTimestamp(overview.readiness?.lastUpdatedAt ?? null)}.
+            </Text>
+            <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+              <Card>
+                <BlockStack gap="100">
+                  <Text as="p" variant="headingSm">Order review evidence</Text>
+                  <Text as="p">{overview.fraudReviewQueue.length} orders need review</Text>
+                  <Text as="p" tone="subdued">{overview.chargebackCandidates.length} chargeback pressure candidates</Text>
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="100">
+                  <Text as="p" variant="headingSm">Customer behavior evidence</Text>
+                  <Text as="p">{overview.returnAbuseSignals.length} return-abuse profiles</Text>
+                  <Text as="p" tone="subdued">{overview.networkMatches.length} shared-network matches</Text>
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+            <Text as="p">
+              Use the full evidence section to review customer history, order risk, return behavior, and export-ready support notes before taking action.
+            </Text>
+          </BlockStack>
         </Modal.Section>
       </Modal>
 

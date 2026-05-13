@@ -6,7 +6,8 @@ export type MerchantOrderLike = {
   shopifyOrderGid?: string | null;
 };
 
-const UNKNOWN_ORDER_LABEL = "Order pending sync";
+const UNKNOWN_ORDER_LABEL = "Waiting for Shopify order data";
+const LEGACY_UNKNOWN_ORDER_LABEL = "Order pending sync";
 
 function cleanOrderToken(value?: string | number | null) {
   if (value == null) {
@@ -51,6 +52,7 @@ export function isInternalOrderLabel(value?: string | null) {
 
   return (
     value === UNKNOWN_ORDER_LABEL ||
+    value === LEGACY_UNKNOWN_ORDER_LABEL ||
     /\.myshopify\.com-order-\d+$/i.test(value) ||
     value.startsWith("gid://shopify/") ||
     /^order-[a-z0-9]+$/i.test(value)

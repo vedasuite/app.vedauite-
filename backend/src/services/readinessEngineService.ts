@@ -259,7 +259,7 @@ function buildSetupSummary(input: {
     ? blockers[0] ?? "Complete the remaining setup steps before the store is marked ready."
     : allCoreModulesReady
     ? "Connection, sync, billing, and all core modules are ready for normal use."
-    : "Connection, sync, and billing are ready. Some modules are still collecting data.";
+    : "Connection, sync, and billing are ready. Some features are still preparing results.";
 
   return {
     minimumComplete,
@@ -456,11 +456,11 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.fraud
         ? "Fraud Intelligence is locked"
         : operational.counts.timelineEvents > 0
-        ? "Fraud Intelligence is ready"
+        ? "Fraud protection enabled"
         : syncStatus.status === "SYNC_IN_PROGRESS" ||
           syncStatus.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-        ? "Fraud Intelligence is collecting data"
-        : "Fraud Intelligence needs more store history",
+        ? "Fraud protection is analyzing new orders"
+        : "Sync orders to enable fraud protection",
     description:
       !subscription.enabledModules.fraud
         ? "Upgrade the current plan to unlock Fraud Intelligence."
@@ -508,11 +508,11 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         "The latest competitor refresh failed."
       : operational.counts.competitorRows > 0
       ? isStaleTimestamp(operational.latestCompetitorAt)
-        ? "Competitor data exists, but it has not refreshed recently enough to count as ready."
+        ? "Refresh competitor results before using them for decisions."
         : "Comparable competitor products were matched and monitoring outputs are available."
       : competitorCollecting
-      ? "Competitor monitoring is configured and still collecting comparable product data."
-      : "Competitor monitoring ran, but no comparable competitor products were found yet.";
+      ? "Competitor monitoring is checking your selected domains."
+      : "Competitor monitoring completed. No comparable products were identified yet.";
   const competitorReadiness = createReadinessItem({
     state:
       competitorState === "ready" && isStaleTimestamp(operational.latestCompetitorAt)
@@ -522,12 +522,12 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.competitor
         ? "Competitor Intelligence is locked"
         : !competitorHasSetup
-        ? "Competitor setup is incomplete"
+        ? "Add competitor domains to begin monitoring"
         : operational.counts.competitorRows > 0 && !isStaleTimestamp(operational.latestCompetitorAt)
-        ? "Competitor Intelligence is ready"
+        ? "Competitor monitoring active"
         : competitorCollecting
-        ? "Competitor Intelligence is collecting data"
-        : "Competitor Intelligence needs more setup",
+        ? "Competitor monitoring is running"
+        : "Add competitor domains to begin monitoring",
     description: competitorDescription,
     nextAction:
       !subscription.enabledModules.competitor
@@ -606,13 +606,13 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.pricing
         ? "AI Pricing Engine is locked"
         : pricingViewState.status === "ready"
-        ? "AI Pricing Engine is ready"
+        ? "Pricing analysis ready"
         : pricingViewState.status === "failed_timeout" ||
           pricingViewState.status === "failed_error"
         ? "AI Pricing Engine needs attention"
         : pricingViewState.status === "syncing"
-        ? "AI Pricing Engine is collecting data"
-        : "AI Pricing Engine needs more store data",
+        ? "Pricing analysis is updating"
+        : "Sync product and order history to prepare pricing analysis",
     description: pricingViewState.description,
     nextAction:
       !subscription.enabledModules.pricing

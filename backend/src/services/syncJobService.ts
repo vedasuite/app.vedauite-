@@ -28,8 +28,8 @@ function buildSyncActivitySummary(params: {
   const competitorRows = params.operational.counts.competitorRows;
   const competitorReason =
     competitorRows > 0
-      ? "Competitor module was not refreshed in this sync."
-      : "Competitor module was not refreshed in this sync. Run competitor monitoring separately to check domains and matches.";
+      ? "Competitor monitoring runs separately from store data sync."
+      : "Competitor monitoring runs separately from store data sync. Run it from Competitor Intelligence to check domains and matches.";
 
   return {
     ordersProcessed: params.syncResult.ordersSynced,
@@ -43,7 +43,7 @@ function buildSyncActivitySummary(params: {
     noChangeReasons: [
       "no new fraud signals were triggered",
       competitorRows > 0
-        ? "competitor module was not refreshed in this sync"
+        ? "competitor monitoring runs separately from store data sync"
         : "no competitor checks ran during this sync",
       "pricing signals remained stable",
     ],

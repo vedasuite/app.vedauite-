@@ -387,7 +387,7 @@ export function OnboardingPage() {
             <BlockStack gap="400">
               <BlockStack gap="200">
                 <Text as="p" tone="subdued" variant="bodyLg">
-                  Follow the setup steps below to confirm store connection, sync Shopify data, choose the first workflow, and unlock the right module access.
+                  Follow the setup steps below to confirm store connection, sync Shopify data, choose the first workflow, and unlock the right features.
                 </Text>
               </BlockStack>
               <InlineStack gap="300">

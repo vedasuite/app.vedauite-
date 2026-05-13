@@ -51,6 +51,31 @@ function buildDashboardSummaryTitle(status: string) {
   return "Run first sync to populate store signals";
 }
 
+function isActionableDashboardEvent(input: {
+  category: string;
+  eventType: string;
+  severity: string;
+  orderLabel: string | null;
+}) {
+  if (input.category === "orders" || input.eventType === "refund_requested") {
+    return !!input.orderLabel && ["critical", "warning"].includes(input.severity);
+  }
+
+  if (input.category === "abuse" || input.category === "trust") {
+    return ["critical", "warning"].includes(input.severity);
+  }
+
+  if (input.category === "competitor") {
+    return input.eventType.includes("price") || input.eventType.includes("promotion");
+  }
+
+  if (input.category === "pricing" || input.category === "profit") {
+    return ["critical", "warning", "success"].includes(input.severity);
+  }
+
+  return ["critical", "warning"].includes(input.severity);
+}
+
 export async function getDashboardMetrics(shopDomain: string) {
   const [store, operational, onboarding, readiness] = await Promise.all([
     prisma.store.findUnique({
@@ -128,7 +153,7 @@ export async function getDashboardMetrics(shopDomain: string) {
     : null;
   const moduleStates = readiness?.moduleStates ?? null;
   const summaryTitle = buildDashboardSummaryTitle(syncState.status);
-  const recentInsights = store.timelineEvents.slice(0, 5).map((event) => {
+  const recentInsights = store.timelineEvents.flatMap((event) => {
     const metadata = (() => {
       if (!event.metadataJson) {
         return {};
@@ -144,7 +169,18 @@ export async function getDashboardMetrics(shopDomain: string) {
         ? metadata.orderLabel
         : null;
 
-    return {
+    if (
+      !isActionableDashboardEvent({
+        category: event.category,
+        eventType: event.eventType,
+        severity: event.severity,
+        orderLabel,
+      })
+    ) {
+      return [];
+    }
+
+    return [{
       id: event.id,
       title: formatMerchantInsightTitle({
         category: event.category,
@@ -166,8 +202,8 @@ export async function getDashboardMetrics(shopDomain: string) {
           : event.category === "pricing" || event.category === "profit"
           ? "/app/ai-pricing-engine"
           : "/app/fraud-intelligence",
-    };
-  });
+    }];
+  }).slice(0, 5);
   const quickAccess = readiness?.quickAccess ?? null;
   const syncHealthReason = readiness?.setup.summaryDescription ?? syncState.reason;
   const dashboardState = {

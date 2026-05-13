@@ -428,6 +428,9 @@ export function PricingProfitPage() {
     pricingState.projectedGainStatus === "not_available"
       ? "Not enough data yet"
       : `$${Math.round(pricingState.projectedGainValue)}`;
+  const hasExampleCatalogRecommendations = (overview.prioritizedRecommendations ?? []).some(
+    (item) => item.dataBasis.toLowerCase().includes("example recommendation")
+  );
 
   return (
     <Page
@@ -571,6 +574,14 @@ export function PricingProfitPage() {
                         : "Setup required"}
                     </Badge>
                   </InlineStack>
+
+                  {hasExampleCatalogRecommendations ? (
+                    <Banner title="Example recommendations based on the current catalog" tone="info">
+                      <p>
+                        Some products look like Shopify sample catalog items. Review these recommendations as examples before applying any price changes.
+                      </p>
+                    </Banner>
+                  ) : null}
 
                   {(overview.prioritizedRecommendations ?? []).length === 0 ? (
                     <Text as="p" tone="subdued">{pricingState.description}</Text>

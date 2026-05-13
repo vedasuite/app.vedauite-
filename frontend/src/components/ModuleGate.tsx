@@ -76,14 +76,14 @@ export function ModuleGate({
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center">
                 <Text as="h3" variant="headingMd">
-                  Module access is locked on your current plan
+                  This feature is not included in your current plan
                 </Text>
                 <Badge tone="attention">{currentPlan}</Badge>
               </InlineStack>
               <Text as="p" tone="subdued">
-                {billingState?.lifecycle === "pending_approval"
-                  ? "A plan change is waiting for Shopify approval. Until that completes, VedaSuite keeps the current verified module access."
-                  : "Move to the appropriate plan to enable this workflow and all of its analytics, actions, and reports."}
+                  {billingState?.lifecycle === "pending_approval"
+                  ? "A plan change is waiting for Shopify approval. Your current features stay available until Shopify confirms the change."
+                  : "Choose a plan that includes this workflow to use its analytics, actions, and reports."}
               </Text>
               {billingState?.merchantDescription ? (
                 <Text as="p" variant="bodySm" tone="subdued">
@@ -91,11 +91,11 @@ export function ModuleGate({
                 </Text>
               ) : null}
               {currentPlan === "STARTER" && currentStarterModule ? (
-                <Banner title="Starter module selection detected" tone="info">
+                <Banner title="Current Starter feature" tone="info">
                   <p>
-                    Your store is currently using the{" "}
-                    <strong>{starterLabel ?? currentStarterModule}</strong> Starter module. Upgrade
-                    or switch the Starter module to access this workflow.
+                    Your store currently includes{" "}
+                    <strong>{starterLabel ?? currentStarterModule}</strong>. Upgrade
+                    or choose a different Starter feature to access this workflow.
                   </p>
                 </Banner>
               ) : null}

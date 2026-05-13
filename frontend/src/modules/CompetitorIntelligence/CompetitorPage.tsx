@@ -155,15 +155,15 @@ function createEmptyOverview(): CompetitorOverview {
   return {
     competitorState: {
       primaryState: "SETUP_INCOMPLETE",
-      freshnessLabel: "Awaiting first successful refresh",
+      freshnessLabel: "Ready after first refresh",
       lastSuccessfulRunAt: null,
       lastAttemptAt: null,
       checkedDomainsCount: 0,
       matchedProductsCount: 0,
       activePromotionsCount: 0,
       stockAlertsCount: 0,
-      coverageStatus: "Setup required",
-      title: "Competitor setup is incomplete",
+      coverageStatus: "Add domains",
+      title: "Add competitor domains to begin monitoring",
       description:
         "Add competitor domains before VedaSuite can monitor comparable competitor products.",
       confidenceExplanation:
@@ -181,7 +181,7 @@ function createEmptyOverview(): CompetitorOverview {
     moveFeed: [],
     actionSuggestions: [],
     weeklyReport: {
-      headline: "Competitor monitoring is not ready for a brief yet",
+      headline: "Add competitor domains to start the weekly brief",
       whyItMatters:
         "VedaSuite needs a successful monitored refresh with matched products before weekly reporting becomes useful.",
       merchantBrief:
@@ -269,11 +269,11 @@ function getBannerTone(state: CompetitorPrimaryState) {
 function getPageSubtitle(state: CompetitorPrimaryState) {
   switch (state) {
     case "SETUP_INCOMPLETE":
-      return "Complete setup to start monitoring competitor domains and matched products.";
+      return "Add competitor domains to begin monitoring competitor products.";
     case "AWAITING_FIRST_RUN":
       return "Domains are configured. Run the first refresh to begin competitor monitoring.";
     case "NO_MATCHES":
-      return "Monitoring ran successfully, but VedaSuite has not found comparable competitor products yet.";
+      return "Competitor monitoring completed. No comparable products were identified yet.";
     case "LOW_CONFIDENCE":
       return "Monitoring found possible overlap, but the captured competitor pages were not strong enough to trust as comparable matches yet.";
     case "NO_CHANGES":
@@ -281,7 +281,7 @@ function getPageSubtitle(state: CompetitorPrimaryState) {
     case "CHANGES_DETECTED":
       return "Review competitor price moves, promotion changes, and recommended responses.";
     case "STALE":
-      return "Competitor data needs a fresh refresh before you act on it.";
+      return "Refresh competitor data before using it for decisions.";
     case "FAILURE":
       return "The latest competitor refresh needs attention before fresh monitoring can resume.";
   }
@@ -298,7 +298,7 @@ function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" 
   if (tab === "tracked") {
     if (state === "SETUP_INCOMPLETE") return "Add competitor domains to build the tracked products table.";
     if (state === "AWAITING_FIRST_RUN") return "Run the first refresh to build the tracked products table.";
-    if (state === "NO_MATCHES") return "Monitoring ran successfully, but no comparable competitor products were found.";
+    if (state === "NO_MATCHES") return "Competitor monitoring completed. No comparable products were identified yet.";
     if (state === "LOW_CONFIDENCE") return "Possible competitor pages were found, but they were excluded because the match confidence was too low.";
     return "Tracked products will appear here after competitor data becomes available.";
   }
@@ -520,7 +520,7 @@ export function CompetitorPage() {
     ["Low-confidence matches", overview.competitorState?.lowConfidenceMatchesCount ?? 0],
     ["Active promotions", overview.competitorState?.activePromotionsCount ?? 0],
     ["Stock alerts", overview.competitorState?.stockAlertsCount ?? 0],
-    ["Domains checked", overview.competitorState?.checkedDomainsCount ?? 0],
+    ["Domains reviewed", overview.competitorState?.checkedDomainsCount ?? 0],
     ["Monitoring freshness", overview.competitorState?.freshnessLabel ?? "Unknown"],
     ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
   ];
@@ -532,7 +532,7 @@ export function CompetitorPage() {
       formatDateTime(overview.competitorState?.lastSuccessfulRunAt),
     ],
     ["Last refresh attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
-    ["Domains checked", String(overview.competitorState?.checkedDomainsCount ?? 0)],
+    ["Domains reviewed", String(overview.competitorState?.checkedDomainsCount ?? 0)],
     ["Eligible products monitored", String(overview.competitorState?.monitoredProductsCount ?? overview.productCoverage?.eligibleProductsCount ?? 0)],
     ["Comparable matches", String(overview.competitorState?.validMatchedProductsCount ?? overview.competitorState?.matchedProductsCount ?? 0)],
     ["Low-confidence matches", String(overview.competitorState?.lowConfidenceMatchesCount ?? 0)],

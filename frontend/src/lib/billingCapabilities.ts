@@ -483,7 +483,7 @@ export function normalizeBillingState(
     value?.merchantDescription?.toLowerCase().includes("shopify test charge")
       ? subscription.planName === "TRIAL"
         ? "Your trial is active."
-        : "VedaSuite has verified the current plan and module access."
+        : "VedaSuite has verified the current plan and included features."
       : value?.merchantDescription ??
         "VedaSuite could not confirm the latest Shopify billing state yet.";
 
