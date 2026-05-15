@@ -6,14 +6,14 @@ This document is the operator-facing package for Shopify App Review preparation.
 
 - App name: `VedaSuite AI`
 - Type: `Embedded Shopify app`
-- Core value: AI commerce intelligence suite covering fraud detection, competitor monitoring, pricing intelligence, shopper credit scoring, and profit optimization.
+- Core value: AI-powered competitor and refund intelligence for Shopify merchants.
 
 ## Main Features
 
 - Dashboard with suite KPIs
 - Fraud Intelligence
-- Competitor Intelligence
-- AI Pricing Strategy
+- Competitor pricing analysis
+- AI-generated pricing recommendations
 - Shopper Credit Score
 - AI Profit Optimization Engine
 - Weekly Reports
@@ -35,14 +35,20 @@ Reviewers should test:
 2. Open the embedded app from Shopify Admin.
 3. Confirm Dashboard loads.
 4. Open each module from the left navigation.
-5. Visit Subscription Plans and test billing entry.
-6. Confirm webhooks and live sync can be triggered from the dashboard.
+5. Add a real competitor domain such as `gymshark.com` or `allbirds.com` in Competitor Intelligence.
+6. Run competitor analysis and confirm the app shows either matched products or a clean no-match result.
+7. Open Pricing & Profit and review AI-generated recommendations based on current catalog and competitor analysis.
+8. Visit Subscription Plans and test billing entry.
+9. Confirm Shopify connection and store insight updates can be triggered from the dashboard.
 
-## Notes About Current Product State
+## Review-Safe Product Claims
 
-- Competitor Intelligence includes website ingestion and connector-style signals for Google Shopping and Meta Ad Library.
-- Some data may be seeded for new stores before live sync fills the store dataset.
-- Compliance exports are currently written to backend runtime storage and should be moved to durable storage before production launch.
+- Monitor competitor pricing from merchant-entered competitor domains.
+- Analyze refund risk patterns from Shopify order and customer activity.
+- Generate AI pricing suggestions from catalog, order, margin, and competitor signals.
+- Track competitor product pricing where public product data is available.
+- View customer risk insights for merchant review.
+- Beta integrations are disclosed inside the app when a connector is not part of the primary review path.
 
 ## Required Submission Assets
 
@@ -53,12 +59,12 @@ Reviewers should test:
 - Terms of service URL
 - Support email
 - Support URL
-- Demo/reviewer instructions
+- Reviewer instructions
 
 ## Support Contact
 
 - Support email: `abhimanyu@vedasuite.in`
-- Support URL: replace with production support page
+- Support URL: `https://app.vedasuite.in/support`
 
 ## Risk Notes
 

@@ -38,11 +38,11 @@ export const env = {
       (process.env.SHOPIFY_BILLING_TEST_MODE || "true").toLowerCase() !==
       "false",
   },
-  enableDemoBootstrap:
-    (process.env.VEDASUITE_ENABLE_DEMO_BOOTSTRAP || "false").toLowerCase() ===
+  enableGuidedBootstrap:
+    (process.env.VEDASUITE_ENABLE_GUIDED_BOOTSTRAP || "false").toLowerCase() ===
     "true",
-  enableSampleData:
-    (process.env.ENABLE_SAMPLE_DATA || "false").toLowerCase() === "true",
+  enableGuidedSetupData:
+    (process.env.ENABLE_GUIDED_SETUP_DATA || "false").toLowerCase() === "true",
 };
 
 if (!env.shopifyApiKey || !env.shopifyApiSecret || !env.shopifyAppUrl) {

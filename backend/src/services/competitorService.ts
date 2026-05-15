@@ -47,7 +47,7 @@ type CompetitorPrimaryState =
   | "CHANGES_DETECTED"
   | "STALE"
   | "FAILURE";
-type CompetitorChannelAvailability = "Live" | "Configured" | "Preview" | "Not enabled";
+type CompetitorChannelAvailability = "Live" | "Configured" | "Beta" | "Not enabled";
 
 type SourceProductCandidate = {
   productHandle: string;
@@ -331,8 +331,8 @@ function normalizeCompetitorName(domain: string, label?: string | null) {
 }
 
 function formatSourceLabel(source: string) {
-  if (source === "google_shopping") return "Google Shopping (limited preview)";
-  if (source === "meta_ads") return "Ad-library import (limited preview)";
+  if (source === "google_shopping") return "Google Shopping beta";
+  if (source === "meta_ads") return "Ad-library beta";
   if (source.startsWith("website")) return "Competitor website";
   return source;
 }
@@ -347,8 +347,8 @@ function inferMoveType(row: {
   if (row.stockStatus === "out_of_stock") return "Stock outage";
   if (row.stockStatus === "low_stock") return "Stock pressure";
   if (row.promotion) return "Promotion change";
-  if (row.source === "meta_ads" || row.adCopy) return "Imported ad signal";
-  if (row.source === "google_shopping") return "Imported shopping signal";
+  if (row.source === "meta_ads" || row.adCopy) return "Beta ad-library signal";
+  if (row.source === "google_shopping") return "Beta shopping signal";
   if (row.price != null) return "Price move";
   return "Market signal";
 }
@@ -368,7 +368,7 @@ function inferSuggestedAction(args: {
   if (args.stockStatus === "out_of_stock") return "Promote availability and hold price";
   if (args.stockStatus === "low_stock") return "Monitor stock pressure before discounting";
   if (args.promotion) return "Review bundle or selective response";
-  if (args.source === "meta_ads") return "Monitor campaign pressure";
+  if (args.source === "meta_ads") return "Review beta ad-library signal";
   if (args.priceDelta <= -2) return "Review hero SKU pricing";
   if (args.priceDelta >= 2) return "Hold price and protect margin";
   return "Wait and monitor";
@@ -1100,9 +1100,9 @@ export async function getCompetitorOverview(shopDomain: string) {
             ? "not_configured"
             : lastSuccessAt
             ? "connected"
-            : "preview_only",
-        googleShopping: "preview_only",
-        metaAds: "preview_only",
+            : "ready_for_analysis",
+        googleShopping: "beta",
+        metaAds: "beta",
       },
       lastSuccessfulRunAt: toIsoString(lastSuccessAt),
       lastAttemptAt: toIsoString(lastAttemptAt),
@@ -1212,7 +1212,7 @@ export async function getCompetitorOverview(shopDomain: string) {
       recentChanges >= 24 ? "High" : recentChanges >= 10 ? "Medium" : recentChanges > 0 ? "Low" : "No live market data",
     adPressure:
       sourceBreakdown.metaAds > 0
-        ? "Imported preview data present"
+        ? "Beta ad-library signal available"
         : "Not enabled",
     launchAlerts: recentRows
       .filter((row) => !!row.promotion && /launch|new/i.test(row.promotion))
@@ -1253,8 +1253,8 @@ export async function getCompetitorOverview(shopDomain: string) {
       domainsConfigured: store.competitorDomains.length,
       channelsReady: [
         store.competitorDomains.length > 0 ? "Competitor website" : null,
-        sourceBreakdown.googleShopping > 0 ? "Google Shopping" : null,
-        sourceBreakdown.metaAds > 0 ? "Meta Ad Library" : null,
+        sourceBreakdown.googleShopping > 0 ? "Shopping beta" : null,
+        sourceBreakdown.metaAds > 0 ? "Ad-library beta" : null,
       ].filter((item): item is string => item !== null),
       monitoringPosture: primaryStateCopy.coverageStatus,
     },
@@ -1313,24 +1313,24 @@ export async function listCompetitorConnectors(shopDomain: string) {
     },
     {
       id: "google_shopping",
-      label: "Google Shopping feed",
+      label: "Shopping beta",
       description:
-        "Limited preview connector. Production VedaSuite does not yet run live Google Shopping ingestion.",
+        "Beta integration for catalog-based shopping signals.",
       connected: false,
       trackedTargets: 0,
       lastIngestedAt: null,
-      readiness: "Preview",
+      readiness: "Beta",
       action: "No action needed",
     },
     {
       id: "meta_ads",
-      label: "Meta Ad Library",
+      label: "Ad-library beta",
       description:
-        "Limited preview connector. Production VedaSuite does not yet run live ad-library ingestion.",
+        "Beta integration for ad-library signals.",
       connected: false,
       trackedTargets: 0,
       lastIngestedAt: null,
-      readiness: "Preview",
+      readiness: "Beta",
       action: "No action needed",
     },
   ];

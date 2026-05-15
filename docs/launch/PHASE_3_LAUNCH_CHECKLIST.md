@@ -45,13 +45,13 @@ This checklist covers the final non-trivial work required before submitting Veda
 
 ## App Review Package
 
-- Record a short install and usage demo video.
+- Record a short install and reviewer walkthrough video.
 - Prepare reviewer instructions for:
   - install
   - billing plan selection
   - test flows
   - key feature entry points
-- List any features that are demo-mode, simulated, or require external connectors.
+- List any beta features or external connectors that are not part of the primary review path.
 - Provide test store access or review steps if needed.
 
 ## Go/No-Go

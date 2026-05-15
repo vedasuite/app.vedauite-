@@ -65,7 +65,7 @@ export type OnboardingState = {
   selectedModule: OnboardingModuleKey | null;
   selectedModuleTitle: string | null;
   selectedModuleRoute: string | null;
-  sampleInsights: Array<{
+  guidedInsights: Array<{
     key: string;
     module: string;
     title: string;

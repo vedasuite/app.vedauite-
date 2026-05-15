@@ -74,7 +74,7 @@ Be ready to explain:
 
 ## Public URLs
 
-Replace placeholders if needed, then paste into Partner Dashboard:
+Confirm final public URLs, then paste into Partner Dashboard:
 
 - Privacy policy URL: `/legal/privacy`
 - Terms of service URL: `/legal/terms`
@@ -89,7 +89,7 @@ Prepare and upload:
 - desktop screenshots
 - short feature descriptions
 - pricing explanation
-- demo/reviewer instructions
+- reviewer instructions
 
 ## Final Before Submit
 
@@ -97,4 +97,6 @@ Prepare and upload:
 - test billing on the production-linked app
 - verify compliance and uninstall webhooks
 - verify session-token protected APIs work in the embedded app
-- verify no placeholder legal/support values remain
+- verify all legal/support values are production URLs
+- verify the listing only claims: competitor pricing analysis, refund risk analysis, customer risk insights, and AI-generated pricing suggestions
+- verify reviewer instructions use a real competitor domain such as `gymshark.com` or `allbirds.com`

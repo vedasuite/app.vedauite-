@@ -141,7 +141,7 @@ export type CanonicalAppState = {
       pricingReady: boolean;
       profitReady: boolean;
     };
-    sampleMode: boolean;
+    guidedMode: boolean;
   };
 };
 

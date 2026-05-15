@@ -423,28 +423,28 @@ export async function getOnboardingState(shopDomain: string) {
     selectedModule,
     selectedModuleTitle: selectedModule ? moduleTitle(selectedModule) : null,
     selectedModuleRoute: selectedModule ? moduleRoute(selectedModule) : null,
-    sampleInsights: env.enableSampleData
+    guidedInsights: env.enableGuidedSetupData
       ? [
           {
-            key: "fraud-sample",
+            key: "fraud-guided",
             module: "Fraud Intelligence",
-            title: "Sample preview: Customer flagged for repeated refund behaviour",
+            title: "Guided setup: Customer flagged for repeated refund behaviour",
             detail:
-              "Sample preview only. Live fraud insights appear here after Shopify orders and customer history are synced.",
+              "Fraud insights appear here after Shopify orders and customer history are available.",
           },
           {
-            key: "competitor-sample",
+            key: "competitor-guided",
             module: "Competitor Intelligence",
-            title: "Sample preview: Competitor changed price on a tracked product",
+            title: "Guided setup: Competitor changed price on a tracked product",
             detail:
-              "Sample preview only. Live competitor changes appear after competitor websites are connected and analysis completes.",
+              "Competitor changes appear after competitor websites are connected and analysis completes.",
           },
           {
-            key: "pricing-sample",
+            key: "pricing-guided",
             module: "AI Pricing Engine",
-            title: "Sample preview: Suggested price change based on baseline store data",
+            title: "Guided setup: Suggested price change based on baseline store data",
             detail:
-              "Sample preview only. Live pricing actions appear after enough synced product and order history is available.",
+              "Pricing actions appear after enough product and order history is available.",
           },
         ]
       : [],
@@ -461,7 +461,7 @@ export async function getOnboardingState(shopDomain: string) {
       ].filter((value): value is string => !!value),
       lockedFeatures: [
         subscription.enabledModules.fraud ? null : "Fraud detection",
-        subscription.enabledModules.competitor ? null : "Competitor tracking",
+        subscription.enabledModules.competitor ? null : "Competitor analysis",
         subscription.enabledModules.pricing ? null : "Pricing optimization",
       ].filter((value): value is string => !!value),
       manageRoute: "/app/billing",

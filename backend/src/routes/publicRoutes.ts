@@ -43,11 +43,11 @@ publicRouter.get("/legal/privacy", (_req, res) => {
         <h1>Privacy Policy</h1>
         <p class="meta">Last updated: 2026-03-24</p>
         <div class="card">
-          <p>VedaSuite AI provides commerce intelligence for Shopify merchants including fraud support, pricing intelligence, competitor monitoring, shopper trust scoring, and profit optimization.</p>
+          <p>VedaSuite AI provides AI-powered competitor and refund intelligence for Shopify merchants, including fraud support, pricing guidance, shopper trust scoring, and profit insights.</p>
           <h2>Data We Process</h2>
           <p>Depending on merchant configuration and scopes, we may process store metadata, order and customer records, refund behavior, fraud-related signals, merchant-defined settings, and tracked competitor domains.</p>
-          <h2>Shared Fraud Intelligence</h2>
-          <p>If a merchant explicitly enables shared fraud intelligence, VedaSuite AI limits that behavior to anonymized or pseudonymized fraud signals intended to reduce fraud and return abuse risk. Raw customer contact data is not exposed cross-merchant through this feature.</p>
+          <h2>Anonymized Fraud Pattern Insights</h2>
+          <p>If a merchant explicitly enables anonymized fraud pattern insights, VedaSuite AI limits that behavior to anonymized or pseudonymized fraud signals intended to reduce fraud and return abuse risk. Raw customer contact data is not exposed cross-merchant through this feature.</p>
           <h3>Categories of Data</h3>
           <ul>
             <li>merchant account and store installation information</li>
@@ -91,7 +91,7 @@ publicRouter.get("/legal/terms", (_req, res) => {
         <h1>Terms of Service</h1>
         <p class="meta">Last updated: 2026-03-24</p>
         <div class="card">
-          <p>VedaSuite AI is a Shopify app that provides merchant decision-support tooling for fraud intelligence, competitor monitoring, pricing guidance, shopper trust scoring, and profit optimization.</p>
+          <p>VedaSuite AI is a Shopify app that provides merchant decision-support tooling for fraud intelligence, competitor analysis, pricing guidance, shopper trust scoring, and profit optimization.</p>
           <h2>Acceptance and Eligibility</h2>
           <p>By installing or using VedaSuite AI, the merchant agrees to these terms and represents that they have authority to bind the relevant business or store.</p>
           <h2>Merchant Responsibilities</h2>

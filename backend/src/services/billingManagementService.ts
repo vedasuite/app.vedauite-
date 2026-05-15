@@ -102,11 +102,11 @@ export type BillingPlanChangeResult =
 function planSummary(planName: BillingPlanName) {
   switch (planName) {
     case "STARTER":
-      return "Starter includes one selected feature plus reports and settings.";
+      return "Fraud & Return Protection for small stores, with one selected Starter feature.";
     case "GROWTH":
-      return "Growth includes Trust & Abuse, Competitor, and baseline Pricing & Profit coverage.";
+      return "Advanced competitor and pricing intelligence with enhanced fraud analysis.";
     case "PRO":
-      return "Pro includes all core features and the full profit engine.";
+      return "Full AI commerce intelligence suite with profit optimization and priority processing.";
     case "TRIAL":
       return "Trial provides temporary evaluation access before a paid plan is selected.";
     default:

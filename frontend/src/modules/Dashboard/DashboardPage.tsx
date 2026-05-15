@@ -1133,7 +1133,7 @@ export function DashboardPage() {
 
         {onboarding && !onboarding.canAccessDashboard ? (
           <Layout.Section>
-            <Banner title="Dashboard preview until onboarding is complete" tone="info">
+            <Banner title="Dashboard available after onboarding" tone="info">
               <BlockStack gap="200">
                 <p>
                   VedaSuite is still preparing this store. The view below stays simple until connection, billing, and the first workflow are ready.

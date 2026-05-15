@@ -92,7 +92,7 @@ Confirm:
 - Dashboard does not overclaim that all modules are ready
 - Competitor and pricing modules show truthful empty or partial states when data is limited
 - No module claims live readiness without persisted backing data
-- No dead buttons or placeholder reviewer-visible routes remain
+- No dead buttons or incomplete reviewer-visible routes remain
 
 ## 8. Production Safety
 

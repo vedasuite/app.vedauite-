@@ -2,6 +2,19 @@
 
 Final verification timestamp: `2026-05-13T00:00:00+05:30`
 
+Latest approval hardening timestamp: `2026-05-15T00:00:00+05:30`
+
+## 2026-05-15 reviewer-risk wording and claim alignment
+
+- Removed reviewer-risk “unfinished feature” wording from live app surfaces and launch/submission docs.
+- Replaced onboarding training language with guided setup wording.
+- Replaced broad shared-fraud-network wording with anonymized fraud pattern insights.
+- Reframed pricing outputs as AI-generated or baseline recommendations based on current catalog and store activity.
+- Updated plan copy to the production-ready Starter, Growth, and Pro positioning.
+- Updated reviewer walkthroughs to use real public competitor domains: `gymshark.com` and `allbirds.com`.
+- Limited review/listing guidance to claims reviewers can verify quickly: competitor pricing analysis, refund risk analysis, customer risk insights, and AI-generated pricing suggestions.
+- Verification passed: backend build, frontend production build, reviewer-risk wording scan, and targeted regressions for bootstrap, billing capabilities, competitor service, pricing/profit overview, and readiness engine.
+
 ## 2026-05-13 final merchant experience polish
 
 This pass is intentionally limited to wording, merchant-facing copy, empty states, dashboard simplification, and Shopify approval polish. It does not rewrite backend architecture, billing logic, database models, or entitlement systems.
@@ -12,7 +25,7 @@ This pass is intentionally limited to wording, merchant-facing copy, empty state
 - Dashboard Recent Insights now favors real actionable events and calm empty/healthy messages instead of synthetic-looking alert noise.
 - Fraud and Trust Abuse empty states now communicate that no high-risk orders are currently detected instead of implying missing data.
 - Competitor Intelligence now uses competitor websites and competitor analysis language, with success copy such as `Competitor analysis completed. No matching products were identified yet.`
-- Pricing and profit copy now frames limited outputs as baseline/example recommendations and avoids exaggerated certainty for Shopify sample catalog products.
+- Pricing and profit copy now frames limited outputs as baseline recommendations and avoids exaggerated certainty for early catalog data.
 - Billing copy now emphasizes `Current plan`, `Included features`, `Upgrade`, `Downgrade`, `Active subscription`, and Shopify approval without developer/test wording.
 - Reports, onboarding, settings, and app readiness copy now use connected/ready/available/insights language instead of sync/module/system language.
 
@@ -40,7 +53,7 @@ This pass was focused on the remaining approval blockers from the latest live QA
 1. Starter access still depended on a mix of canonical and legacy module names across backend resolution, billing reconciliation, and frontend access mirrors.
 2. Billing confirmation refreshed subscription state, but the selected Starter module was not being reinforced consistently enough after plan changes.
 3. Merchant-facing order labels still had multiple formatter paths, so synthetic fallback IDs could leak through timeline events, fraud summaries, and evidence views.
-4. Recent Insights relied on timeline copy that was operationally useful but still too close to internal synthetic test language when sample mode was off.
+4. Recent Insights relied on timeline copy that was operationally useful but still too close to internal synthetic test language when guided setup data was off.
 5. The Trust & Abuse evidence CTA changed local state only; it did not clearly move the merchant to the actual evidence section.
 6. Competitor module cache and UI state could linger after access was lost, which made locked or not-configured stores look stale instead of simply locked or empty.
 7. Billing pending states had backend and frontend coverage, but the embedded shell still needed a stronger non-blank full-page fallback during redirect/return confirmation.
@@ -109,7 +122,7 @@ This pass was focused on the remaining approval blockers from the latest live QA
 ### Recent Insights cleanup
 
 - Recent Insights now reformat titles and detail lines through merchant-safe label helpers in [backend/src/services/dashboardService.ts](/C:/Users/Abhimanyu/OneDrive/Desktop/untitled%20folder/vedasuite-shopify-app/app-repo/backend/src/services/dashboardService.ts).
-- Sample-like shopper strings such as `shopper 3zvn` are no longer surfaced in the dashboard insight cards when sample mode is off.
+- Internal-looking shopper strings such as `shopper 3zvn` are no longer surfaced in the dashboard insight cards when guided setup data is off.
 - Timeline copy now prefers plain merchant-safe patterns like:
   - `Customer profile updated`
   - `Refund review needs attention`

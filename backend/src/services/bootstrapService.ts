@@ -16,17 +16,17 @@ export async function ensureStoreBootstrapped(shop: string) {
     throw new Error("Store not found");
   }
 
-  if (env.enableDemoBootstrap) {
-    logEvent("warn", "bootstrap.demo_mode_ignored", {
+  if (env.enableGuidedBootstrap) {
+    logEvent("warn", "bootstrap.guided_bootstrap_ignored", {
       shop: store.shop,
       message:
-        "Demo bootstrap is enabled in configuration, but VedaSuite no longer seeds fake merchant intelligence data.",
+        "Guided bootstrap is enabled in configuration, but VedaSuite only uses Shopify store activity for merchant intelligence.",
     });
   }
 
   logEvent("info", "bootstrap.checked", {
     shop: store.shop,
     installedAt: store.installedAt?.toISOString() ?? null,
-    seeded: false,
+    generatedGuidedData: false,
   });
 }

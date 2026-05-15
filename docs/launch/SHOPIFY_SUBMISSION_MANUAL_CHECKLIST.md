@@ -101,6 +101,6 @@ Do not use `prisma db push --accept-data-loss` in Render production deploys.
 
 - Upload final app icon
 - Upload screenshots
-- Upload review/demo video
+- Upload reviewer walkthrough video
 - Ensure listing copy does not claim unsupported capabilities
 - Keep fraud, trust, pricing, and competitor claims explainable and operational

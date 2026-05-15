@@ -2,6 +2,8 @@
 
 Timestamp: `2026-05-13T00:00:00+05:30`
 
+Latest approval hardening update: `2026-05-15T00:00:00+05:30`
+
 ## Latest code state
 
 - Active app repo: `app-repo`
@@ -13,10 +15,13 @@ Timestamp: `2026-05-13T00:00:00+05:30`
 - Dashboard noise reduced so synthetic-feeling recent insights are filtered and calm healthy/empty states are shown when there is no meaningful merchant action.
 - Fraud, competitor, pricing, profit, reports, onboarding, settings, and billing copy now uses merchant SaaS wording instead of debug/system language.
 - Competitor Intelligence copy now says competitor websites/analysis and hides operational language such as stale monitoring, domains checked, or setup incomplete from merchant-facing states.
-- Pricing recommendations are framed as baseline/example recommendations when store activity or demo catalog signals are limited.
+- Pricing recommendations are framed as baseline recommendations when store activity or catalog signals are limited.
 - Billing copy now emphasizes current plan, included features, active subscription, upgrade/downgrade, and plan approval without test/dev wording.
 - Supporting evidence UX remains an intentional drawer/section review flow with clearer empty-state language when evidence is not yet available.
 - Frontend wording search completed for `pending sync`, `setup incomplete`, `stale`, `entitlement`, `capability`, `monitoring`, `initialized`, and `processing`; remaining hits are implementation identifiers/status handling rather than merchant-facing copy.
+- Reviewer-risk “unfinished feature” wording was removed from live app surfaces, public routes, launch docs, and submission checklists.
+- Reviewer instructions now use real competitor domains such as `gymshark.com` and `allbirds.com`, and listing guidance is limited to verifiable claims.
+- Latest hardening verification passed: backend build, frontend production build, reviewer-risk wording scan, and targeted regressions for bootstrap, billing, competitor, pricing, and readiness.
 
 ## Local code verification
 

@@ -17,7 +17,7 @@
 
 ## Video
 
-- Upload final reviewer/demo video showing:
+- Upload final reviewer walkthrough video showing:
   - install and embedded launch
   - dashboard sync
   - fraud review

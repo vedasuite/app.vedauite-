@@ -19,7 +19,7 @@
 
 ## Billing and subscription
 
-- Verify `TRIAL` shows preview-only behavior and does not unlock paid module access.
+- Verify `TRIAL` shows plan-limited behavior and does not unlock paid feature access.
 - Verify `STARTER` with fraud selection unlocks fraud and keeps competitor/pricing/profit locked.
 - Verify `STARTER` with competitor selection unlocks competitor and keeps fraud/pricing/profit locked.
 - Verify `GROWTH` unlocks fraud, competitor, pricing, reports, and credit score.
@@ -52,9 +52,9 @@
 
 - With no domains configured, confirm the setup CTA appears.
 - With no eligible products, confirm the page explains that products must be synced first.
-- With stale data, confirm the page shows a warning with refresh guidance rather than raw extreme hour counts.
-- With no comparable matches, confirm the page explains that monitoring ran but no valid comparable products were found.
-- Verify fake `.example` domains do not appear by default.
+- With older analysis data, confirm the page shows update guidance rather than raw extreme hour counts.
+- With no comparable matches, confirm the page explains that competitor analysis completed but no matching products were found.
+- Add `gymshark.com` or `allbirds.com`, run competitor analysis, and confirm the app shows either matched products with pricing or a clean no-match result.
 
 ## Pricing and profit
 

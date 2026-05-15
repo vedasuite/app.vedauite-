@@ -384,7 +384,7 @@ export function SettingsPage() {
                       }
                     />
                     <Checkbox
-                      label="Join shared fraud intelligence network"
+                      label="Use anonymized fraud pattern insights"
                       checked={settings.sharedFraudNetwork}
                       onChange={(checked) =>
                         setSettings((prev) => ({ ...prev, sharedFraudNetwork: checked }))

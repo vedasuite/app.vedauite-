@@ -176,7 +176,7 @@ export function buildCapabilities(
     planName === "STARTER" && normalizedStarterModule === "fraud";
   const isStarterCompetitor =
     planName === "STARTER" && normalizedStarterModule === "competitor";
-  const trialPreviewOnly = isTrial && (options?.trialActive ?? true);
+  const trialLimitedOnly = isTrial && (options?.trialActive ?? true);
   const fraudModule = isStarterTrust || isGrowth || isPro;
   const competitorModule = isStarterCompetitor || isGrowth || isPro;
   const pricingModule = isGrowth || isPro;
@@ -191,7 +191,7 @@ export function buildCapabilities(
   capabilities["billing.upgrade"] = true;
   capabilities["billing.downgrade"] = planName !== "NONE";
   capabilities["billing.moduleSelectionStarter"] = planName === "STARTER";
-  capabilities["billing.trialActive"] = trialPreviewOnly;
+  capabilities["billing.trialActive"] = trialLimitedOnly;
 
   capabilities["module.trustAbuse"] = fraudModule;
   capabilities["module.competitorIntel"] = competitorModule;

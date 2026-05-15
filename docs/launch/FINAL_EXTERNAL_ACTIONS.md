@@ -20,7 +20,7 @@ The remaining launch steps now sit outside the repository.
 
 - Upload app icon
 - Upload screenshots
-- Upload demo video if required
+- Upload reviewer walkthrough video if required
 - Finalize app listing copy
 
 ## Production QA

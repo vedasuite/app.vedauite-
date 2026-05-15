@@ -359,7 +359,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
       cases: supportCopilotCases,
     },
     evidencePack: {
-      status: subscription.featureAccess.evidencePackExport ? "ready" : "preview",
+      status: subscription.featureAccess.evidencePackExport ? "ready" : "upgrade_available",
       exports: [
         "Order-level risk explanation",
         "Refund and abuse timeline",

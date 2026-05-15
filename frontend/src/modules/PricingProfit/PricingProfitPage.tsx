@@ -429,7 +429,7 @@ export function PricingProfitPage() {
       ? "Not enough data yet"
       : `$${Math.round(pricingState.projectedGainValue)}`;
   const hasExampleCatalogRecommendations = (overview.prioritizedRecommendations ?? []).some(
-    (item) => item.dataBasis.toLowerCase().includes("example recommendation")
+    (item) => item.dataBasis.toLowerCase().includes("baseline recommendation")
   );
 
   return (
@@ -576,9 +576,9 @@ export function PricingProfitPage() {
                   </InlineStack>
 
                   {hasExampleCatalogRecommendations ? (
-                    <Banner title="Example recommendations based on the current catalog" tone="info">
+                    <Banner title="Baseline recommendations based on the current catalog" tone="info">
                       <p>
-                        Some products look like Shopify sample catalog items. Review these recommendations as examples before applying any price changes.
+                        These AI-generated recommendations use the current catalog and available store activity. Review each recommendation before applying any price changes.
                       </p>
                     </Banner>
                   ) : null}

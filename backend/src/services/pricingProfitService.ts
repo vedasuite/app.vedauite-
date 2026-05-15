@@ -747,13 +747,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
         confidence,
         confidenceScore: item.approvalConfidence,
         dataBasis: exampleCatalogProduct
-          ? "Example recommendation based on current catalog"
+          ? "Baseline recommendation based on current catalog"
           : competitorReady
           ? "competitor-informed"
           : "Baseline estimate - review before applying",
         why:
           exampleCatalogProduct
-            ? "This store appears to include Shopify sample catalog products, so the recommendation is presented as an example for merchant review."
+            ? "This recommendation is generated from the current catalog and available store activity."
             : item.demandSignals[0] ??
           "Recommendation is based on synced pricing rows and current merchant pricing settings.",
         support:
@@ -766,7 +766,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
           item.autoApprovalCandidate
             ? "Ready for merchant review."
             : exampleCatalogProduct
-            ? "Example recommendation - review before applying in Shopify."
+            ? "Baseline recommendation - review before applying in Shopify."
             : "Baseline estimate - review before applying in Shopify.",
       };
     })

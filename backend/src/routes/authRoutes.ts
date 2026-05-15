@@ -335,7 +335,7 @@ authRouter.get("/callback", async (req, res) => {
 
     setShopifySessionCookie(res, shop);
 
-    if (env.enableDemoBootstrap) {
+    if (env.enableGuidedBootstrap) {
       await ensureStoreBootstrapped(shop);
     }
 

@@ -62,6 +62,6 @@ export async function getStoreReadinessState(shopDomain: string) {
       pricingReady: entitlements.enabledModules.includes("pricing") && hasPricingData,
       profitReady: entitlements.enabledModules.includes("profit") && hasProfitData,
     },
-    sampleMode: env.enableSampleData,
+    guidedMode: env.enableGuidedSetupData,
   };
 }

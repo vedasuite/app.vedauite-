@@ -216,7 +216,7 @@ export function createApp() {
         return redirectTopLevel(res, reconnectUrl.toString());
       }
 
-      if (env.enableDemoBootstrap) {
+      if (env.enableGuidedBootstrap) {
         await ensureStoreBootstrapped(shop);
       }
 

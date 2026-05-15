@@ -23,12 +23,12 @@ This walkthrough is intended for Shopify App Review or internal launch QA.
    - sync status is visible
    - billing status is visible
 6. Open Dashboard and test:
-   - Sync live Shopify data
-   - Register sync webhooks
+   - Update store insights
+   - Verify Shopify connection
 7. Trigger one real module workflow:
    - Trust & Abuse: review queue/timeline
-   - Competitor Intelligence: move feed/setup state
-   - Pricing & Profit: recommendation or baseline state
+   - Competitor Intelligence: add `gymshark.com` or `allbirds.com`, run analysis, then review matched products or the no-match result
+   - Pricing & Profit: review AI-generated recommendation or baseline state
 8. Open Subscription Plans and trigger a billing selection.
 9. Confirm the billing redirect opens correctly outside the iframe.
 10. Return to the app and verify plan access updates.
@@ -43,17 +43,17 @@ This walkthrough is intended for Shopify App Review or internal launch QA.
 - Embedded requests authenticate cleanly while server-admin operations use the stored offline installation.
 - Reviewer-facing health and launch checks are factual, not score-based.
 
-## Demo Notes
+## Reviewer Notes
 
-- Competitor Intelligence includes monitored competitor surfaces plus manual/setup states where live external coverage is not yet configured.
-- The app no longer seeds fake merchant intelligence into production installs.
-- Compliance export files are generated server-side and should use durable storage in production.
+- Use a real public competitor domain such as `gymshark.com` or `allbirds.com`.
+- The review-safe claims are competitor pricing analysis, refund risk analysis, customer risk insights, and AI-generated pricing suggestions.
+- Beta integrations are disclosed as beta and are not required for the primary review path.
 
 ## Suggested Screenshot Set
 
 - dashboard overview
 - trust & abuse module
-- competitor module with connector cards
+- competitor module with a tracked domain
 - pricing & profit recommendation review
 - subscription plan screen
 - settings page

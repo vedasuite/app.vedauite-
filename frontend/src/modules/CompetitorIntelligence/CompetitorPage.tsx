@@ -832,8 +832,8 @@ export function CompetitorPage() {
                       <InlineGrid columns={{ xs: 1, md: 3 }} gap="300">
                         {[
                           ["Website", sourceBreakdown.website],
-                          ["Google Shopping", sourceBreakdown.googleShopping],
-                          ["Meta Ads", sourceBreakdown.metaAds],
+                          ["Shopping beta", sourceBreakdown.googleShopping],
+                          ["Ad-library beta", sourceBreakdown.metaAds],
                         ].map(([label, value]) => (
                           <Card key={String(label)}>
                             <BlockStack gap="150">
@@ -966,7 +966,7 @@ export function CompetitorPage() {
                                 ? "success"
                                 : connector.readiness === "Configured"
                                 ? "info"
-                                : connector.readiness === "Preview"
+                                : connector.readiness === "Beta"
                                 ? "attention"
                                 : "subdued"
                             }

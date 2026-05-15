@@ -63,8 +63,8 @@ function createEmptyOverview(readinessState = "SYNC_REQUIRED", reason = "Run the
     wardrobingSignals: [],
     networkMatches: [],
     chargebackCandidates: [],
-    supportCopilot: { status: "preview", playbooks: [], cases: [] },
-    evidencePack: { status: "preview", exports: [], templates: [] },
+    supportCopilot: { status: "upgrade_available", playbooks: [], cases: [] },
+    evidencePack: { status: "upgrade_available", exports: [], templates: [] },
     behaviorTimeline: [],
     refundOutcomeSimulator: undefined,
     smartPolicyRecommendations: [],
@@ -657,8 +657,8 @@ export function TrustAbusePage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">Support guidance</Text>
-                <Banner title={overview.supportCopilot.status === "active" ? "Support guidance is available" : "Support guidance preview"} tone={overview.supportCopilot.status === "active" ? "success" : "info"}>
-                  <p>{overview.supportCopilot.status === "active" ? "Use trust scores, review reasons, and handling guidance inside support workflows." : "Support guidance previews are visible on this plan."}</p>
+                <Banner title={overview.supportCopilot.status === "active" ? "Support guidance is available" : "Support guidance included with upgrade"} tone={overview.supportCopilot.status === "active" ? "success" : "info"}>
+                  <p>{overview.supportCopilot.status === "active" ? "Use trust scores, review reasons, and handling guidance inside support workflows." : "Upgrade to use support guidance with trust scores and review reasons."}</p>
                 </Banner>
                 <Text as="p" variant="headingSm">Playbooks</Text>
                 <List type="bullet">
