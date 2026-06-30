@@ -511,14 +511,9 @@ export async function resolveOfflineInstallation(
     return refreshOfflineAccessToken(installation);
   }
 
-  // Automatically upgrade deprecated permanent offline tokens to new expiring tokens
-  if (
-    options.allowRefresh !== false &&
-    installation.tokenAcquisitionMode === "offline_legacy"
-  ) {
-    return exchangeLegacyOfflineToken(installation);
-  }
-
+  // Legacy offline tokens (offline_legacy) still work for API calls — Shopify deprecated
+  // permanent tokens but they remain valid. Migration to expiring tokens requires the
+  // merchant to re-authorize via OAuth; it cannot be done by exchanging tokens server-side.
   return installation;
 }
 

@@ -585,7 +585,7 @@ export async function resolveBillingState(
   let reconciledFromShopify = false;
 
   if (!isPaidSubscriptionActive(subscription) || !subscription?.plan) {
-    const reconciled = await reconcileCurrentSubscriptionFromShopify(store);
+    const reconciled = await reconcileCurrentSubscriptionFromShopify(store).catch(() => null);
     if (reconciled) {
       subscription = reconciled;
       reconciledFromShopify = true;
