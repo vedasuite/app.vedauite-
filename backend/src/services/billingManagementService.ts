@@ -553,17 +553,19 @@ export async function confirmBillingApprovalReturn(input: {
 
   const activeSubscription = await getActiveAppSubscription(input.shopDomain);
   if (!activeSubscription) {
+    const declineMessage =
+      "Shopify billing was not approved. If you declined the plan, select a plan below to subscribe.";
     if (intent) {
       await prisma.billingPlanIntent.update({
         where: { id: intent.id },
         data: {
           status: "FAILED",
           errorCode: "BILLING_NOT_CONFIRMED",
-          errorMessage: "No active Shopify app subscription was found after returning from approval.",
+          errorMessage: declineMessage,
         },
       });
     }
-    throw new Error("No active Shopify app subscription was found after returning from approval.");
+    throw new Error(declineMessage);
   }
 
   const effectivePlan = normalizePlanName(activeSubscription.name);

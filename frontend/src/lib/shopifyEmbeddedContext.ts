@@ -10,10 +10,6 @@ function canUseSessionStorage() {
   return typeof window !== "undefined" && !!window.sessionStorage;
 }
 
-function canUseLocalStorage() {
-  return typeof window !== "undefined" && !!window.localStorage;
-}
-
 function normalizeShop(value: string) {
   const normalized = value.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(normalized)) {
@@ -37,28 +33,17 @@ function normalizeHost(value: string) {
 }
 
 function readStoredValue(key: string) {
-  if (!canUseSessionStorage() && !canUseLocalStorage()) {
+  if (!canUseSessionStorage()) {
     return "";
   }
-
-  return (
-    (canUseSessionStorage() ? window.sessionStorage.getItem(key) : null) ??
-    (canUseLocalStorage() ? window.localStorage.getItem(key) : null) ??
-    ""
-  );
+  return window.sessionStorage.getItem(key) ?? "";
 }
 
 function writeStoredValue(key: string, value: string) {
-  if (!value) {
+  if (!value || !canUseSessionStorage()) {
     return;
   }
-
-  if (canUseSessionStorage()) {
-    window.sessionStorage.setItem(key, value);
-  }
-  if (canUseLocalStorage()) {
-    window.localStorage.setItem(key, value);
-  }
+  window.sessionStorage.setItem(key, value);
 }
 
 function parseShopFromReferrer() {

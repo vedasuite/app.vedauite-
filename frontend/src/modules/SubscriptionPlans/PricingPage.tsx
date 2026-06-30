@@ -476,17 +476,28 @@ export function PricingPage() {
 
         {billingFlowState === "FAILED" && billingError ? (
           <Layout.Section>
-            <Banner title="Subscription confirmation needs attention" tone="critical">
+            <Banner
+              title={
+                /declined|not approved|not confirmed/i.test(billingError)
+                  ? "Billing approval was not completed"
+                  : "Subscription confirmation needs attention"
+              }
+              tone="critical"
+            >
               <BlockStack gap="200">
                 <p>{billingError}</p>
-                <InlineStack gap="300">
-                  <Button variant="primary" onClick={() => void retryBillingConfirmation()}>
-                    Retry confirmation
-                  </Button>
-                  <Button onClick={() => void loadBillingState()}>
-                    Refresh billing state
-                  </Button>
-                </InlineStack>
+                {/declined|not approved|not confirmed/i.test(billingError) ? (
+                  <p>Select a plan below to subscribe.</p>
+                ) : (
+                  <InlineStack gap="300">
+                    <Button variant="primary" onClick={() => void retryBillingConfirmation()}>
+                      Retry confirmation
+                    </Button>
+                    <Button onClick={() => void loadBillingState()}>
+                      Refresh billing state
+                    </Button>
+                  </InlineStack>
+                )}
               </BlockStack>
             </Banner>
           </Layout.Section>
