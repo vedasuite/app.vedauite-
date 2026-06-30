@@ -101,7 +101,27 @@ export function verifyShopifySessionToken(
     const payload = jwt.verify(token, env.shopifyApiSecret, {
       algorithms: ["HS256"],
       audience: env.shopifyApiKey,
-    }) as JwtPayload & { dest?: string };
+    }) as JwtPayload & { dest?: string; iss?: string };
+
+    // Docs require iss and dest top-level domains to match
+    if (typeof payload.iss === "string" && typeof payload.dest === "string") {
+      try {
+        const issHost = new URL(payload.iss).host;
+        const destHost = new URL(payload.dest).host;
+        if (issHost !== destHost) {
+          throw new Error("iss/dest domain mismatch");
+        }
+      } catch {
+        return sendAuthError(
+          req,
+          res,
+          401,
+          "INVALID_SHOPIFY_SESSION_TOKEN",
+          "Invalid Shopify session token. Refresh or reconnect the embedded app and retry.",
+          requestedShop
+        );
+      }
+    }
 
     const tokenShop = normalizeShopDomain(
       typeof payload.dest === "string" ? new URL(payload.dest).host : undefined
