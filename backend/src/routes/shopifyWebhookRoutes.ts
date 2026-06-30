@@ -46,6 +46,10 @@ async function handleSyncWebhook(req: any, res: any) {
     return res.status(400).send("Missing shop domain");
   }
 
+  // Acknowledge immediately — Shopify counts any non-200 as a failure and retries.
+  // Process the sync job asynchronously so errors don't surface as 5xx to Shopify.
+  res.status(200).send("ok");
+
   logEvent("info", "webhook.sync_received", {
     topic: req.path,
     shop: shopDomain,
@@ -53,7 +57,7 @@ async function handleSyncWebhook(req: any, res: any) {
 
   const triggerSource = req.path.replace("/", "") as SyncTriggerSource;
 
-  await withRetry(() => runStoreSyncJob(shopDomain, triggerSource), {
+  void withRetry(() => runStoreSyncJob(shopDomain, triggerSource), {
     attempts: 3,
     delayMs: 300,
     operationName: "webhook.shopify_sync",
@@ -61,8 +65,13 @@ async function handleSyncWebhook(req: any, res: any) {
       topic: req.path,
       shop: shopDomain,
     },
+  }).catch((error) => {
+    logEvent("error", "webhook.sync_job_failed", {
+      topic: req.path,
+      shop: shopDomain,
+      error,
+    });
   });
-  return res.status(200).send("ok");
 }
 
 async function handleWebhookEnvelope(req: any, res: any) {
