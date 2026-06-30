@@ -146,6 +146,18 @@ function isRetriableError(error: unknown) {
   );
 }
 
+async function getShopifySessionToken(): Promise<string | null> {
+  try {
+    const shopify = (window as unknown as { shopify?: { idToken?: () => Promise<string> } }).shopify;
+    if (typeof shopify?.idToken === "function") {
+      return await shopify.idToken();
+    }
+  } catch {
+    // App Bridge not ready or not embedded — fall back to cookie auth
+  }
+  return null;
+}
+
 export async function embeddedShopRequest<T = unknown>(
   path: string,
   options: EmbeddedRequestOptions = {}
@@ -153,14 +165,18 @@ export async function embeddedShopRequest<T = unknown>(
   const { method = "GET", body, timeoutMs = 30000, retries = 0, signal } = options;
   const url = buildUrl(path);
   const requestBody = buildRequestBody(path, method, body);
-  const baseHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Requested-With": "XMLHttpRequest",
-  };
   let attempt = 0;
 
   while (attempt <= retries) {
     try {
+      // Session tokens expire in 60 s — fetch a fresh one on each attempt
+      const sessionToken = await getShopifySessionToken();
+      const baseHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      };
+
       const responseResult = await doFetch(
         url,
         method,
