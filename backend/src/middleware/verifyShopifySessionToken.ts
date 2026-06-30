@@ -35,6 +35,11 @@ function sendAuthError(
       ? req.body.returnTo
       : req.path;
 
+  // Tell App Bridge to refresh the session token and retry automatically
+  if (status === 401) {
+    res.setHeader("X-Shopify-Retry-Invalid-Session-Request", "1");
+  }
+
   return res.status(status).json({
     error: {
       code,
