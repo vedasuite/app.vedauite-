@@ -16,7 +16,7 @@ import {
   TextField,
   Toast,
 } from "@shopify/polaris";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleGate } from "../../components/ModuleGate";
 import { useAppState } from "../../hooks/useAppState";
@@ -48,6 +48,9 @@ type CompetitorRow = {
   confidenceScore?: number;
   confidenceLabel?: string;
   matchReason?: string;
+  competitorProductTitle?: string | null;
+  competitorProductHandle?: string | null;
+  catalogObservation?: boolean;
 };
 
 type CompetitorOverview = {
@@ -340,6 +343,7 @@ export function CompetitorPage() {
   );
   const [selectedTab, setSelectedTab] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  const tabsSectionRef = useRef<HTMLDivElement | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [domainsInput, setDomainsInput] = useState("");
@@ -463,7 +467,7 @@ export function CompetitorPage() {
 
   const saveDomains = async () => {
     const domains = domainsInput
-      .split(",")
+      .split(/[\s,]+/)
       .map((domain) => domain.trim())
       .filter(Boolean)
       .map((domain) => ({ domain }));
@@ -506,10 +510,18 @@ export function CompetitorPage() {
     }
     if (primaryState === "CHANGES_DETECTED") {
       setSelectedTab(1);
+      setToast("Competitor changes loaded — scroll down to 'Move feed & signals' tab.");
+      window.setTimeout(() => {
+        tabsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
       return;
     }
     if (primaryState === "LOW_CONFIDENCE") {
       setSelectedTab(0);
+      setToast("Review low-confidence matches — scroll down to 'Tracked products' tab.");
+      window.setTimeout(() => {
+        tabsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
       return;
     }
     void ingestCompetitorData();
@@ -738,6 +750,7 @@ export function CompetitorPage() {
 
           {showOperationalPanels ? (
           <Layout.Section>
+            <div ref={tabsSectionRef}>
             <Card>
               <Tabs
                 tabs={[
@@ -778,7 +791,22 @@ export function CompetitorPage() {
                       >
                         {visibleRows.map((row, index) => (
                           <IndexTable.Row id={row.id} key={row.id} position={index}>
-                            <IndexTable.Cell>{row.productHandle}</IndexTable.Cell>
+                            <IndexTable.Cell>
+                              <BlockStack gap="100">
+                                <Text as="span">
+                                  {row.competitorProductTitle ?? row.productHandle}
+                                </Text>
+                                {row.catalogObservation ? (
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    Competitor catalog product
+                                  </Text>
+                                ) : row.competitorProductHandle ? (
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    Matched with {row.competitorProductHandle}
+                                  </Text>
+                                ) : null}
+                              </BlockStack>
+                            </IndexTable.Cell>
                             <IndexTable.Cell>{row.competitorName}</IndexTable.Cell>
                             <IndexTable.Cell>
                               {row.price != null ? `$${row.price.toFixed(2)}` : "-"}
@@ -812,7 +840,11 @@ export function CompetitorPage() {
                             </IndexTable.Cell>
                             <IndexTable.Cell>{row.stockStatus ?? "-"}</IndexTable.Cell>
                             <IndexTable.Cell>
-                              {getProductUrl(row.productHandle) ? (
+                              {row.catalogObservation ? (
+                                <Button url={row.competitorUrl} external>
+                                  Competitor
+                                </Button>
+                              ) : getProductUrl(row.productHandle) ? (
                                 <Button
                                   url={getProductUrl(row.productHandle) ?? undefined}
                                   external
@@ -942,6 +974,7 @@ export function CompetitorPage() {
                 </Box>
               </Tabs>
             </Card>
+            </div>
           </Layout.Section>
           ) : null}
 

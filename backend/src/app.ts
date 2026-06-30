@@ -60,6 +60,7 @@ export function createApp() {
 
   app.use(
     helmet({
+      frameguard: false,
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
@@ -67,8 +68,8 @@ export function createApp() {
             "https://admin.shopify.com",
             "https://*.myshopify.com",
           ],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.shopify.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.shopify.com"],
         },
       },
     })
@@ -200,7 +201,7 @@ export function createApp() {
       );
 
       if (!shop) {
-        return res.status(400).send("Missing shop");
+        return res.sendFile(frontendIndexPath);
       }
 
       const connectionHealth = await getConnectionHealth(shop, { probeApi: false });
