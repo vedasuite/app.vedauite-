@@ -1,9 +1,8 @@
 import { prisma } from "../db/prismaClient";
 import {
-  fetchCompetitorCatalogProducts,
   fetchCompetitorSnapshot,
-  type CompetitorCatalogProduct,
 } from "./shopifyAdminService";
+import { logEvent, withRetry } from "./observabilityService";
 import {
   deriveModuleReadiness,
   deriveSyncStatus,
@@ -13,6 +12,98 @@ import {
   createUnifiedModuleState,
   toIsoString,
 } from "./unifiedModuleStateService";
+
+export type CompetitorCatalogProduct = {
+  handle: string;
+  title: string;
+  url: string;
+  price: number | null;
+  available: boolean | null;
+};
+
+function normalizeCompetitorCatalogPrice(value: unknown) {
+  if (value == null) {
+    return null;
+  }
+  const parsed = Number(String(value).replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function fetchCompetitorCatalogProducts(
+  domain: string,
+  limit = 30
+): Promise<CompetitorCatalogProduct[]> {
+  try {
+    return await withRetry(
+      async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(
+            `https://${domain}/products.json?limit=${Math.min(Math.max(limit, 1), 50)}`,
+            {
+              signal: controller.signal,
+              headers: {
+                "User-Agent": "VedaSuiteAI/1.0 competitor-catalog-analysis",
+                Accept: "application/json",
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const payload = (await response.json()) as {
+            products?: Array<{
+              handle?: string | null;
+              title?: string | null;
+              variants?: Array<{
+                price?: string | number | null;
+                available?: boolean | null;
+              }>;
+            }>;
+          };
+
+          return (payload.products ?? [])
+            .map((product) => {
+              const handle = product.handle?.trim();
+              const title = product.title?.trim();
+              if (!handle || !title) {
+                return null;
+              }
+
+              const firstVariant = product.variants?.[0] ?? null;
+              return {
+                handle,
+                title,
+                url: `https://${domain}/products/${handle}`,
+                price: normalizeCompetitorCatalogPrice(firstVariant?.price),
+                available:
+                  typeof firstVariant?.available === "boolean"
+                    ? firstVariant.available
+                    : null,
+              };
+            })
+            .filter((product): product is CompetitorCatalogProduct => !!product)
+            .slice(0, limit);
+        } finally {
+          clearTimeout(timeout);
+        }
+      },
+      {
+        attempts: 2,
+        delayMs: 200,
+        operationName: "competitor.fetch_catalog",
+        context: { domain },
+      }
+    );
+  } catch {
+    logEvent("warn", "competitor.catalog_fetch_failed", { domain });
+    return [];
+  }
+}
 
 type CompetitorSetupStatus =
   | "READY"
