@@ -106,23 +106,23 @@ export async function getDashboardMetrics(shopDomain: string) {
     serialReturners,
   ] =
     await Promise.all([
-      getTrustAbuseOverview(shopDomain),
-      getCompetitorOverview(shopDomain),
-      getPricingProfitOverview(shopDomain),
+      getTrustAbuseOverview(shopDomain).catch(() => null),
+      getCompetitorOverview(shopDomain).catch(() => null),
+      getPricingProfitOverview(shopDomain).catch(() => null),
       prisma.customer.count({
         where: {
           storeId: store.id,
           refundRate: { gt: 0.3 },
         },
-      }),
+      }).catch(() => 0),
     ]);
 
-  const todayHighRiskOrders = trustOverview.summary.highRiskOrders;
+  const todayHighRiskOrders = trustOverview?.summary?.highRiskOrders ?? 0;
   const competitorChanges =
-    (competitorOverview.competitorState?.detectedPriceChangesCount ?? 0) +
-    (competitorOverview.competitorState?.detectedPromotionChangesCount ?? 0);
-  const pricingSuggestions = pricingOverview.summary.recommendationCount;
-  const profitOpportunities = pricingOverview.summary.profitOpportunityCount;
+    (competitorOverview?.competitorState?.detectedPriceChangesCount ?? 0) +
+    (competitorOverview?.competitorState?.detectedPromotionChangesCount ?? 0);
+  const pricingSuggestions = pricingOverview?.summary?.recommendationCount ?? 0;
+  const profitOpportunities = pricingOverview?.summary?.profitOpportunityCount ?? 0;
 
   const syncState = operational
     ? deriveSyncStatus({

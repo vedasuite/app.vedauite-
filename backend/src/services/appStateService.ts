@@ -143,6 +143,46 @@ export function deriveConnectionState(health: Awaited<ReturnType<typeof getConne
   };
 }
 
+const FALLBACK_MODULE_STATE = {
+  state: "error",
+  status: "unavailable",
+  title: "Module unavailable",
+  description: "This module is temporarily unavailable.",
+  ready: false,
+};
+
+const FALLBACK_READINESS: Awaited<ReturnType<typeof getUnifiedReadinessState>> = {
+  connection: { state: "error", status: "unavailable", title: "Connection status unavailable", description: "", ready: false, healthy: false, code: "UNKNOWN" },
+  initialSync: { state: "error", status: "unavailable", title: "Sync status unavailable", description: "", ready: false, syncStatus: "NOT_CONNECTED", hasRawData: false, hasProcessedData: false },
+  billing: { state: "error", status: "unavailable", title: "Billing unavailable", description: "", ready: false, lifecycle: "unknown", planName: "UNKNOWN", accessActive: false, verified: false },
+  modules: {
+    fraud: FALLBACK_MODULE_STATE,
+    competitor: FALLBACK_MODULE_STATE,
+    pricing: FALLBACK_MODULE_STATE,
+  },
+  setup: { minimumComplete: false, allCoreModulesReady: false, blockers: [], nextAction: { label: "Continue setup", route: "/app/onboarding" }, percent: 0, summaryTitle: "Setup unavailable", summaryDescription: "" },
+  quickAccess: {
+    fraud: { state: "error", status: "unavailable", freshnessAt: null, reason: "" },
+    competitor: { state: "error", status: "unavailable", freshnessAt: null, reason: "" },
+    pricing: { state: "error", status: "unavailable", freshnessAt: null, reason: "" },
+  },
+  moduleStates: null,
+} as any;
+
+const FALLBACK_STORE_READINESS: Awaited<ReturnType<typeof getStoreReadinessState>> = {
+  billing: {
+    plan: "UNKNOWN",
+    isActive: false,
+    isTrial: false,
+    starterModule: null,
+    enabledModules: { fraud: false, competitor: false, pricing: false, profit: false, reports: false, settings: true },
+  },
+  onboarding: { complete: false, stepsRemaining: [] },
+  data: { hasOrders: false, hasProducts: false, hasCompetitors: false, hasPricingData: false, hasProfitData: false },
+  modules: { fraudReady: false, competitorReady: false, pricingReady: false, profitReady: false },
+  guidedMode: false,
+} as any;
+
 export async function getMerchantAppState(shopDomain: string): Promise<MerchantAppState> {
   const [health, subscription, billing, onboarding, dashboard, readiness, storeReadiness] = await Promise.all([
     getConnectionHealth(shopDomain, { probeApi: false }),
@@ -150,8 +190,14 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
     resolveBillingState(shopDomain),
     getOnboardingState(shopDomain),
     getDashboardMetrics(shopDomain),
-    getUnifiedReadinessState(shopDomain),
-    getStoreReadinessState(shopDomain),
+    getUnifiedReadinessState(shopDomain).catch((err) => {
+      logEvent("error", "app_state.readiness_failed", { shop: shopDomain, error: err });
+      return FALLBACK_READINESS;
+    }),
+    getStoreReadinessState(shopDomain).catch((err) => {
+      logEvent("error", "app_state.store_readiness_failed", { shop: shopDomain, error: err });
+      return FALLBACK_STORE_READINESS;
+    }),
   ]);
 
   if (!dashboard) {
@@ -224,20 +270,17 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       fraud: {
         status: readiness.modules.fraud.state,
         title: readiness.modules.fraud.title,
-        description:
-          readiness.modules.fraud.description,
+        description: readiness.modules.fraud.description,
       },
       competitor: {
         status: readiness.modules.competitor.state,
         title: readiness.modules.competitor.title,
-        description:
-          readiness.modules.competitor.description,
+        description: readiness.modules.competitor.description,
       },
       pricing: {
         status: readiness.modules.pricing.state,
         title: readiness.modules.pricing.title,
-        description:
-          readiness.modules.pricing.description,
+        description: readiness.modules.pricing.description,
       },
     },
     readiness,
