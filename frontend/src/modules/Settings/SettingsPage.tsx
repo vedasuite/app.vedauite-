@@ -118,7 +118,7 @@ export function SettingsPage() {
 
   const save = async () => {
     const competitorDomains = domainsInput
-      .split(",")
+      .split(/[\n,]+/)
       .map((domain) => domain.trim())
       .filter(Boolean)
       .map((domain) => ({ domain }));

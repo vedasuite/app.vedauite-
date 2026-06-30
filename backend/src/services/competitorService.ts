@@ -1,5 +1,9 @@
 import { prisma } from "../db/prismaClient";
-import { fetchCompetitorSnapshot } from "./shopifyAdminService";
+import {
+  fetchCompetitorCatalogProducts,
+  fetchCompetitorSnapshot,
+  type CompetitorCatalogProduct,
+} from "./shopifyAdminService";
 import {
   deriveModuleReadiness,
   deriveSyncStatus,
@@ -64,11 +68,100 @@ type CompetitorMatchMetadata = {
   externalFetch?: boolean;
   sourceProductTitle?: string;
   sourceProductStatus?: string;
+  competitorProductTitle?: string;
+  competitorProductHandle?: string;
+  catalogObservation?: boolean;
 };
 
 const GIFT_CARD_PATTERN =
   /\bgift\s*card\b|\bgiftcard\b|\bgift[-\s]?voucher\b|\be[-\s]?gift\b/i;
-const LIVE_COMPETITOR_SOURCES = new Set(["website", "website_live"]);
+const LIVE_COMPETITOR_SOURCES = new Set(["website", "website_live", "website_catalog"]);
+const PRODUCT_TOKEN_STOPWORDS = new Set([
+  "and",
+  "the",
+  "for",
+  "with",
+  "from",
+  "product",
+  "shopify",
+  "online",
+  "store",
+  "men",
+  "women",
+  "unisex",
+]);
+
+function tokenizeProductText(value?: string | null) {
+  return Array.from(
+    new Set(
+      (value ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .split(" ")
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !PRODUCT_TOKEN_STOPWORDS.has(token))
+    )
+  );
+}
+
+function scoreCatalogProductMatch(
+  sourceProduct: SourceProductCandidate,
+  competitorProduct: CompetitorCatalogProduct
+) {
+  const sourceTokens = tokenizeProductText(`${sourceProduct.title} ${sourceProduct.productHandle}`);
+  const competitorTokens = tokenizeProductText(`${competitorProduct.title} ${competitorProduct.handle}`);
+
+  if (sourceProduct.productHandle === competitorProduct.handle) {
+    return 100;
+  }
+
+  if (sourceTokens.length === 0 || competitorTokens.length === 0) {
+    return 0;
+  }
+
+  const competitorSet = new Set(competitorTokens);
+  const overlap = sourceTokens.filter((token) => competitorSet.has(token)).length;
+  const titleIncludes =
+    competitorProduct.title.toLowerCase().includes(sourceProduct.title.toLowerCase()) ||
+    sourceProduct.title.toLowerCase().includes(competitorProduct.title.toLowerCase());
+
+  return Math.min(
+    96,
+    overlap * 24 +
+      (titleIncludes ? 28 : 0) +
+      (competitorProduct.price != null ? 10 : 0) +
+      (competitorProduct.available === false ? 4 : 0)
+  );
+}
+
+function findBestCatalogMatch(
+  sourceProduct: SourceProductCandidate,
+  catalogProducts: CompetitorCatalogProduct[]
+) {
+  return catalogProducts
+    .map((product) => ({
+      product,
+      score: scoreCatalogProductMatch(sourceProduct, product),
+    }))
+    .sort((a, b) => b.score - a.score)[0] ?? null;
+}
+
+export function normalizeCompetitorDomainInput(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutProtocol = trimmed.replace(/^https?:\/\//, "");
+  const withoutAuth = withoutProtocol.replace(/^[^/@]+@/, "");
+  const host = withoutAuth.split(/[/?#\s]/)[0]?.replace(/^www\./, "") ?? "";
+
+  if (!host || host.includes("..") || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) {
+    return null;
+  }
+
+  return host;
+}
 
 function parseCompetitorMetadata(value?: string | null): CompetitorMatchMetadata | null {
   if (!value) {
@@ -701,7 +794,11 @@ export async function getCompetitorOverview(shopDomain: string) {
       ? 0
       : latestCompetitorSummary?.domains ?? store.competitorDomains.length;
   const monitoredProductsCount =
-    latestCompetitorSummary?.products ?? eligibleProducts.eligible.length;
+    Math.max(
+      latestCompetitorSummary?.products ?? 0,
+      eligibleProducts.eligible.length,
+      comparableRecentRows.validMatchedProductsCount
+    );
   const matchedProductsCount = comparableRecentRows.validMatchedProductsCount;
   const lowConfidenceMatchesCount = comparableRecentRows.lowConfidenceProductsCount;
   const detectedPriceChangesCount = topMovers.filter(
@@ -1271,6 +1368,9 @@ export async function listTrackedCompetitorProducts(shopDomain: string) {
       confidenceScore: metadata.confidenceScore,
       confidenceLabel: metadata.confidenceLabel,
       matchReason: metadata.matchReason,
+      competitorProductTitle: metadata.competitorProductTitle ?? null,
+      competitorProductHandle: metadata.competitorProductHandle ?? null,
+      catalogObservation: !!metadata.catalogObservation,
     };
   });
 }
@@ -1281,6 +1381,7 @@ export async function listCompetitorConnectors(shopDomain: string) {
   const latestBySource = new Map<string, Date>();
   const websiteLastIngestedAt =
     rows.find((row) => row.source === "website_live")?.collectedAt ??
+    rows.find((row) => row.source === "website_catalog")?.collectedAt ??
     rows.find((row) => row.source === "website")?.collectedAt ??
     null;
 
@@ -1342,11 +1443,20 @@ export async function updateCompetitorDomains(
 ) {
   const store = await getStore(shopDomain);
   const normalizedDomains = domains
-    .map((domain) => ({
-      domain: domain.domain.trim().toLowerCase(),
-      label: domain.label?.trim() || null,
-    }))
-    .filter((domain) => domain.domain.length > 0);
+    .map((domain) => {
+      const normalizedDomain = normalizeCompetitorDomainInput(domain.domain);
+      return normalizedDomain
+        ? {
+            domain: normalizedDomain,
+            label: domain.label?.trim() || null,
+          }
+        : null;
+    })
+    .filter((domain): domain is { domain: string; label: string | null } => !!domain)
+    .filter(
+      (domain, index, allDomains) =>
+        allDomains.findIndex((candidate) => candidate.domain === domain.domain) === index
+    );
 
   await prisma.competitorDomain.deleteMany({
     where: { storeId: store.id },
@@ -1372,7 +1482,18 @@ export async function updateCompetitorDomains(
 
 export async function ingestCompetitorSnapshots(shopDomain: string) {
   const store = await getStore(shopDomain);
-  const domains = store.competitorDomains;
+  const domains = store.competitorDomains
+    .flatMap((domain) =>
+      domain.domain.split(/[\n,]+/).map((part) => ({
+        ...domain,
+        domain: normalizeCompetitorDomainInput(part.trim()) ?? "",
+      }))
+    )
+    .filter((domain) => domain.domain.length > 0)
+    .filter(
+      (domain, index, all) =>
+        all.findIndex((d) => d.domain === domain.domain) === index
+    );
   const job = await prisma.syncJob.create({
     data: {
       storeId: store.id,
@@ -1417,6 +1538,69 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     );
 
     if (sourceProducts.eligible.length === 0) {
+      let catalogIngested = 0;
+
+      for (const domain of domains) {
+        const catalogProducts = await fetchCompetitorCatalogProducts(domain.domain, 8);
+        for (const competitorProduct of catalogProducts.filter((product) => product.price != null)) {
+          await prisma.competitorData.create({
+            data: {
+              storeId: store.id,
+              productHandle: competitorProduct.handle,
+              competitorName: normalizeCompetitorName(domain.domain, domain.label),
+              competitorUrl: competitorProduct.url,
+              source: "website_catalog",
+              price: competitorProduct.price,
+              promotion: null,
+              stockStatus:
+                competitorProduct.available === false ? "out_of_stock" : "in_stock",
+              adCopy: null,
+              insightsJson: JSON.stringify({
+                ingestionSource: "competitor_catalog_analysis",
+                capturedAt: new Date().toISOString(),
+                externalFetch: true,
+                catalogObservation: true,
+                competitorProductTitle: competitorProduct.title,
+                competitorProductHandle: competitorProduct.handle,
+                confidenceScore: 64,
+                confidenceLabel: "medium",
+                matchReason:
+                  "Competitor catalog product and price were detected. Add matching products to the Shopify catalog for direct product comparison.",
+                usedFallbackPrice: false,
+              }),
+            },
+          });
+          catalogIngested += 1;
+        }
+      }
+
+      if (catalogIngested > 0) {
+        const result = {
+          ingested: catalogIngested,
+          domains: domains.length,
+          products: catalogIngested,
+          skipped: 0,
+          lowConfidenceMatches: 0,
+          status: "SUCCEEDED",
+          reason: null,
+          merchantMessage:
+            "Competitor analysis completed. Competitor products were detected from the tracked domains.",
+          excludedProducts: sourceProducts.excluded,
+        };
+
+        await prisma.syncJob.update({
+          where: { id: job.id },
+          data: {
+            status: "SUCCEEDED",
+            finishedAt: new Date(),
+            summaryJson: JSON.stringify(result),
+            errorMessage: null,
+          },
+        });
+
+        return result;
+      }
+
       const result = {
         ingested: 0,
         domains: domains.length,
@@ -1449,6 +1633,9 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     let skipped = 0;
 
     for (const domain of domains) {
+      const catalogProducts = await fetchCompetitorCatalogProducts(domain.domain, 40);
+      let domainIngested = 0;
+
       for (const product of sourceProducts.eligible.slice(0, 18)) {
         const liveSnapshot = await fetchCompetitorSnapshot(
           domain.domain,
@@ -1456,12 +1643,52 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
           product.currentPrice ?? 0
         );
 
-        if (!liveSnapshot) {
+        const bestCatalogMatch =
+          !liveSnapshot && catalogProducts.length > 0
+            ? findBestCatalogMatch(product, catalogProducts)
+            : null;
+
+        if (!liveSnapshot && (!bestCatalogMatch || bestCatalogMatch.score < 24)) {
           skipped += 1;
           continue;
         }
 
-        if (liveSnapshot.confidenceScore < 60) {
+        const catalogSnapshot =
+          !liveSnapshot && bestCatalogMatch
+            ? {
+                competitorUrl: bestCatalogMatch.product.url,
+                price: bestCatalogMatch.product.price,
+                promotion: null,
+                stockStatus:
+                  bestCatalogMatch.product.available === false
+                    ? "out_of_stock"
+                    : "in_stock",
+                source: "website_catalog",
+                adCopy: null,
+                confidenceScore: Math.max(62, Math.min(88, bestCatalogMatch.score)),
+                confidenceLabel:
+                  bestCatalogMatch.score >= 72
+                    ? ("high" as const)
+                    : ("medium" as const),
+                matchReason:
+                  bestCatalogMatch.score >= 72
+                    ? "Competitor catalog product matched by title or handle and a price was detected."
+                    : "Competitor catalog product was detected as a market reference. Review before treating it as a direct product match.",
+                usedFallbackPrice: false,
+                competitorProductTitle: bestCatalogMatch.product.title,
+                competitorProductHandle: bestCatalogMatch.product.handle,
+                catalogObservation: bestCatalogMatch.score < 72,
+              }
+            : null;
+
+        const capturedSnapshot = liveSnapshot ?? catalogSnapshot;
+
+        if (!capturedSnapshot) {
+          skipped += 1;
+          continue;
+        }
+
+        if (capturedSnapshot.confidenceScore < 60) {
           lowConfidenceMatches += 1;
         }
 
@@ -1471,27 +1698,69 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
             productHandle: product.productHandle,
             competitorName: normalizeCompetitorName(domain.domain, domain.label),
             competitorUrl:
-              liveSnapshot.competitorUrl ??
+              capturedSnapshot.competitorUrl ??
               `https://${domain.domain}/products/${product.productHandle}`,
-            source: liveSnapshot.source ?? "website_live",
-            price: liveSnapshot.price ?? null,
-            promotion: liveSnapshot.promotion ?? null,
-            stockStatus: liveSnapshot.stockStatus ?? null,
-            adCopy: liveSnapshot.adCopy ?? null,
+            source: capturedSnapshot.source ?? "website_live",
+            price: capturedSnapshot.price ?? null,
+            promotion: capturedSnapshot.promotion ?? null,
+            stockStatus: capturedSnapshot.stockStatus ?? null,
+            adCopy: capturedSnapshot.adCopy ?? null,
             insightsJson: JSON.stringify({
-              ingestionSource: "live_competitor_fetch",
+              ingestionSource: liveSnapshot
+                ? "live_competitor_fetch"
+                : "competitor_catalog_analysis",
               capturedAt: new Date().toISOString(),
               externalFetch: true,
               sourceProductTitle: product.title,
               sourceProductStatus: product.status,
-              confidenceScore: liveSnapshot.confidenceScore,
-              confidenceLabel: liveSnapshot.confidenceLabel,
-              matchReason: liveSnapshot.matchReason,
-              usedFallbackPrice: liveSnapshot.usedFallbackPrice,
+              competitorProductTitle: catalogSnapshot?.competitorProductTitle,
+              competitorProductHandle: catalogSnapshot?.competitorProductHandle,
+              catalogObservation: catalogSnapshot?.catalogObservation ?? false,
+              confidenceScore: capturedSnapshot.confidenceScore,
+              confidenceLabel: capturedSnapshot.confidenceLabel,
+              matchReason: capturedSnapshot.matchReason,
+              usedFallbackPrice: capturedSnapshot.usedFallbackPrice,
             }),
           },
         });
         ingested += 1;
+        domainIngested += 1;
+      }
+
+      if (domainIngested === 0 && catalogProducts.length > 0) {
+        for (const competitorProduct of catalogProducts
+          .filter((product) => product.price != null)
+          .slice(0, 8)) {
+          await prisma.competitorData.create({
+            data: {
+              storeId: store.id,
+              productHandle: competitorProduct.handle,
+              competitorName: normalizeCompetitorName(domain.domain, domain.label),
+              competitorUrl: competitorProduct.url,
+              source: "website_catalog",
+              price: competitorProduct.price,
+              promotion: null,
+              stockStatus:
+                competitorProduct.available === false ? "out_of_stock" : "in_stock",
+              adCopy: null,
+              insightsJson: JSON.stringify({
+                ingestionSource: "competitor_catalog_analysis",
+                capturedAt: new Date().toISOString(),
+                externalFetch: true,
+                catalogObservation: true,
+                competitorProductTitle: competitorProduct.title,
+                competitorProductHandle: competitorProduct.handle,
+                confidenceScore: 64,
+                confidenceLabel: "medium",
+                matchReason:
+                  "Competitor catalog product and price were detected. No direct Shopify catalog match was found yet.",
+                usedFallbackPrice: false,
+              }),
+            },
+          });
+          ingested += 1;
+          domainIngested += 1;
+        }
       }
     }
 
@@ -1507,7 +1776,7 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
       reason:
         ingested > 0
           ? null
-          : "Competitor pages were fetched, but no live competitor snapshots were captured for the monitored products.",
+          : "Competitor pages were fetched, but no competitor catalog or product price data was captured.",
       merchantMessage:
         ingested > 0 && lowConfidenceMatches === 0
           ? "Competitor analysis completed successfully."
