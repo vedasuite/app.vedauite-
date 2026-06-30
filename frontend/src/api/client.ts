@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 import { useMemo } from "react";
-import { useAppBridge } from "../shopifyAppBridge";
+import { useAppBridge, getEmbeddedSessionToken } from "../shopifyAppBridge";
 import { getEmbeddedContext } from "../lib/shopifyEmbeddedContext";
 
 const backendUrl =
@@ -34,6 +34,23 @@ export function useApiClient() {
           ...(config.headers ?? {}),
           "X-Requested-With": "XMLHttpRequest",
         } as any;
+      }
+
+      // Attach Shopify session token as Bearer for cookie-free authentication
+      try {
+        const sessionToken = await getEmbeddedSessionToken();
+        if (sessionToken) {
+          if (config.headers && typeof config.headers.set === "function") {
+            config.headers.set("Authorization", `Bearer ${sessionToken}`);
+          } else {
+            config.headers = {
+              ...(config.headers ?? {}),
+              Authorization: `Bearer ${sessionToken}`,
+            } as any;
+          }
+        }
+      } catch {
+        // Non-fatal: backend falls back to cookie session
       }
 
       if (!config.params) config.params = {};

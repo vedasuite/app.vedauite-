@@ -1,50 +1,38 @@
-import { getSessionToken } from "@shopify/app-bridge/utilities/session-token";
-import { useMemo } from "react";
-import createApp, { AppConfig } from "@shopify/app-bridge";
+// Uses the CDN-loaded App Bridge (window.shopify) injected by index.html.
+// The @shopify/app-bridge npm package is intentionally not used here —
+// Shopify requires the CDN script as of March 2024.
 import { getEmbeddedContext } from "./lib/shopifyEmbeddedContext";
 import { withRequestTimeout } from "./lib/requestTimeout";
 
-const apiKey =
-  (import.meta.env.VITE_SHOPIFY_API_KEY as string | undefined) || "";
-const appCache = new Map<string, ReturnType<typeof createApp>>();
+declare global {
+  interface Window {
+    shopify?: {
+      idToken(): Promise<string>;
+      config?: {
+        apiKey?: string;
+        shop?: string;
+        host?: string;
+      };
+    };
+  }
+}
+
 const sessionTokenCache = new Map<
   string,
   { token: string; expiresAt: number; inflight?: Promise<string> }
 >();
 
-function getCachedApp(host: string) {
-  if (!apiKey || !host) {
-    return null;
-  }
-
-  const cacheKey = `${apiKey}|${host || "default"}`;
-  const existingApp = appCache.get(cacheKey);
-  if (existingApp) {
-    return existingApp;
-  }
-
-  const config: AppConfig = {
-    apiKey,
-    host,
-    forceRedirect: true,
-  };
-  const nextApp = createApp(config);
-  appCache.set(cacheKey, nextApp);
-  return nextApp;
-}
-
 export function getEmbeddedAppBridge() {
-  const { host } = getEmbeddedContext();
-  return getCachedApp(host);
+  return window.shopify ?? null;
 }
 
-export async function getEmbeddedSessionToken() {
-  const { host } = getEmbeddedContext();
-  if (!apiKey || !host) {
+export async function getEmbeddedSessionToken(): Promise<string | null> {
+  if (typeof window === "undefined" || !window.shopify) {
     return null;
   }
 
-  const cacheKey = `${apiKey}|${host || "default"}`;
+  const { shop } = getEmbeddedContext();
+  const cacheKey = shop || "default";
   const now = Date.now();
   const cached = sessionTokenCache.get(cacheKey);
 
@@ -56,13 +44,8 @@ export async function getEmbeddedSessionToken() {
     return cached.inflight;
   }
 
-  const app = getCachedApp(host);
-  if (!app) {
-    return null;
-  }
-
   const inflight = withRequestTimeout(
-    getSessionToken(app),
+    window.shopify.idToken(),
     12000,
     "Shopify session token request timed out."
   ).then((token) => {
@@ -108,24 +91,11 @@ export async function getEmbeddedSessionToken() {
 export function useAppBridge() {
   const { shop, host } = getEmbeddedContext();
 
-  const config: AppConfig = useMemo(
-    () => ({
-      apiKey,
-      host,
-      forceRedirect: true,
-    }),
-    [host]
-  );
-
-  const cachedApp = useMemo(() => {
-    return getCachedApp(config.host);
-  }, [config, host]);
-
   return {
-    app: cachedApp,
+    app: window.shopify ?? null,
     shop,
     host,
-    ready: !!apiKey && !!host,
+    ready: !!window.shopify && !!shop,
   };
 }
 

@@ -264,6 +264,82 @@ async function markReconnectRequired(
   });
 }
 
+async function exchangeLegacyOfflineToken(
+  installation: NonNullable<InstallationRecord>
+) {
+  if (!installation.accessToken) {
+    throw new ShopifyConnectionError(
+      "MISSING_OFFLINE_TOKEN",
+      `Cannot exchange legacy token for ${installation.shop}: no access token stored.`,
+      { reauthorizeUrl: buildReauthorizeUrl(installation.shop) }
+    );
+  }
+
+  try {
+    const tokenUrl = `https://${installation.shop}/admin/oauth/access_token`;
+    const response = await axios.post<RefreshAccessTokenResponse>(tokenUrl, {
+      client_id: env.shopifyApiKey,
+      client_secret: env.shopifyApiSecret,
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      subject_token: installation.accessToken,
+      subject_token_type:
+        "urn:shopify:params:oauth:token-type:offline-access-token",
+      requested_token_type:
+        "urn:shopify:params:oauth:token-type:offline-access-token",
+    });
+
+    const now = new Date();
+    const accessTokenExpiresAt =
+      typeof response.data.expires_in === "number"
+        ? new Date(now.getTime() + response.data.expires_in * 1000)
+        : null;
+    const refreshTokenExpiresAt =
+      typeof response.data.refresh_token_expires_in === "number"
+        ? new Date(now.getTime() + response.data.refresh_token_expires_in * 1000)
+        : null;
+
+    const updated = await prisma.store.update({
+      where: { id: installation.id },
+      data: {
+        accessToken: response.data.access_token,
+        grantedScopes: response.data.scope ?? installation.grantedScopes,
+        accessTokenExpiresAt,
+        refreshToken: response.data.refresh_token ?? null,
+        refreshTokenExpiresAt,
+        tokenAcquisitionMode: "offline_expiring",
+        reauthorizedAt: now,
+        authErrorCode: null,
+        authErrorMessage: null,
+        lastConnectionCheckAt: now,
+        lastConnectionStatus: "OK",
+        lastConnectionError: null,
+      },
+    });
+
+    logEvent("info", "shopify.connection.legacy_token_exchanged", {
+      shop: installation.shop,
+      accessTokenExpiresAt: accessTokenExpiresAt?.toISOString() ?? null,
+      hasRefreshToken: !!response.data.refresh_token,
+    });
+
+    return updated;
+  } catch (error) {
+    // Exchange failed — token may already be deprecated/revoked, force reconnect
+    const code = "SHOPIFY_RECONNECT_REQUIRED";
+    const message = `Failed to exchange legacy offline token for ${installation.shop}. Reconnect the app to continue.`;
+    await markReconnectRequired(installation, code, message);
+
+    logEvent("warn", "shopify.connection.legacy_token_exchange_failed", {
+      shop: installation.shop,
+      error,
+    });
+
+    throw new ShopifyConnectionError(code, message, {
+      reauthorizeUrl: buildReauthorizeUrl(installation.shop),
+    });
+  }
+}
+
 async function refreshOfflineAccessToken(
   installation: NonNullable<InstallationRecord>
 ) {
@@ -433,6 +509,14 @@ export async function resolveOfflineInstallation(
 
   if (options.allowRefresh !== false && isAccessTokenExpiring(installation)) {
     return refreshOfflineAccessToken(installation);
+  }
+
+  // Automatically upgrade deprecated permanent offline tokens to new expiring tokens
+  if (
+    options.allowRefresh !== false &&
+    installation.tokenAcquisitionMode === "offline_legacy"
+  ) {
+    return exchangeLegacyOfflineToken(installation);
   }
 
   return installation;
