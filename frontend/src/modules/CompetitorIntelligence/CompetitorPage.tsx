@@ -573,7 +573,14 @@ export function CompetitorPage() {
           onAction: handlePrimaryAction,
           disabled: ingesting,
         }}
-        secondaryActions={[{ content: "Update domains", onAction: () => setModalOpen(true) }]}
+        secondaryActions={[
+          {
+            content: ingesting ? "Running..." : "Run analysis",
+            onAction: () => void ingestCompetitorData(),
+            disabled: ingesting,
+          },
+          { content: "Update domains", onAction: () => setModalOpen(true) },
+        ]}
       >
         <Layout>
           {subscriptionLoading ? (
