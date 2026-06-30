@@ -9,6 +9,8 @@ import {
   updateCompetitorDomains,
 } from "../services/competitorService";
 import { resolveAuthenticatedShop } from "./routeShop";
+import { prisma } from "../db/prismaClient";
+import { getStore } from "../db/store";
 
 export const competitorRouter = Router();
 competitorRouter.use(requireFeature("competitor"));
@@ -75,6 +77,14 @@ competitorRouter.post("/ingest", async (req, res) => {
 
   if (!shop) {
     return res.status(400).json({ error: "Missing shop." });
+  }
+
+  const store = await getStore(shop);
+  const runningJob = await prisma.syncJob.findFirst({
+    where: { storeId: store.id, jobType: "competitor_ingest", status: "RUNNING" },
+  });
+  if (runningJob) {
+    return res.json({ result: { merchantMessage: "Analysis is already running. Please wait for it to finish." } });
   }
 
   const result = await ingestCompetitorSnapshots(shop);

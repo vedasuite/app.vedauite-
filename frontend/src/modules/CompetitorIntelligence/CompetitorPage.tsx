@@ -494,7 +494,7 @@ export function CompetitorPage() {
       setIngesting(true);
       const ingestResponse = await embeddedShopRequest<{
         result: { merchantMessage?: string | null };
-      }>("/api/competitor/ingest", { method: "POST", timeoutMs: 45000 });
+      }>("/api/competitor/ingest", { method: "POST", timeoutMs: 180000 });
       await refreshCompetitorState(ingestResponse.result.merchantMessage ?? null);
     } catch {
       setToast("Competitor analysis failed. Please try again.");
@@ -587,6 +587,14 @@ export function CompetitorPage() {
             <Layout.Section>
               <Banner title="Loading competitor analysis" tone="info">
                 <p>VedaSuite is loading competitor insights and response guidance.</p>
+              </Banner>
+            </Layout.Section>
+          ) : null}
+
+          {ingesting ? (
+            <Layout.Section>
+              <Banner title="Running competitor analysis — this takes 1–3 minutes" tone="info">
+                <p>VedaSuite is crawling your competitor domains and matching products. Do not close this page. The results will appear automatically when done.</p>
               </Banner>
             </Layout.Section>
           ) : null}
