@@ -82,13 +82,17 @@ export function getEmbeddedContext(): EmbeddedContext {
   const urlHost = normalizeHost(params.get("host") ?? "");
   const urlShop = normalizeShop(params.get("shop") ?? "");
 
+  const appBridgeShop = parseShopFromAppBridge();
   const storedHost = normalizeHost(readStoredValue(HOST_STORAGE_KEY));
   const storedShop = normalizeShop(readStoredValue(SHOP_STORAGE_KEY));
   const referrerShop = normalizeShop(parseShopFromReferrer());
-  const appBridgeShop = parseShopFromAppBridge();
 
+  // Priority: URL params (always authoritative) → App Bridge config (always
+  // available when embedded, never depends on storage) → sessionStorage cache
+  // (SPA navigation convenience) → referrer heuristic (last resort).
+  // Authentication itself uses window.shopify.idToken() and never touches storage.
   const host = urlHost || storedHost;
-  const shop = urlShop || storedShop || appBridgeShop || referrerShop;
+  const shop = urlShop || appBridgeShop || storedShop || referrerShop;
 
   if (urlHost) {
     writeStoredValue(HOST_STORAGE_KEY, urlHost);
