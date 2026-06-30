@@ -64,6 +64,15 @@ function parseShopFromReferrer() {
   }
 }
 
+function parseShopFromAppBridge() {
+  try {
+    const shopify = (window as unknown as { shopify?: { config?: { shop?: string } } }).shopify;
+    return normalizeShop(shopify?.config?.shop ?? "");
+  } catch {
+    return "";
+  }
+}
+
 export function getEmbeddedContext(): EmbeddedContext {
   if (typeof window === "undefined") {
     return { host: "", shop: "" };
@@ -76,9 +85,10 @@ export function getEmbeddedContext(): EmbeddedContext {
   const storedHost = normalizeHost(readStoredValue(HOST_STORAGE_KEY));
   const storedShop = normalizeShop(readStoredValue(SHOP_STORAGE_KEY));
   const referrerShop = normalizeShop(parseShopFromReferrer());
+  const appBridgeShop = parseShopFromAppBridge();
 
   const host = urlHost || storedHost;
-  const shop = urlShop || storedShop || referrerShop;
+  const shop = urlShop || storedShop || appBridgeShop || referrerShop;
 
   if (urlHost) {
     writeStoredValue(HOST_STORAGE_KEY, urlHost);
