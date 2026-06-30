@@ -514,6 +514,28 @@ export async function resolveOfflineInstallation(
   // Legacy offline tokens (offline_legacy) still work for API calls — Shopify deprecated
   // permanent tokens but they remain valid. Migration to expiring tokens requires the
   // merchant to re-authorize via OAuth; it cannot be done by exchanging tokens server-side.
+
+  // Clear any stale auth error written by a prior failed token exchange attempt.
+  // Fire-and-forget: heals DB state on the first successful API call without blocking the caller.
+  if (installation.authErrorCode) {
+    void prisma.store.update({
+      where: { id: installation.id },
+      data: {
+        authErrorCode: null,
+        authErrorMessage: null,
+        lastConnectionStatus: "OK",
+        lastConnectionError: null,
+        lastConnectionCheckAt: new Date(),
+      },
+    }).catch((err) => {
+      logEvent("warn", "shopify.connection.clear_stale_auth_error_failed", {
+        shop: installation.shop,
+        authErrorCode: installation.authErrorCode,
+        error: err,
+      });
+    });
+  }
+
   return installation;
 }
 
