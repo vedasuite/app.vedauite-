@@ -36,21 +36,20 @@ export function useApiClient() {
         } as any;
       }
 
-      // Attach Shopify session token as Bearer for cookie-free authentication
-      try {
-        const sessionToken = await getEmbeddedSessionToken();
-        if (sessionToken) {
-          if (config.headers && typeof config.headers.set === "function") {
-            config.headers.set("Authorization", `Bearer ${sessionToken}`);
-          } else {
-            config.headers = {
-              ...(config.headers ?? {}),
-              Authorization: `Bearer ${sessionToken}`,
-            } as any;
-          }
+      // Attach Shopify session token as Bearer for cookie-free authentication.
+      // Always propagate errors — the backend requires a valid token and has no
+      // cookie fallback. If the CDN App Bridge isn't ready, the caller gets a
+      // clear auth error rather than a silent 401 downstream.
+      const sessionToken = await getEmbeddedSessionToken();
+      if (sessionToken) {
+        if (config.headers && typeof config.headers.set === "function") {
+          config.headers.set("Authorization", `Bearer ${sessionToken}`);
+        } else {
+          config.headers = {
+            ...(config.headers ?? {}),
+            Authorization: `Bearer ${sessionToken}`,
+          } as any;
         }
-      } catch {
-        // Non-fatal: backend falls back to cookie session
       }
 
       if (!config.params) config.params = {};
