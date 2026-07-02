@@ -153,7 +153,9 @@ async function getShopifySessionToken(): Promise<string | null> {
       return await shopify.idToken();
     }
   } catch {
-    // App Bridge not ready or not embedded — fall back to cookie auth
+    // App Bridge not ready — return null so the request proceeds without
+    // a Bearer header. The backend returns 401, which propagates as an auth
+    // error and the user is shown a reconnect prompt.
   }
   return null;
 }
