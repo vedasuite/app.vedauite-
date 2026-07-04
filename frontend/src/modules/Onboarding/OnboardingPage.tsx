@@ -258,8 +258,12 @@ export function OnboardingPage() {
     setActionError(null);
     try {
       const nextOnboarding = await confirmPlan();
-      setToast("Onboarding completed. Redirecting to your dashboard.");
-      navigateEmbedded(nextOnboarding.canAccessDashboard ? "/app/dashboard" : "/app/onboarding");
+      if (nextOnboarding.canAccessDashboard) {
+        setToast("Onboarding completed. Redirecting to your dashboard.");
+        navigateEmbedded("/app/dashboard");
+      } else {
+        setToast("Plan confirmed. Finish the remaining setup steps below.");
+      }
     } catch (nextError) {
       setActionError(
         nextError instanceof Error

@@ -548,6 +548,19 @@ export async function confirmOnboardingPlan(shopDomain: string) {
     throw new HttpError(400, "View the first insight before confirming the plan.");
   }
 
+  // "Confirming" a plan that was never actually chosen makes no sense —
+  // without this check, clicking Confirm Plan before ever subscribing
+  // silently set onboardingPlanConfirmedAt anyway, which the frontend
+  // then misreported as "Onboarding completed" even though
+  // canAccessDashboard was still false, landing the merchant back on
+  // onboarding with no clear next step.
+  if (!onboarding.readiness.billing.ready) {
+    throw new HttpError(
+      400,
+      "Choose and subscribe to a plan on the Billing page before confirming this step."
+    );
+  }
+
   await prisma.store.update({
     where: { shop: shopDomain },
     data: {
