@@ -1,5 +1,6 @@
 import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
+import { HttpError } from "../lib/httpError";
 import {
   normalizeStarterModuleLabel,
   type StarterModule,
@@ -497,12 +498,15 @@ export async function selectOnboardingModule(input: {
   const normalizedModule = normalizeOnboardingModule(input.moduleKey);
 
   if (!normalizedModule) {
-    throw new Error("Invalid onboarding module.");
+    throw new HttpError(400, "Invalid onboarding module.");
   }
 
   const module = onboarding.moduleOverview.find((item) => item.key === normalizedModule);
   if (!module?.available) {
-    throw new Error("That module is not available on the current plan.");
+    throw new HttpError(
+      403,
+      "That module isn't included in your current plan. Choose a plan on the Billing page first, then select this module."
+    );
   }
 
   await prisma.store.update({

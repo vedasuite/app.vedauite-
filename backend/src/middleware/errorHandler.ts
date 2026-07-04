@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { logEvent } from "../services/observabilityService";
+import { HttpError } from "../lib/httpError";
 
 function isAggregateLikeError(
   err: unknown
@@ -19,9 +20,11 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ) {
-  const status = 500;
+  const status = err instanceof HttpError ? err.status : 500;
   const message =
-    isAggregateLikeError(err)
+    err instanceof HttpError
+      ? err.message
+      : isAggregateLikeError(err)
       ? err.errors
           .map((inner) =>
             inner instanceof Error && inner.message
@@ -40,10 +43,11 @@ export function errorHandler(
     }
   ).requestId;
 
-  logEvent("error", "request.failed", {
+  logEvent(status >= 500 ? "error" : "warn", "request.failed", {
     requestId,
     method: req.method,
     path: req.originalUrl,
+    status,
     error: err,
   });
 
