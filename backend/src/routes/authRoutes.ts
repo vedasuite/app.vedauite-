@@ -4,10 +4,8 @@ import crypto from "crypto";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import {
-  clearShopifyOAuthStateCookie,
   createShopifyOAuthState,
-  readShopifyOAuthStateCookie,
-  setShopifyOAuthStateCookie,
+  verifyShopifyOAuthState,
 } from "../lib/shopifyOAuthState";
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
@@ -241,7 +239,6 @@ function startOAuth(req: Request, res: Response) {
     return res.status(400).send("Missing or invalid shop parameter.");
   }
 
-  const state = createShopifyOAuthState();
   const host =
     typeof req.query.host === "string" && req.query.host.trim()
       ? req.query.host
@@ -250,9 +247,8 @@ function startOAuth(req: Request, res: Response) {
     typeof req.query.returnTo === "string" ? req.query.returnTo : "/"
   );
 
-  setShopifyOAuthStateCookie(res, {
+  const state = createShopifyOAuthState({
     shop: normalizedShop,
-    state,
     host,
     returnTo,
   });
@@ -290,21 +286,14 @@ authRouter.get("/callback", async (req, res) => {
     return res.status(400).send("HMAC validation failed.");
   }
 
-  const statePayload = readShopifyOAuthStateCookie(req);
-  if (
-    !statePayload ||
-    statePayload.shop !== shop ||
-    statePayload.state !== state
-  ) {
+  const statePayload = verifyShopifyOAuthState(state, shop);
+  if (!statePayload) {
     logEvent("warn", "shopify.auth.callback_invalid_state", {
       shop,
       route: "auth.callback",
-      cookieShop: statePayload?.shop ?? null,
     });
     return res.status(400).send("OAuth state validation failed.");
   }
-
-  clearShopifyOAuthStateCookie(res);
 
   try {
     const tokenData = await exchangeOfflineAccessToken(shop, code);
