@@ -378,10 +378,19 @@ export async function requestBillingPlanChange(input: {
     };
   }
 
+  // Reusing a previously-created Shopify charge URL is unsafe: the charge
+  // was created with whatever config was active at that time (e.g. test
+  // mode), and reusing it doesn't reflect config changes made since, or
+  // any other reason the original charge might be stale/broken. Only reuse
+  // a charge created moments ago (guards against a genuine accidental
+  // double-click firing two requests back to back) — otherwise always
+  // create a fresh Shopify charge.
+  const DUPLICATE_CLICK_WINDOW_MS = 10 * 1000;
   const existingPending = await prisma.billingPlanIntent.findFirst({
     where: {
       storeId: store.id,
       status: { in: [...PENDING_INTENT_STATUSES] },
+      createdAt: { gte: new Date(Date.now() - DUPLICATE_CLICK_WINDOW_MS) },
     },
     orderBy: { createdAt: "desc" },
   });
