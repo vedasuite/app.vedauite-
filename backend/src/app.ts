@@ -103,19 +103,16 @@ export function createApp() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Redirecting…</title>
-  </head>
-  <body>
     <script>
       (function () {
         var target = ${JSON.stringify(url)};
-        if (window.top && window.top !== window) {
-          window.top.location.href = target;
-          return;
-        }
-        window.location.href = target;
+        var destination = window.top && window.top !== window ? window.top : window;
+        destination.location.replace(target);
       })();
     </script>
-    <p>Redirecting… <a href="${url}">Continue</a></p>
+  </head>
+  <body>
+    <noscript><p>Redirecting… <a href="${url}">Continue</a></p></noscript>
   </body>
 </html>`);
   }
