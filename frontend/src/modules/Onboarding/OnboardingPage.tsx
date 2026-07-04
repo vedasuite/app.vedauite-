@@ -370,19 +370,33 @@ export function OnboardingPage() {
       <Layout>
         {actionError ? (
           <Layout.Section>
-            <Banner title="Setup action failed" tone="critical">
-              <BlockStack gap="200">
-                <p>{actionError}</p>
-                <InlineStack gap="300">
-                  <Button onClick={() => void refresh()}>Try again</Button>
-                  {reauthorizeUrl ? (
-                    <Button variant="primary" url={reauthorizeUrl} target="_top">
-                      Reconnect Shopify
-                    </Button>
-                  ) : null}
-                </InlineStack>
-              </BlockStack>
-            </Banner>
+            {(() => {
+              // Only offer "Reconnect Shopify" when the failure actually
+              // indicates a connection/session problem — showing it for
+              // every action failure (e.g. "choose a plan first") is
+              // confusing since reconnecting Shopify doesn't fix those.
+              const isConnectionIssue = /reconnect|session|reauthoriz|expired/i.test(
+                actionError
+              );
+              return (
+                <Banner
+                  title={isConnectionIssue ? "Shopify connection needs attention" : "Setup action needs attention"}
+                  tone={isConnectionIssue ? "critical" : "warning"}
+                >
+                  <BlockStack gap="200">
+                    <p>{actionError}</p>
+                    <InlineStack gap="300">
+                      <Button onClick={() => void refresh()}>Try again</Button>
+                      {isConnectionIssue && reauthorizeUrl ? (
+                        <Button variant="primary" url={reauthorizeUrl} target="_top">
+                          Reconnect Shopify
+                        </Button>
+                      ) : null}
+                    </InlineStack>
+                  </BlockStack>
+                </Banner>
+              );
+            })()}
           </Layout.Section>
         ) : null}
 

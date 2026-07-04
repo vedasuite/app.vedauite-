@@ -222,11 +222,16 @@ export async function getOnboardingState(shopDomain: string) {
       : selectedModule === "pricing"
       ? readiness.modules.pricing
       : null;
-  const moduleSelectionComplete = readiness.initialSync.ready && selectedModuleAvailable;
+  // Choosing a module during onboarding is a preference, not a purchase —
+  // anyone should be able to pick one and walk through onboarding without
+  // paying first. Only actually USING a module's real data still requires
+  // an entitled plan, already enforced by ModuleGate + requireFeature on
+  // the module pages themselves. `selectedModuleAvailable` is still tracked
+  // above for display (e.g. "your pick isn't in your plan yet"), but it no
+  // longer gates step completion.
+  const moduleSelectionComplete = readiness.initialSync.ready && !!selectedModule;
   const firstInsightViewedComplete =
-    moduleSelectionComplete &&
-    !!selectedModuleReadiness?.ready &&
-    !!store.onboardingFirstInsightViewedAt;
+    moduleSelectionComplete && !!store.onboardingFirstInsightViewedAt;
   const planConfirmationComplete =
     readiness.billing.ready && !!store.onboardingPlanConfirmedAt;
   const canAccessDashboard =
@@ -253,26 +258,28 @@ export async function getOnboardingState(shopDomain: string) {
       helper:
         !readiness.initialSync.ready
           ? "Finish syncing Shopify data before choosing the first workflow."
+          : !selectedModule
+          ? "Choose any module to start with — you can pick a plan afterward."
           : selectedModuleAvailable && selectedModuleReadiness?.ready
-          ? `${moduleTitle(selectedModule!)} is selected and ready for the first guided review.`
+          ? `${moduleTitle(selectedModule)} is selected and ready for the first guided review.`
           : selectedModuleAvailable && selectedModuleReadiness
-          ? `${moduleTitle(selectedModule!)} is selected, but ${selectedModuleReadiness.description.toLowerCase()}`
-          : billing.planName === "STARTER" && subscription.starterModule === null
-          ? "Starter requires one selected module in billing before you can continue."
-          : "Choose one available module to start with.",
-      ctaLabel: selectedModuleAvailable ? "Module selected" : "Choose Module",
+          ? `${moduleTitle(selectedModule)} is selected, but ${selectedModuleReadiness.description.toLowerCase()}`
+          : `${moduleTitle(selectedModule)} is selected. Choose a plan on Billing to unlock its real data.`,
+      ctaLabel: selectedModule ? "Module selected" : "Choose Module",
     },
     {
       key: "FIRST_INSIGHT_VIEW",
       label: "Step 3: View First Insight",
       complete: firstInsightViewedComplete,
       description:
-        "Open the selected module and review the first real store insight before moving into the dashboard.",
+        "Open the selected module and see what it offers before moving into the dashboard.",
       helper:
         !moduleSelectionComplete
           ? "Select a starting module first."
           : store.onboardingFirstInsightViewedAt
           ? "First insight viewed."
+          : !selectedModuleAvailable
+          ? `Open ${moduleTitle(selectedModule!)} to see a preview — choose a plan on Billing to unlock its real data.`
           : selectedModuleReadiness && !selectedModuleReadiness.ready
           ? selectedModuleReadiness.description
           : !hasAnyProcessedData
@@ -490,23 +497,19 @@ export async function getOnboardingState(shopDomain: string) {
   };
 }
 
+// Selecting a module during onboarding is a preference, not a purchase —
+// anyone can pick any module regardless of their current plan. Actually
+// using that module's real data is separately enforced by ModuleGate +
+// requireFeature on the module page itself, which is the correct place to
+// require payment, not here during onboarding.
 export async function selectOnboardingModule(input: {
   shopDomain: string;
   moduleKey: string;
 }) {
-  const onboarding = await getOnboardingState(input.shopDomain);
   const normalizedModule = normalizeOnboardingModule(input.moduleKey);
 
   if (!normalizedModule) {
     throw new HttpError(400, "Invalid onboarding module.");
-  }
-
-  const module = onboarding.moduleOverview.find((item) => item.key === normalizedModule);
-  if (!module?.available) {
-    throw new HttpError(
-      403,
-      "That module isn't included in your current plan. Choose a plan on the Billing page first, then select this module."
-    );
   }
 
   await prisma.store.update({
