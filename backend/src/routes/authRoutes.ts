@@ -123,11 +123,15 @@ function validateOAuthHmac(query: Record<string, unknown>, hmac: string) {
 
 async function exchangeOfflineAccessToken(shop: string, code: string) {
   const tokenUrl = `https://${shop}/admin/oauth/access_token`;
-  const response = await axios.post<OAuthAccessTokenResponse>(tokenUrl, {
-    client_id: env.shopifyApiKey,
-    client_secret: env.shopifyApiSecret,
-    code,
-  });
+  const response = await axios.post<OAuthAccessTokenResponse>(
+    tokenUrl,
+    {
+      client_id: env.shopifyApiKey,
+      client_secret: env.shopifyApiSecret,
+      code,
+    },
+    { timeout: 15000 }
+  );
 
   return response.data;
 }
@@ -205,17 +209,21 @@ async function persistInstallationRecord(params: {
   });
 }
 
-async function finalizeInstallationHealth(shop: string, returnUrl: string) {
-  try {
-    await registerSyncWebhooks(shop, env.shopifyAppUrl);
-  } catch (error) {
+// Fire-and-forget: webhook registration and the initial sync both call out
+// to Shopify's API and can be slow or flaky. Neither should block the
+// redirect back to the app UI — a merchant (or reviewer) should never sit
+// on a blank page waiting for these to finish. Errors are logged, not
+// surfaced, since the app functions correctly even if this hasn't
+// completed yet (it self-heals on the next scheduled/triggered sync).
+function finalizeInstallationHealth(shop: string, returnUrl: string) {
+  void registerSyncWebhooks(shop, env.shopifyAppUrl).catch((error) => {
     logEvent("warn", "shopify.auth.webhook_registration_failed", {
       shop,
       route: "auth.callback",
       returnUrl,
       error,
     });
-  }
+  });
 
   void runStoreSyncJob(shop, "auth_install").catch((error) => {
     logEvent("warn", "shopify.auth.initial_sync_failed", {
@@ -337,7 +345,7 @@ authRouter.get("/callback", async (req, res) => {
       authErrorMessage: null,
     });
 
-    await finalizeInstallationHealth(shop, returnUrl);
+    finalizeInstallationHealth(shop, returnUrl);
 
     logEvent("info", "shopify.auth.callback_completed", {
       shop,
