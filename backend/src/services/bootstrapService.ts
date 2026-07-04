@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
@@ -13,7 +14,7 @@ export async function ensureStoreBootstrapped(shop: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   if (env.enableGuidedBootstrap) {

@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import fs from "fs/promises";
 import path from "path";
 import { env } from "../config/env";
@@ -34,7 +35,7 @@ async function getStore(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   return store;

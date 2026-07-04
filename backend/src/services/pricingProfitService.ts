@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import { getCompetitorResponseEngine } from "./competitorService";
 import { logEvent } from "./observabilityService";
@@ -124,7 +125,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       getStoreOperationalSnapshot(shopDomain),
     ]);
     if (!store) {
-      throw new Error("Store not found");
+      throw new HttpError(404, "Store not found.");
     }
 
     const subscription = await getCurrentSubscription(shopDomain);

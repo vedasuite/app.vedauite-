@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 
 function parseRationaleJson(value?: string | null) {
@@ -23,7 +24,7 @@ export async function getPricingRecommendations(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const history = await prisma.priceHistory.findMany({
     where: { storeId: store.id },
@@ -136,7 +137,7 @@ export async function approvePricingRecommendation(
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const recommendation = await prisma.priceHistory.findFirst({
     where: {
@@ -145,7 +146,7 @@ export async function approvePricingRecommendation(
     },
   });
   if (!recommendation) {
-    throw new Error("Pricing recommendation not found");
+    throw new HttpError(404, "Pricing recommendation not found.");
   }
 
   const rationale = parseRationaleJson(recommendation.rationaleJson);

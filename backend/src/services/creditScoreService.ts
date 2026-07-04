@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
 
@@ -84,7 +85,7 @@ export async function listCustomerScores(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const customers = await prisma.customer.findMany({
     where: { storeId: store.id },
@@ -98,12 +99,12 @@ export async function getCustomerScore(shopDomain: string, customerId: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const customer = await prisma.customer.findFirst({
     where: { id: customerId, storeId: store.id },
   });
-  if (!customer) throw new Error("Customer not found");
+  if (!customer) throw new HttpError(404, "Customer not found.");
 
   return mapCustomer(customer);
 }
@@ -112,7 +113,7 @@ export async function recomputeCustomerScore(customerId: string) {
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
   });
-  if (!customer) throw new Error("Customer not found");
+  if (!customer) throw new HttpError(404, "Customer not found.");
 
   const base = 70;
   const refundPenalty = Math.min(40, customer.refundRate * 100);
@@ -136,7 +137,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const customers = await prisma.customer.findMany({
     where: { storeId: store.id },

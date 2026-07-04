@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 
 export const STORE_SYNC_STATUSES = [
@@ -83,7 +84,7 @@ export async function getStoreOperationalSnapshot(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const latestSyncJob =

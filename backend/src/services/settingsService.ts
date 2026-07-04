@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 
 export type SettingsInput = {
@@ -13,7 +14,7 @@ export async function getSettings(shopDomain: string) {
     where: { shop: shopDomain },
     include: { competitorDomains: true },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   return {
     fraudSensitivity:
@@ -33,7 +34,7 @@ export async function updateSettings(
   const store = await prisma.store.findUnique({
     where: { shop: shopDomain },
   });
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   await prisma.store.update({
     where: { id: store.id },

@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
 import {
@@ -163,7 +164,7 @@ async function getStoreForBilling(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   return store;
@@ -339,12 +340,12 @@ export async function requestBillingPlanChange(input: {
 }): Promise<BillingPlanChangeResult> {
   const requestedPlan = input.requestedPlan;
   if (!MANAGED_PAID_PLANS.includes(requestedPlan)) {
-    throw new Error("Only paid plans can be requested through the billing change flow.");
+    throw new HttpError(400, "Only paid plans can be requested through the billing change flow.");
   }
 
   const normalizedStarterModule = normalizeStarterModule(input.starterModule);
   if (requestedPlan === "STARTER" && !normalizedStarterModule) {
-    throw new Error("Starter plan requires selecting a Starter feature.");
+    throw new HttpError(400, "Starter plan requires selecting a Starter feature.");
   }
 
   if (requestedPlan === "STARTER" && normalizedStarterModule) {
@@ -574,12 +575,12 @@ export async function confirmBillingApprovalReturn(input: {
         },
       });
     }
-    throw new Error(declineMessage);
+    throw new HttpError(400, declineMessage);
   }
 
   const effectivePlan = normalizePlanName(activeSubscription.name);
   if (!effectivePlan || effectivePlan === "TRIAL" || effectivePlan === "NONE") {
-    throw new Error("Shopify returned an unsupported billing plan.");
+    throw new HttpError(502, "Shopify returned an unsupported billing plan.");
   }
 
   logEvent("info", "billing.confirmation_received", {
@@ -604,7 +605,8 @@ export async function confirmBillingApprovalReturn(input: {
         shopifyChargeId: activeSubscription.id,
       },
     });
-    throw new Error(
+    throw new HttpError(
+      409,
       `Shopify approved ${effectivePlan} but the pending intent expected ${intent.requestedPlanName}.`
     );
   }

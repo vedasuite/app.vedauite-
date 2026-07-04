@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import {
   fetchCompetitorSnapshot,
@@ -580,7 +581,7 @@ async function getStore(shopDomain: string) {
     },
   });
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
   return store;
 }

@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { createHash } from "crypto";
 import { prisma } from "../db/prismaClient";
 import { maskCustomerIdentity } from "../lib/maskCustomerIdentity";
@@ -154,7 +155,7 @@ export async function scoreOrderFraud(
     where: { shop: shopDomain },
   });
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   let score = 10;
@@ -219,7 +220,7 @@ export async function listRecentFraudOrders(shopDomain: string) {
     where: { shop: shopDomain },
   });
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const orders = await prisma.order.findMany({
@@ -240,7 +241,7 @@ export async function applyFraudAction(
     where: { shop: shopDomain },
   });
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const nextStatus =
@@ -307,7 +308,7 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const sharedHashCounts = new Map<string, number>();

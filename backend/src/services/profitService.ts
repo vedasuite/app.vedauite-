@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import { getCurrentSubscription } from "./subscriptionService";
 
@@ -9,14 +10,14 @@ async function assertProPlan(shopDomain: string) {
     getCurrentSubscription(shopDomain),
   ]);
 
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const hasFullProfitAccess =
     subscription.enabledModules.pricing &&
     subscription.featureAccess.fullProfitEngine;
 
   if (!hasFullProfitAccess) {
-    throw new Error("AI Profit Optimization Engine is available only on PRO.");
+    throw new HttpError(403, "AI Profit Optimization Engine is available only on PRO.");
   }
 
   return store;

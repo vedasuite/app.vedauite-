@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 
 type DecisionItem = {
@@ -19,7 +20,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const [highRiskOrder, riskyCustomer, competitorSignal, pricingMove, profitMove] =

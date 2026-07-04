@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
 import {
@@ -417,7 +418,7 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const customerUpdates = store.customers.map((customer) => {

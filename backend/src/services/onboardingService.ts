@@ -129,7 +129,7 @@ export async function getOnboardingState(shopDomain: string) {
 
   const store = storeResult as any;
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const syncState = deriveSyncStatus({
@@ -542,7 +542,7 @@ export async function confirmOnboardingPlan(shopDomain: string) {
   const onboarding = await getOnboardingState(shopDomain);
 
   if (!onboarding.steps.find((step) => step.key === "FIRST_INSIGHT_VIEW")?.complete) {
-    throw new Error("View the first insight before confirming the plan.");
+    throw new HttpError(400, "View the first insight before confirming the plan.");
   }
 
   await prisma.store.update({
@@ -560,7 +560,7 @@ export async function confirmOnboardingPlan(shopDomain: string) {
 export async function markOnboardingComplete(shopDomain: string) {
   const onboarding = await getOnboardingState(shopDomain);
   if (!onboarding.canAccessDashboard) {
-    throw new Error("Complete the onboarding flow before entering the dashboard.");
+    throw new HttpError(400, "Complete the onboarding flow before entering the dashboard.");
   }
 
   await prisma.store.update({

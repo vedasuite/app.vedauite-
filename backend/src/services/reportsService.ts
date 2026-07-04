@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import {
   deriveSyncStatus,
@@ -24,7 +25,7 @@ export async function getWeeklyReport(shopDomain: string) {
     }),
     getStoreOperationalSnapshot(shopDomain),
   ]);
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));

@@ -1,5 +1,6 @@
 import { prisma } from "./prismaClient";
 import { env } from "../config/env";
+import { HttpError } from "../lib/httpError";
 import {
   normalizeShopDomain,
   resolveOfflineInstallation,
@@ -8,7 +9,7 @@ import {
 export async function saveStore(shop: string, accessToken: string) {
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
-    throw new Error("Invalid Shopify shop domain.");
+    throw new HttpError(400, "Invalid Shopify shop domain.");
   }
 
   return prisma.store.upsert({

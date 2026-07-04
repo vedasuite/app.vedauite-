@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { env } from "../config/env";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db/prismaClient";
@@ -567,7 +568,7 @@ export async function resolveBillingState(
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const { trialEndsAt } = await ensureStoreTrialState(store);
@@ -781,7 +782,7 @@ export async function getCurrentSubscription(
   });
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const { trialStartedAt, trialEndsAt } = await ensureStoreTrialState(store);
@@ -893,8 +894,8 @@ export async function cancelSubscription(shopDomain: string) {
     ...storeWithSubscriptionArgs,
   });
 
-  if (!store) throw new Error("Store not found");
-  if (!store.subscription) throw new Error("No active subscription");
+  if (!store) throw new HttpError(404, "Store not found.");
+  if (!store.subscription) throw new HttpError(400, "No active subscription to cancel.");
 
   const activeSubscriptionBeforeCancel =
     store.subscription.shopifyChargeId
@@ -950,7 +951,7 @@ export async function downgradeToTrial(shopDomain: string) {
     ...storeWithSubscriptionArgs,
   });
 
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
 
   if (store.subscription?.shopifyChargeId) {
     await cancelAppSubscription(shopDomain, store.subscription.shopifyChargeId, false);
@@ -1012,14 +1013,14 @@ export async function updateStarterModuleSelection(
     ...storeWithSubscriptionArgs,
   });
 
-  if (!store) throw new Error("Store not found");
+  if (!store) throw new HttpError(404, "Store not found.");
   if (!store.subscription || store.subscription.plan.name !== "STARTER") {
-    throw new Error("Starter feature selection can only be changed on the STARTER plan.");
+    throw new HttpError(400, "Starter feature selection can only be changed on the STARTER plan.");
   }
 
   const normalizedStarterModule = normalizeStarterModule(starterModule);
   if (!normalizedStarterModule) {
-    throw new Error("Invalid Starter feature selection.");
+    throw new HttpError(400, "Invalid Starter feature selection.");
   }
 
   const updated = await prisma.storeSubscription.update({

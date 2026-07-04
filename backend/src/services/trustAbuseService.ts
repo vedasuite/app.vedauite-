@@ -1,3 +1,4 @@
+import { HttpError } from "../lib/httpError";
 import { getTrustOperatingLayer, listCustomerScores } from "./creditScoreService";
 import {
   getFraudIntelligenceOverview,
@@ -49,7 +50,7 @@ export async function getTrustAbuseOverview(shopDomain: string) {
     ]);
 
   if (!store) {
-    throw new Error("Store not found");
+    throw new HttpError(404, "Store not found.");
   }
 
   const queue = recentOrders
