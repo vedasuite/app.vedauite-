@@ -277,16 +277,20 @@ async function exchangeLegacyOfflineToken(
 
   try {
     const tokenUrl = `https://${installation.shop}/admin/oauth/access_token`;
-    const response = await axios.post<RefreshAccessTokenResponse>(tokenUrl, {
-      client_id: env.shopifyApiKey,
-      client_secret: env.shopifyApiSecret,
-      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-      subject_token: installation.accessToken,
-      subject_token_type:
-        "urn:shopify:params:oauth:token-type:offline-access-token",
-      requested_token_type:
-        "urn:shopify:params:oauth:token-type:offline-access-token",
-    });
+    const response = await axios.post<RefreshAccessTokenResponse>(
+      tokenUrl,
+      {
+        client_id: env.shopifyApiKey,
+        client_secret: env.shopifyApiSecret,
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: installation.accessToken,
+        subject_token_type:
+          "urn:shopify:params:oauth:token-type:offline-access-token",
+        requested_token_type:
+          "urn:shopify:params:oauth:token-type:offline-access-token",
+      },
+      { timeout: 15000 }
+    );
 
     const now = new Date();
     const accessTokenExpiresAt =
@@ -370,12 +374,16 @@ async function refreshOfflineAccessToken(
 
   try {
     const tokenUrl = `https://${installation.shop}/admin/oauth/access_token`;
-    const response = await axios.post<RefreshAccessTokenResponse>(tokenUrl, {
-      client_id: env.shopifyApiKey,
-      client_secret: env.shopifyApiSecret,
-      grant_type: "refresh_token",
-      refresh_token: installation.refreshToken,
-    });
+    const response = await axios.post<RefreshAccessTokenResponse>(
+      tokenUrl,
+      {
+        client_id: env.shopifyApiKey,
+        client_secret: env.shopifyApiSecret,
+        grant_type: "refresh_token",
+        refresh_token: installation.refreshToken,
+      },
+      { timeout: 15000 }
+    );
 
     const now = new Date();
     const nextAccessTokenExpiresAt =

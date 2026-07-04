@@ -75,9 +75,28 @@ export function createApp() {
     })
   );
 
+  const allowedCorsOrigins = [
+    "https://admin.shopify.com",
+    env.shopifyAppUrl,
+  ].filter(Boolean);
+
   app.use(
     cors({
-      origin: true,
+      origin: (origin, callback) => {
+        // Same-origin requests (no Origin header, e.g. curl/server-to-server)
+        // and the app's own frontend are always allowed. Only Shopify admin
+        // and this app's own domain may make credentialed cross-origin calls.
+        if (!origin) {
+          return callback(null, true);
+        }
+        if (
+          allowedCorsOrigins.includes(origin) ||
+          /^https:\/\/[a-z0-9-]+\.myshopify\.com$/i.test(origin)
+        ) {
+          return callback(null, true);
+        }
+        return callback(new Error("Not allowed by CORS"));
+      },
       credentials: true,
     })
   );
