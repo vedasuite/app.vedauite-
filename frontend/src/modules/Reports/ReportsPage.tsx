@@ -153,10 +153,14 @@ export function ReportsPage() {
   const cachedReport = readModuleCache<WeeklyReport>("weekly-report");
   const [report, setReport] = useState<WeeklyReport>(cachedReport ?? buildFallbackReport());
   const [loading, setLoading] = useState(!cachedReport);
+  // Client-cached entitlement can go stale right after a billing change.
+  // The backend is the real source of truth and rejects with 403
+  // FEATURE_LOCKED in that case — track it so ModuleGate can correct itself.
+  const [planLocked, setPlanLocked] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const focus = searchParams.get("focus");
-  const reportsEnabled = !!subscription?.capabilities?.["reports.view"];
+  const reportsEnabled = !!subscription?.capabilities?.["reports.view"] && !planLocked;
   const reportState = report.readiness?.status ?? report.setupState ?? report.sync?.latestStatus ?? "SYNC_REQUIRED";
   const reportReason =
     report.readiness?.reason ??
@@ -171,7 +175,14 @@ export function ReportsPage() {
         setReport(res.data.report);
         writeModuleCache("weekly-report", res.data.report);
       })
-      .catch(() => setReport((current) => current ?? buildFallbackReport()))
+      .catch((err) => {
+        const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "FEATURE_LOCKED") {
+          setPlanLocked(true);
+          return;
+        }
+        setReport((current) => current ?? buildFallbackReport());
+      })
       .finally(() => setLoading(false));
   }, [api]);
 

@@ -67,6 +67,10 @@ export function PricingPage() {
   const cachedRecs = readModuleCache<Recommendation[]>("pricing-recommendations");
   const [recs, setRecs] = useState<Recommendation[]>(cachedRecs ?? []);
   const [loading, setLoading] = useState(false);
+  // Client-cached entitlement can go stale right after a billing change.
+  // The backend is the real source of truth and rejects with 403
+  // FEATURE_LOCKED in that case — track it so ModuleGate can correct itself.
+  const [planLocked, setPlanLocked] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [simulateOpen, setSimulateOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -91,7 +95,14 @@ export function PricingPage() {
         setRecs(res.data.recommendations);
         writeModuleCache("pricing-recommendations", res.data.recommendations);
       })
-      .catch(() => setRecs([]))
+      .catch((err) => {
+        const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "FEATURE_LOCKED") {
+          setPlanLocked(true);
+          return;
+        }
+        setRecs([]);
+      })
       .finally(() => setLoading(false));
   }, [api]);
 
@@ -160,7 +171,7 @@ export function PricingPage() {
       title="AI Pricing Strategy"
       subtitle="Review AI pricing guidance based on margin, competitor movement, and sales velocity."
       requiredPlan="Growth or Pro"
-      allowed={!!subscription?.enabledModules?.pricing}
+      allowed={!!subscription?.enabledModules?.pricing && !planLocked}
     >
       {recs.length === 0 ? (
         <Page

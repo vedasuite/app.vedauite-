@@ -349,6 +349,13 @@ export function CompetitorPage() {
   const [domainsInput, setDomainsInput] = useState("");
 
   const allowed = isBackendModuleEnabled(appState, "competitor");
+  // The client's cached entitlement can go stale right after a billing
+  // change (e.g. cancelling a subscription). The backend's
+  // requireFeature("competitor") middleware is the real source of truth
+  // and correctly rejects with a 403 FEATURE_LOCKED in that case — track
+  // that separately so ModuleGate shows the correct upgrade-required UI
+  // instead of a confusing generic "could not load" toast.
+  const [planLocked, setPlanLocked] = useState(false);
   const canSeeWeeklyReports =
     subscription?.capabilities?.["competitor.weeklyReports"] ?? false;
   const focus = searchParams.get("focus");
@@ -410,12 +417,21 @@ export function CompetitorPage() {
           writeModuleCache("competitor-response-engine", nextResponseEngine);
         }
       )
-      .catch(() => {
+      .catch((err) => {
         if (!mounted) return;
+        const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "FEATURE_LOCKED") {
+          setPlanLocked(true);
+          return;
+        }
         setOverview(createEmptyOverview());
         setConnectors([]);
         setResponseEngine(createEmptyResponseEngine());
-        setToast("Competitor analysis could not be loaded. Please try again.");
+        setToast(
+          err instanceof Error
+            ? err.message
+            : "Competitor analysis could not be loaded. Please try again."
+        );
       });
 
     return () => {
@@ -562,7 +578,7 @@ export function CompetitorPage() {
       title="Competitor Intelligence"
       subtitle="Track competitor pricing, promotions, stock posture, and response opportunities across key domains."
       requiredPlan="Starter, Growth, or Pro"
-      allowed={allowed}
+      allowed={allowed && !planLocked}
       featureKey="competitor"
     >
       <Page

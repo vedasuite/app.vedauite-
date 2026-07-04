@@ -97,6 +97,10 @@ export function CreditScorePage() {
     cachedOperatingLayer ?? null
   );
   const [loading, setLoading] = useState(false);
+  // Client-cached entitlement can go stale right after a billing change.
+  // The backend is the real source of truth and rejects with 403
+  // FEATURE_LOCKED in that case — track it so ModuleGate can correct itself.
+  const [planLocked, setPlanLocked] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [activeCustomer, setActiveCustomer] = useState<CustomerRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -146,7 +150,12 @@ export function CreditScorePage() {
           operatingLayerResponse.data.operatingLayer
         );
       })
-      .catch(() => {
+      .catch((err) => {
+        const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "FEATURE_LOCKED") {
+          setPlanLocked(true);
+          return;
+        }
         setCustomers([]);
         setOperatingLayer(null);
       })
@@ -197,7 +206,7 @@ export function CreditScorePage() {
       title="Shopper Credit Score"
       subtitle="See trust, refund behavior, and customer reliability at a glance."
       requiredPlan="Growth or Pro"
-      allowed={!!subscription?.enabledModules?.creditScore}
+      allowed={!!subscription?.enabledModules?.creditScore && !planLocked}
     >
       {filteredCustomers.length === 0 ? (
         <Page

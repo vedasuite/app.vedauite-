@@ -132,12 +132,20 @@ export function TrustAbusePage() {
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const evidenceSectionRef = useRef<HTMLDivElement | null>(null);
   const allowed = isBackendModuleEnabled(appState, "fraud");
+  // The client's cached entitlement (`allowed`, from appState) can go stale
+  // right after a billing change — e.g. cancelling a subscription. The
+  // backend's requireFeature("fraud") middleware is the real source of
+  // truth and correctly rejects with a 403 FEATURE_LOCKED in that case.
+  // Track that separately so the page can self-correct to the same clean
+  // "upgrade required" UI instead of showing a confusing generic failure.
+  const [planLocked, setPlanLocked] = useState(false);
 
   const loadOverview = useCallback(async (showToast = false) => {
     if (!allowed) {
       setOverview(createEmptyOverview());
       setLoading(false);
       setSyncIssue(false);
+      setPlanLocked(false);
       return;
     }
     setLoading(true);
@@ -146,11 +154,20 @@ export function TrustAbusePage() {
     try {
       const res = await embeddedShopRequest<{ overview: Overview }>("/api/trust-abuse/overview", { timeoutMs: 30000 });
       setOverview(res.overview);
+      setPlanLocked(false);
       if (showToast) setToast("Fraud intelligence refreshed — data is up to date.");
-    } catch {
-      setOverview(createEmptyOverview("FAILED", "VedaSuite could not load persisted trust and abuse outputs."));
+    } catch (err) {
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      if (code === "FEATURE_LOCKED") {
+        setPlanLocked(true);
+        setLoading(false);
+        return;
+      }
+      const message =
+        err instanceof Error ? err.message : "VedaSuite could not load persisted trust and abuse outputs.";
+      setOverview(createEmptyOverview("FAILED", message));
       setSyncIssue(true);
-      if (showToast) setToast("Refresh failed. Please try again.");
+      if (showToast) setToast(message);
     } finally {
       setLoading(false);
     }
@@ -262,7 +279,7 @@ export function TrustAbusePage() {
     window.setTimeout(() => setEvidenceHighlighted(false), 2800);
   }, []);
 
-  if (!allowed) {
+  if (!allowed || planLocked) {
     return (
       <Page title="Detect refund abuse and customer risk" subtitle="Fraud Intelligence keeps refund abuse, risky customers, and order-risk review in one operational workspace.">
         <Layout>

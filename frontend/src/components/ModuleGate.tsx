@@ -41,10 +41,17 @@ export function ModuleGate({
   const { subscription, billingState, entitlements } = useSubscriptionPlan();
   const { appState } = useAppState();
 
+  // `allowed` also acts as an override the caller can force to `false` —
+  // e.g. when its own API call just got rejected with a 403
+  // FEATURE_LOCKED, meaning the backend (source of truth) disagrees with
+  // whatever the cached appState-derived check below concludes. Without
+  // this, a page could never correct a stale-cache false positive: this
+  // component would recompute its own (same, possibly stale) answer from
+  // appState and ignore what the caller already knows to be wrong.
   const backendAllowed = featureKey
     ? isBackendModuleEnabled(appState, featureKey)
     : allowed;
-  const resolvedAllowed = featureKey ? backendAllowed : allowed;
+  const resolvedAllowed = backendAllowed && allowed;
 
   if (resolvedAllowed) {
     return <>{children}</>;
