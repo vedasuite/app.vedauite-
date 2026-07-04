@@ -30,7 +30,16 @@ type OAuthAccessTokenResponse = {
 
 type TokenAcquisitionMode = "offline_expiring" | "offline_legacy";
 
+// Escaping an iframe with script (window.top.location = url) is blocked by
+// Chrome's (and other browsers') popup/redirect protections when it isn't
+// tied to a direct user click — this is stricter in Incognito and can leave
+// the merchant on a blank page with no way forward. A real <a target="_top">
+// click is never blocked by any browser, so it's the primary mechanism here,
+// not a hidden fallback. We still attempt an automatic redirect for the
+// common case where it isn't blocked, but the visible button is what
+// guarantees this page never dead-ends.
 function redirectTopLevel(res: Response, url: string) {
+  const safeUrl = JSON.stringify(url);
   return res
     .status(200)
     .type("html")
@@ -39,17 +48,30 @@ function redirectTopLevel(res: Response, url: string) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Redirecting...</title>
-    <script>
-      (function () {
-        var target = ${JSON.stringify(url)};
-        var destination = window.top && window.top !== window ? window.top : window;
-        destination.location.replace(target);
-      })();
-    </script>
+    <title>Continue to VedaSuite</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
+      .card { text-align: center; }
+      .btn { display: inline-block; margin-top: 16px; padding: 10px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; }
+    </style>
   </head>
   <body>
-    <noscript><p>Redirecting... <a href="${url}">Continue</a></p></noscript>
+    <div class="card">
+      <p>Continuing to VedaSuite...</p>
+      <a class="btn" id="continue-link" href="${url}" target="_top" rel="noopener">Continue</a>
+    </div>
+    <script>
+      (function () {
+        var target = ${safeUrl};
+        try {
+          var destination = window.top && window.top !== window ? window.top : window;
+          destination.location.replace(target);
+        } catch (e) {
+          // Cross-origin top navigation was blocked — the visible button
+          // above (a real user click) always works as the fallback.
+        }
+      })();
+    </script>
   </body>
 </html>`);
 }
