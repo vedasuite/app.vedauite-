@@ -405,14 +405,6 @@ function normalizeModuleRefreshStatus(
   return "unchanged";
 }
 
-function redirectTopLevel(url: string) {
-  if (window.top && window.top !== window) {
-    window.top.location.href = url;
-    return;
-  }
-  window.location.href = url;
-}
-
 function formatRelativeTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -1156,13 +1148,12 @@ export function DashboardPage() {
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
-                    onClick={() =>
-                      redirectTopLevel(
-                        diagnostics?.connection.reauthorizeUrl ??
-                          fallbackReauthorizeUrl ??
-                          "/auth"
-                      )
+                    url={
+                      diagnostics?.connection.reauthorizeUrl ??
+                      fallbackReauthorizeUrl ??
+                      "/auth"
                     }
+                    target="_top"
                   >
                     Reconnect Shopify
                   </Button>

@@ -188,12 +188,18 @@ function starterLabel(moduleKey: StarterModule | null) {
     : "Not selected";
 }
 
-function redirectTopLevel(url: string) {
-  if (window.top && window.top !== window) {
-    window.top.location.href = url;
-    return;
+// Best-effort only — script-driven cross-origin iframe navigation is
+// blocked by browsers (especially Incognito) when it isn't a direct user
+// click. Callers must always also render a real <a target="_top"> button
+// as the guaranteed path; this just makes the common, unblocked case
+// instant instead of requiring an extra click.
+function attemptTopLevelRedirect(url: string) {
+  try {
+    const destination = window.top && window.top !== window ? window.top : window;
+    destination.location.replace(url);
+  } catch {
+    // Blocked — the visible button rendered by the caller is the fallback.
   }
-  window.location.href = url;
 }
 
 function actionLabel(action: BillingPlanCard["action"]) {
@@ -261,6 +267,7 @@ export function PricingPage() {
   const [error, setError] = useState<string | null>(null);
   const [starterModule, setStarterModule] = useState<StarterModule>("fraud");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [pendingConfirmationUrl, setPendingConfirmationUrl] = useState<string | null>(null);
 
   const loadBillingState = useCallback(async () => {
     const response = await embeddedShopRequest<BillingStateResponse>("/api/billing/state", {
@@ -346,7 +353,10 @@ export function PricingPage() {
             );
           }
           startBillingRedirect();
-          redirectTopLevel(response.result.confirmationUrl);
+          // Show the guaranteed real button immediately (see banner below)
+          // and also try the instant auto-redirect for the common case.
+          setPendingConfirmationUrl(response.result.confirmationUrl);
+          attemptTopLevelRedirect(response.result.confirmationUrl);
           return;
         }
 
@@ -407,12 +417,12 @@ export function PricingPage() {
     }
   }, [loadBillingState, refresh, refreshAppState]);
 
+  // Navigation itself happens via the rendered <a href target="_top"> button
+  // (see JSX below) — a real click is the only cross-origin iframe escape
+  // browsers never block. This only records the state-tracking side effect.
   const handleResumeApproval = useCallback(() => {
-    if (management?.pendingIntent?.confirmationUrl) {
-      startBillingRedirect();
-      redirectTopLevel(management.pendingIntent.confirmationUrl);
-    }
-  }, [management?.pendingIntent?.confirmationUrl, startBillingRedirect]);
+    startBillingRedirect();
+  }, [startBillingRedirect]);
 
   const currentSummary = useMemo(() => {
     if (!management) {
@@ -466,6 +476,28 @@ export function PricingPage() {
       subtitle="Choose a plan, compare included features, and manage Shopify billing."
     >
       <Layout>
+        {pendingConfirmationUrl ? (
+          <Layout.Section>
+            <Banner title="Continue to Shopify to approve billing" tone="info">
+              <BlockStack gap="200">
+                <p>
+                  VedaSuite is redirecting you to Shopify to approve this
+                  plan change. If nothing happens in a moment, click below.
+                </p>
+                <InlineStack gap="300">
+                  <Button
+                    variant="primary"
+                    url={pendingConfirmationUrl}
+                    target="_top"
+                  >
+                    Continue to Shopify
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
         {error ? (
           <Layout.Section>
             <Banner title="Billing action failed" tone="critical">
@@ -525,7 +557,13 @@ export function PricingPage() {
                   <Button
                     variant="primary"
                     disabled={!management.pendingIntent.confirmationUrl}
-                    onClick={handleResumeApproval}
+                    url={management.pendingIntent.confirmationUrl ?? undefined}
+                    target="_top"
+                    onClick={
+                      management.pendingIntent.confirmationUrl
+                        ? handleResumeApproval
+                        : undefined
+                    }
                   >
                     Resume Shopify approval
                   </Button>

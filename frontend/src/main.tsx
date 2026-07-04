@@ -72,10 +72,7 @@ class FrontendErrorBoundary extends React.Component<
                 <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem" }}>
                   <Button onClick={() => window.location.reload()}>Refresh app</Button>
                   {reconnectPath ? (
-                    <Button
-                      variant="primary"
-                      onClick={() => (window.top ?? window).location.assign(reconnectPath)}
-                    >
+                    <Button variant="primary" url={reconnectPath} target="_top">
                       Reconnect Shopify
                     </Button>
                   ) : null}

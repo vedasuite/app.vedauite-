@@ -31,14 +31,6 @@ type SyncJobResponse = {
   } | null;
 };
 
-function redirectTopLevel(url: string) {
-  if (window.top && window.top !== window) {
-    window.top.location.href = url;
-    return;
-  }
-  window.location.href = url;
-}
-
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({
     behavior: "smooth",
@@ -284,9 +276,10 @@ export function OnboardingPage() {
 
     switch (onboarding.primaryAction.key) {
       case "RECONNECT_SHOPIFY":
-        if (reauthorizeUrl) {
-          redirectTopLevel(reauthorizeUrl);
-        }
+        // Handled by rendering a real <a target="_top"> button instead —
+        // script-driven cross-origin iframe navigation is blocked by
+        // browsers (especially Incognito) when it isn't a direct user
+        // click. This case is only reached as a no-op safety net.
         return;
       case "SYNC_LIVE_DATA":
         await syncLiveStoreData();
@@ -336,6 +329,17 @@ export function OnboardingPage() {
     await handlePrimaryAction();
   };
 
+  // Reconnect needs to escape the Shopify admin iframe. A real
+  // <a target="_top"> click is the only navigation browsers never block
+  // (Incognito enforces this strictly) — so this renders as a genuine link
+  // via Polaris Button's `url`/`target` props instead of an onClick handler.
+  const primaryButtonProps =
+    !onboarding?.canAccessDashboard &&
+    onboarding?.primaryAction.key === "RECONNECT_SHOPIFY" &&
+    reauthorizeUrl
+      ? { url: reauthorizeUrl, target: "_top" as const }
+      : { onClick: () => void runPrimaryAction() };
+
   if (loading) {
     return (
       <Page title="Get VedaSuite ready for your store" subtitle="Loading setup state.">
@@ -372,7 +376,7 @@ export function OnboardingPage() {
                 <InlineStack gap="300">
                   <Button onClick={() => void refresh()}>Try again</Button>
                   {reauthorizeUrl ? (
-                    <Button variant="primary" onClick={() => redirectTopLevel(reauthorizeUrl)}>
+                    <Button variant="primary" url={reauthorizeUrl} target="_top">
                       Reconnect Shopify
                     </Button>
                   ) : null}
@@ -393,7 +397,7 @@ export function OnboardingPage() {
               <InlineStack gap="300">
                 <Button
                   variant="primary"
-                  onClick={() => void runPrimaryAction()}
+                  {...primaryButtonProps}
                   loading={
                     busyAction === "SYNC_LIVE_DATA" ||
                     busyAction === "VIEW_FIRST_INSIGHT" ||
@@ -458,7 +462,7 @@ export function OnboardingPage() {
                         <InlineStack gap="300">
                           <Button
                             variant="primary"
-                            onClick={() => void runPrimaryAction()}
+                            {...primaryButtonProps}
                             loading={
                               busyAction === "SYNC_LIVE_DATA" ||
                               busyAction === "VIEW_FIRST_INSIGHT" ||
