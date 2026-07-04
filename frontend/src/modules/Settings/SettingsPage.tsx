@@ -126,6 +126,9 @@ export function SettingsPage() {
     try {
       setLoading(true);
       setSaveBanner(null);
+      // Toast renders at the bottom of the scrollable frame — invisible
+      // without scrolling back up if triggered while scrolled down.
+      window.scrollTo({ top: 0, behavior: "smooth" });
       const payload = {
         fraudSensitivity: settings.fraudSensitivity,
         sharedFraudNetwork: settings.sharedFraudNetwork,

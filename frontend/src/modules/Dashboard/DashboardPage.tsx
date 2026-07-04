@@ -943,6 +943,10 @@ export function DashboardPage() {
     setSyncing(true);
     setError(null);
     setRefreshResult(null);
+    // Toast/error banners render near the top of the page or bottom of the
+    // frame — invisible without scrolling back up if the dashboard was
+    // scrolled down when this was triggered.
+    window.scrollTo({ top: 0, behavior: "smooth" });
     const startedAt = new Date().toISOString();
     try {
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
@@ -1011,6 +1015,7 @@ export function DashboardPage() {
   const registerWebhooks = useCallback(async () => {
     setRegisteringWebhooks(true);
     setError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       await embeddedShopRequest("/api/shopify/register-webhooks", {
         method: "POST",

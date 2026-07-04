@@ -117,6 +117,9 @@ export function PricingPage() {
   }, [focus]);
 
   const simulate = async () => {
+    // Toast renders at the bottom of the scrollable frame — invisible
+    // without scrolling back up if triggered while scrolled down.
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const response = await api.post<SimulationResult>("/api/pricing/simulate", {
         currentPrice: Number(form.currentPrice),
@@ -134,6 +137,10 @@ export function PricingPage() {
 
   const approveRecommendation = async () => {
     if (!activeRecommendation) return;
+
+    // Toast renders at the bottom of the scrollable frame — invisible
+    // without scrolling back up if triggered while scrolled down.
+    window.scrollTo({ top: 0, behavior: "smooth" });
 
     try {
       const response = await api.post(`/api/pricing/recommendations/${activeRecommendation.id}/approve`, {});

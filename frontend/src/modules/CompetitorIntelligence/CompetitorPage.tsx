@@ -488,6 +488,10 @@ export function CompetitorPage() {
       .filter(Boolean)
       .map((domain) => ({ domain }));
 
+    // Toast renders at the bottom of the scrollable frame — invisible
+    // without scrolling back up if triggered while scrolled down.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
     try {
       await embeddedShopRequest("/api/competitor/domains", {
         method: "POST",
@@ -506,6 +510,9 @@ export function CompetitorPage() {
   };
 
   const ingestCompetitorData = async () => {
+    // Toast renders at the bottom of the scrollable frame — invisible
+    // without scrolling back up if triggered while scrolled down.
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       setIngesting(true);
       const ingestResponse = await embeddedShopRequest<{

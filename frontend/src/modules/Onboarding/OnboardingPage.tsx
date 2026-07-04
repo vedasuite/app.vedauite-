@@ -168,6 +168,10 @@ export function OnboardingPage() {
   const syncLiveStoreData = useCallback(async () => {
     setBusyAction("SYNC_LIVE_DATA");
     setActionError(null);
+    // The action-error banner renders at the top of the page — invisible
+    // without scrolling back up if this was triggered from a step card
+    // further down the setup checklist.
+    window.scrollTo({ top: 0, behavior: "smooth" });
 
     try {
       const response = await embeddedShopRequest<SyncJobResponse>("/api/shopify/sync", {
@@ -193,6 +197,7 @@ export function OnboardingPage() {
   const registerWebhooks = useCallback(async () => {
     setBusyAction("REGISTER_WEBHOOKS");
     setActionError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       await embeddedShopRequest("/api/shopify/register-webhooks", {
         method: "POST",
@@ -218,6 +223,7 @@ export function OnboardingPage() {
   const activateSelectedModule = useCallback(async () => {
     setBusyAction(`SELECT_${pendingModule}`);
     setActionError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       await selectModule(pendingModule);
       setToast("Starting workflow selected.");
@@ -239,6 +245,7 @@ export function OnboardingPage() {
 
     setBusyAction("VIEW_FIRST_INSIGHT");
     setActionError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       await markInsightViewed(onboarding.selectedModule ?? undefined);
       navigateEmbedded(onboarding.selectedModuleRoute);
@@ -256,6 +263,7 @@ export function OnboardingPage() {
   const handleConfirmPlan = useCallback(async () => {
     setBusyAction("CONFIRM_PLAN");
     setActionError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const nextOnboarding = await confirmPlan();
       if (nextOnboarding.canAccessDashboard) {

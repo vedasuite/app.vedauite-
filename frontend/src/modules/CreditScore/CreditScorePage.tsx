@@ -183,6 +183,11 @@ export function CreditScorePage() {
   const recomputeScore = async () => {
     if (!activeCustomer) return;
 
+    // Toast renders at the bottom of the scrollable frame — if the user
+    // triggered this while scrolled down in a long customer list, the
+    // result is invisible without scrolling back up first.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
     try {
       const response = await api.post<{ customer: CustomerRow }>(
         `/api/credit-score/customer/${activeCustomer.id}/recompute`,

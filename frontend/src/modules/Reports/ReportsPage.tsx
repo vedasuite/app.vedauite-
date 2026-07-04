@@ -191,6 +191,9 @@ export function ReportsPage() {
   }, [focus]);
 
   const exportReport = async () => {
+    // Toast renders at the bottom of the scrollable frame — invisible
+    // without scrolling back up if triggered while scrolled down.
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const response = await api.get("/api/reports/weekly/export", {
         responseType: "blob",
