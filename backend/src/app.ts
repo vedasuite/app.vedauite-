@@ -118,8 +118,9 @@ export function createApp() {
   // merchant on a blank page. A real <a target="_top"> click is never
   // blocked by any browser, so it's the primary mechanism, not a hidden
   // fallback. The automatic redirect is still attempted for the common case.
-  function redirectTopLevel(res: express.Response, url: string) {
+  function redirectTopLevel(res: express.Response, url: string, shop?: string) {
     const safeUrl = JSON.stringify(url);
+    const escapeUrl = shop ? `https://${shop}/admin` : null;
     return res
       .status(200)
       .type("html")
@@ -133,12 +134,14 @@ export function createApp() {
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
       .card { text-align: center; }
       .btn { display: inline-block; margin-top: 16px; padding: 10px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; }
+      .escape { display: block; margin-top: 14px; color: #6d7175; font-size: 13px; text-decoration: underline; }
     </style>
   </head>
   <body>
     <div class="card">
       <p>Continuing to VedaSuite...</p>
       <a class="btn" id="continue-link" href="${url}" target="_top" rel="noopener">Continue</a>
+      ${escapeUrl ? `<a class="escape" href="${escapeUrl}" target="_top" rel="noopener">Return to Shopify admin instead</a>` : ""}
     </div>
     <script>
       (function () {
@@ -250,7 +253,7 @@ export function createApp() {
           reconnectUrl.searchParams.set("host", req.query.host);
         }
 
-        return redirectTopLevel(res, reconnectUrl.toString());
+        return redirectTopLevel(res, reconnectUrl.toString(), shop);
       }
 
       if (env.enableGuidedBootstrap) {

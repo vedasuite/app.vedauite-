@@ -38,8 +38,9 @@ type TokenAcquisitionMode = "offline_expiring" | "offline_legacy";
 // not a hidden fallback. We still attempt an automatic redirect for the
 // common case where it isn't blocked, but the visible button is what
 // guarantees this page never dead-ends.
-function redirectTopLevel(res: Response, url: string) {
+function redirectTopLevel(res: Response, url: string, shop?: string) {
   const safeUrl = JSON.stringify(url);
+  const escapeUrl = shop ? `https://${shop}/admin` : null;
   return res
     .status(200)
     .type("html")
@@ -53,12 +54,14 @@ function redirectTopLevel(res: Response, url: string) {
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
       .card { text-align: center; }
       .btn { display: inline-block; margin-top: 16px; padding: 10px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; }
+      .escape { display: block; margin-top: 14px; color: #6d7175; font-size: 13px; text-decoration: underline; }
     </style>
   </head>
   <body>
     <div class="card">
       <p>Continuing to VedaSuite...</p>
       <a class="btn" id="continue-link" href="${url}" target="_top" rel="noopener">Continue</a>
+      ${escapeUrl ? `<a class="escape" href="${escapeUrl}" target="_top" rel="noopener">Return to Shopify admin instead</a>` : ""}
     </div>
     <script>
       (function () {
@@ -287,7 +290,7 @@ function startOAuth(req: Request, res: Response) {
     returnTo,
   });
 
-  return redirectTopLevel(res, buildInstallUrl(normalizedShop, state));
+  return redirectTopLevel(res, buildInstallUrl(normalizedShop, state), normalizedShop);
 }
 
 authRouter.get("/install", (req, res) => startOAuth(req, res));
@@ -380,7 +383,7 @@ authRouter.get("/callback", async (req, res) => {
       accessTokenExpiresAt: accessTokenExpiresAt?.toISOString() ?? null,
     });
 
-    return redirectTopLevel(res, returnUrl);
+    return redirectTopLevel(res, returnUrl, shop);
   } catch (error) {
     await prisma.store.upsert({
       where: { shop },

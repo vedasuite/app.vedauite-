@@ -492,6 +492,9 @@ export function PricingPage() {
                   >
                     Continue to Shopify
                   </Button>
+                  <Button onClick={() => setPendingConfirmationUrl(null)}>
+                    Not now
+                  </Button>
                 </InlineStack>
               </BlockStack>
             </Banner>
