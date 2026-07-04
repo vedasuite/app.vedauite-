@@ -120,19 +120,23 @@ export function deriveInstallState(health: Awaited<ReturnType<typeof getConnecti
 }
 
 export function deriveConnectionState(health: Awaited<ReturnType<typeof getConnectionHealth>>) {
-  if (health.healthy) {
-    return {
-      status: "healthy" as const,
-      title: "Shopify connection is healthy",
-      description: "Store access, embedded auth, and webhook registration are available.",
-    };
-  }
-
+  // Check the webhook-specific code before the blanket healthy check —
+  // `healthy` now stays true when only webhook registration is pending
+  // (the token itself is fine), so this must run first or its more
+  // specific "attention" messaging would never be reached.
   if (health.code === "WEBHOOKS_MISSING" || health.code === "WEBHOOK_REGISTRATION_FAILED") {
     return {
       status: "attention" as const,
       title: "Store connection needs attention",
       description: "VedaSuite is connected, but Shopify setup still needs a follow-up before all features are dependable.",
+    };
+  }
+
+  if (health.healthy) {
+    return {
+      status: "healthy" as const,
+      title: "Shopify connection is healthy",
+      description: "Store access, embedded auth, and webhook registration are available.",
     };
   }
 

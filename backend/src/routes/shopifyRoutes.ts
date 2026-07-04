@@ -27,6 +27,7 @@ import {
   getStoreOperationalSnapshot,
 } from "../services/storeOperationalStateService";
 import { resolveAuthenticatedShop } from "./routeShop";
+import { logEvent } from "../services/observabilityService";
 
 export const shopifyRouter = Router();
 
@@ -96,12 +97,34 @@ shopifyRouter.get("/diagnostics", async (req, res) => {
 
   await ensureInstallationMetadata(shop);
 
-  const [health, store, latestSyncJob, subscription, operational, billingState, billingManagement] = await Promise.all([
-    getConnectionHealth(shop, {
-      probeApi: true,
-      host: context.host,
-      returnTo: context.returnTo,
-    }),
+  let health = await getConnectionHealth(shop, {
+    probeApi: true,
+    host: context.host,
+    returnTo: context.returnTo,
+  });
+
+  // Self-heal: the token is valid (probe succeeded) but webhooks never
+  // completed registering — this can happen since registration runs
+  // fire-and-forget after install and doesn't retry on its own. Since we
+  // already have a confirmed-working token right here, register them now
+  // instead of leaving the merchant stuck with no self-service fix.
+  if (health.healthy && !health.webhookCoverageReady) {
+    try {
+      await registerSyncWebhooks(shop, env.shopifyAppUrl);
+      health = await getConnectionHealth(shop, {
+        probeApi: false,
+        host: context.host,
+        returnTo: context.returnTo,
+      });
+    } catch (error) {
+      logEvent("warn", "shopify.diagnostics.webhook_self_heal_failed", {
+        shop,
+        error,
+      });
+    }
+  }
+
+  const [store, latestSyncJob, subscription, operational, billingState, billingManagement] = await Promise.all([
     prisma.store.findUnique({
       where: { shop },
       select: {

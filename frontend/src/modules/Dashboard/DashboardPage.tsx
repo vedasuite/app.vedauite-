@@ -134,6 +134,7 @@ type DashboardState = {
 type Diagnostics = {
   connection: {
     healthy: boolean;
+    webhookCoverageReady: boolean;
     code: string;
     message: string;
     reauthRequired: boolean;
@@ -1140,16 +1141,16 @@ export function DashboardPage() {
           </Layout.Section>
         ) : null}
 
-        {!diagnostics?.connection.healthy ? (
+        {diagnostics && !diagnostics.connection.healthy ? (
           <Layout.Section>
             <Banner title="Shopify connection needs attention" tone="critical">
               <BlockStack gap="200">
-                <p>{diagnostics?.connection.message}</p>
+                <p>{diagnostics.connection.message}</p>
                 <InlineStack gap="300">
                   <Button
                     variant="primary"
                     url={
-                      diagnostics?.connection.reauthorizeUrl ??
+                      diagnostics.connection.reauthorizeUrl ??
                       fallbackReauthorizeUrl ??
                       "/auth"
                     }
@@ -1157,8 +1158,22 @@ export function DashboardPage() {
                   >
                     Reconnect Shopify
                   </Button>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : diagnostics && diagnostics.connection.healthy && !diagnostics.connection.webhookCoverageReady ? (
+          <Layout.Section>
+            <Banner title="Finishing Shopify setup" tone="info">
+              <BlockStack gap="200">
+                <p>
+                  Your Shopify connection is working. VedaSuite is still
+                  registering background sync webhooks — this usually
+                  finishes on its own within a minute of install.
+                </p>
+                <InlineStack gap="300">
                   <Button onClick={() => void registerWebhooks()} loading={registeringWebhooks}>
-                    Verify Shopify connection
+                    Finish setup now
                   </Button>
                 </InlineStack>
               </BlockStack>

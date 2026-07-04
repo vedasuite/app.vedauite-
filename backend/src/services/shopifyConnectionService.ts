@@ -829,9 +829,18 @@ export async function getConnectionHealth(
     );
   }
 
+  // Missing webhooks does NOT make the connection unhealthy — the OAuth
+  // token can be perfectly valid while webhook registration just hasn't
+  // completed yet (e.g. it's fire-and-forget after install and may still
+  // be in flight, or failed once transiently). `healthy` must only reflect
+  // whether we can actually authenticate with Shopify, because `/sync` and
+  // `/register-webhooks` both refuse to run when `!healthy` — conflating
+  // the two meant a store stuck without webhooks couldn't self-heal by
+  // clicking "Register webhooks", since that endpoint's own health check
+  // would reject it first. `webhookCoverageReady` (already computed above)
+  // is the correct, dedicated signal for this instead.
   if (!installation.webhooksRegisteredAt) {
     baseHealth.code = "WEBHOOKS_MISSING";
-    baseHealth.healthy = false;
     baseHealth.message = "Mandatory Shopify webhooks are not registered yet.";
   }
 
