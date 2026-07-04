@@ -320,6 +320,11 @@ export function PricingPage() {
     async (planName: BillingPlanName) => {
       setBusyAction(planName);
       setError(null);
+      // Plan cards render below the error/pending-redirect banners near
+      // the top of the page — without scrolling, any resulting banner
+      // (success, error, or "continue to Shopify") is off-screen and the
+      // click appears to silently do nothing.
+      window.scrollTo({ top: 0, behavior: "smooth" });
 
       try {
         const starterSwitchRequiresApproval =
@@ -727,7 +732,14 @@ export function PricingPage() {
                   <Button
                     tone="critical"
                     disabled={busyAction === "cancel"}
-                    onClick={() => setConfirmCancel(true)}
+                    onClick={() => {
+                      setConfirmCancel(true);
+                      // The confirmation banner renders near the top of the
+                      // page, well above this button — without scrolling,
+                      // clicking appears to do nothing since the banner is
+                      // off-screen.
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
                   >
                     Cancel subscription
                   </Button>
