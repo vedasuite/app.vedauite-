@@ -573,7 +573,7 @@ type SyncQueryResponse = {
             id: string;
             legacyResourceId: string;
             email?: string | null;
-            numberOfOrders: number;
+            numberOfOrders: string | number;
           } | null;
           tags: string[];
         };
@@ -815,7 +815,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
             where: { id: existingCustomer.id },
             data: {
               email: orderNode.customer.email ?? existingCustomer.email,
-              totalOrders: orderNode.customer.numberOfOrders,
+              totalOrders: parseInt(String(orderNode.customer.numberOfOrders), 10) || 0,
             },
           })
         : await prisma.customer.create({
@@ -823,7 +823,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
               storeId: store.id,
               shopifyCustomerId: orderNode.customer.legacyResourceId,
               email: orderNode.customer.email,
-              totalOrders: orderNode.customer.numberOfOrders,
+              totalOrders: parseInt(String(orderNode.customer.numberOfOrders), 10) || 0,
             },
           });
 
