@@ -157,16 +157,26 @@ async function handleCustomersDataRequest(req: any, res: any) {
     return envelope;
   }
 
-  const result = await exportCustomerDataRequest(
-    envelope.shopDomain,
-    envelope.payload
-  );
+  try {
+    const result = await exportCustomerDataRequest(
+      envelope.shopDomain,
+      envelope.payload
+    );
 
-  return res.status(200).json({
-    ok: true,
-    shop: envelope.shopDomain,
-    ...result,
-  });
+    return res.status(200).json({
+      ok: true,
+      shop: envelope.shopDomain,
+      ...result,
+    });
+  } catch (error) {
+    // Always return 200 to Shopify — retrying a data export is harmless but a
+    // 5xx causes Shopify to flag the compliance endpoint as unhealthy.
+    logEvent("error", "webhook.customers_data_request_failed", {
+      shop: envelope.shopDomain,
+      error,
+    });
+    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+  }
 }
 
 async function handleCustomersRedact(req: any, res: any) {
@@ -175,13 +185,21 @@ async function handleCustomersRedact(req: any, res: any) {
     return envelope;
   }
 
-  const result = await redactCustomerData(envelope.shopDomain, envelope.payload);
+  try {
+    const result = await redactCustomerData(envelope.shopDomain, envelope.payload);
 
-  return res.status(200).json({
-    ok: true,
-    shop: envelope.shopDomain,
-    ...result,
-  });
+    return res.status(200).json({
+      ok: true,
+      shop: envelope.shopDomain,
+      ...result,
+    });
+  } catch (error) {
+    logEvent("error", "webhook.customers_redact_failed", {
+      shop: envelope.shopDomain,
+      error,
+    });
+    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+  }
 }
 
 async function handleShopRedact(req: any, res: any) {
@@ -190,12 +208,20 @@ async function handleShopRedact(req: any, res: any) {
     return envelope;
   }
 
-  const result = await redactShopData(envelope.shopDomain);
+  try {
+    const result = await redactShopData(envelope.shopDomain);
 
-  return res.status(200).json({
-    ok: true,
-    ...result,
-  });
+    return res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    logEvent("error", "webhook.shop_redact_failed", {
+      shop: envelope.shopDomain,
+      error,
+    });
+    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+  }
 }
 
 async function handleAppSubscriptionUpdate(req: any, res: any) {

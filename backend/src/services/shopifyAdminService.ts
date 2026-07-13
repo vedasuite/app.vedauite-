@@ -1,5 +1,6 @@
 import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
+import { shopifyInt, shopifyFloat } from "../lib/shopifyScalars";
 import { logEvent, withRetry } from "./observabilityService";
 import {
   forceRefreshOfflineAccessToken,
@@ -815,7 +816,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
             where: { id: existingCustomer.id },
             data: {
               email: orderNode.customer.email ?? existingCustomer.email,
-              totalOrders: parseInt(String(orderNode.customer.numberOfOrders), 10) || 0,
+              totalOrders: shopifyInt(orderNode.customer.numberOfOrders),
             },
           })
         : await prisma.customer.create({
@@ -823,7 +824,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
               storeId: store.id,
               shopifyCustomerId: orderNode.customer.legacyResourceId,
               email: orderNode.customer.email,
-              totalOrders: parseInt(String(orderNode.customer.numberOfOrders), 10) || 0,
+              totalOrders: shopifyInt(orderNode.customer.numberOfOrders),
             },
           });
 
@@ -864,7 +865,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
           shopifyOrderGid: orderNode.id,
           shopifyLegacyOrderId: orderNode.legacyResourceId,
           orderName: orderNode.name,
-          totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
+          totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
           currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
           status: normalizedStatus,
           refunded,
@@ -880,7 +881,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
           shopifyOrderGid: orderNode.id,
           shopifyLegacyOrderId: orderNode.legacyResourceId,
           orderName: orderNode.name,
-          totalAmount: Number(orderNode.currentTotalPriceSet.shopMoney.amount),
+          totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
           currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
           status: normalizedStatus,
           refunded,
@@ -943,7 +944,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
   for (const product of products) {
     const variants = product.variants.edges.map((edge) => edge.node);
     const firstVariant = variants[0];
-    const currentPrice = Number(firstVariant?.price ?? 0);
+    const currentPrice = shopifyFloat(firstVariant?.price ?? 0);
     if (!product.handle || variants.length === 0 || !currentPrice) {
       syncCounts.skipped.products += 1;
       continue;
@@ -1021,12 +1022,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
           productSnapshotId: savedProduct.id,
           shopifyVariantId: variant.id,
           title: variant.title,
-          price: Number(variant.price),
+          price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
         },
         update: {
           title: variant.title,
-          price: Number(variant.price),
+          price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
         },
       });
