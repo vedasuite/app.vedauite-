@@ -7,6 +7,7 @@ import {
   createShopifyOAuthState,
   verifyShopifyOAuthState,
 } from "../lib/shopifyOAuthState";
+import type { OAuthStateResult } from "../lib/shopifyOAuthState";
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
 import { logEvent } from "../services/observabilityService";
@@ -283,11 +284,12 @@ function startOAuth(req: Request, res: Response) {
     returnTo,
   });
 
-  logEvent("info", "shopify.auth.start", {
+  logEvent("info", "shopify.auth.state_issued", {
     shop: normalizedShop,
     route: "auth.install",
     host,
     returnTo,
+    stateIssuedAt: new Date().toISOString(),
   });
 
   return redirectTopLevel(res, buildInstallUrl(normalizedShop, state), normalizedShop);
@@ -304,28 +306,70 @@ authRouter.get("/callback", async (req, res) => {
   const hmac = typeof req.query.hmac === "string" ? req.query.hmac : undefined;
   const state = typeof req.query.state === "string" ? req.query.state : undefined;
 
+  logEvent("info", "shopify.auth.callback_received", {
+    shop: shop ?? "(missing)",
+    route: "auth.callback",
+    hasCode: !!code,
+    hasHmac: !!hmac,
+    hasState: !!state,
+  });
+
   if (!shop || !code || !hmac || !state) {
+    logEvent("warn", "shopify.auth.callback_missing_params", {
+      shop: shop ?? "(missing)",
+      route: "auth.callback",
+      hasCode: !!code,
+      hasHmac: !!hmac,
+      hasState: !!state,
+    });
     return res.status(400).send("Missing OAuth parameters.");
   }
 
-  if (!validateOAuthHmac(req.query, hmac)) {
-    logEvent("warn", "shopify.auth.callback_invalid_hmac", {
-      shop,
-      route: "auth.callback",
-    });
+  const hmacValid = validateOAuthHmac(req.query, hmac);
+  logEvent(hmacValid ? "info" : "warn", "shopify.auth.callback_hmac_check", {
+    shop,
+    route: "auth.callback",
+    hmacValid,
+  });
+
+  if (!hmacValid) {
     return res.status(400).send("HMAC validation failed.");
   }
 
-  const statePayload = verifyShopifyOAuthState(state, shop);
-  if (!statePayload) {
-    logEvent("warn", "shopify.auth.callback_invalid_state", {
-      shop,
-      route: "auth.callback",
-    });
+  const stateResult: OAuthStateResult = verifyShopifyOAuthState(state, shop);
+  logEvent(stateResult.ok ? "info" : "warn", "shopify.auth.callback_state_check", {
+    shop,
+    route: "auth.callback",
+    stateOk: stateResult.ok,
+    stateReason: stateResult.ok ? "valid" : stateResult.reason,
+  });
+
+  if (!stateResult.ok) {
+    if (stateResult.reason === "expired") {
+      // State token expired (TTL exceeded). This is not a security issue — the
+      // HMAC on the callback was already verified above, so we know the request
+      // is genuine. Restart OAuth from the top with a fresh state token so the
+      // merchant/reviewer never hits a dead-end. A human reviewer who takes
+      // longer than the TTL window between clicking install and approving on
+      // Shopify's consent screen would otherwise see a raw 400.
+      logEvent("info", "shopify.auth.callback_state_expired_restarting", {
+        shop,
+        route: "auth.callback",
+      });
+      const host =
+        typeof req.query.host === "string" && req.query.host.trim()
+          ? req.query.host
+          : null;
+      const freshState = createShopifyOAuthState({ shop, host, returnTo: "/" });
+      return redirectTopLevel(res, buildInstallUrl(shop, freshState), shop);
+    }
     return res.status(400).send("OAuth state validation failed.");
   }
 
+  const statePayload = stateResult.payload;
+
   try {
+    logEvent("info", "shopify.auth.token_exchange_start", { shop, route: "auth.callback" });
     const tokenData = await exchangeOfflineAccessToken(shop, code);
     const now = new Date();
     const accessTokenExpiresAt =

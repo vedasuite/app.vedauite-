@@ -7,7 +7,11 @@ import { env } from "../config/env";
 // hit (common with review-bot double-probing) before the first OAuth flow
 // completes, causing spurious "state mismatch" failures on legitimate
 // installs. A self-verifying state has nothing to race against.
-const STATE_MAX_AGE_MS = 15 * 60 * 1000;
+// 30 minutes: generous enough for a human reviewer who reads docs between
+// clicking install and completing the OAuth consent, but short enough to
+// limit replay risk. The callback auto-restarts the flow if a token expires,
+// so the merchant/reviewer never hits a dead-end page.
+const STATE_MAX_AGE_MS = 30 * 60 * 1000;
 
 export type ShopifyOAuthStatePayload = {
   shop: string;
@@ -55,44 +59,48 @@ export function createShopifyOAuthState(payload: ShopifyOAuthStatePayload) {
   return `${encoded}.${signature}`;
 }
 
+export type OAuthStateResult =
+  | { ok: true; payload: ShopifyOAuthStatePayload }
+  | { ok: false; reason: "expired" | "invalid" };
+
 export function verifyShopifyOAuthState(
   state: string | undefined,
   expectedShop: string
-): ShopifyOAuthStatePayload | null {
+): OAuthStateResult {
   if (!state) {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   const separatorIndex = state.lastIndexOf(".");
   if (separatorIndex === -1) {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   const encoded = state.slice(0, separatorIndex);
   const signature = state.slice(separatorIndex + 1);
   if (!encoded || !signature) {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   const expectedSignature = sign(encoded);
   if (!safeEqual(signature, expectedSignature)) {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   let body: SignedStateBody;
   try {
     body = JSON.parse(fromBase64Url(encoded)) as SignedStateBody;
   } catch {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   if (!body.shop || body.shop !== expectedShop) {
-    return null;
+    return { ok: false, reason: "invalid" };
   }
 
   if (!body.issuedAt || Date.now() - body.issuedAt > STATE_MAX_AGE_MS) {
-    return null;
+    return { ok: false, reason: "expired" };
   }
 
-  return { shop: body.shop, host: body.host, returnTo: body.returnTo };
+  return { ok: true, payload: { shop: body.shop, host: body.host, returnTo: body.returnTo } };
 }
