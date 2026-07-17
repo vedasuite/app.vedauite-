@@ -6,6 +6,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
 
+import { logEvent } from "./services/observabilityService";
 import { errorHandler } from "./middleware/errorHandler";
 import { attachRequestContext } from "./middleware/requestContext";
 import { router } from "./routes";
@@ -100,6 +101,19 @@ export function createApp() {
       credentials: true,
     })
   );
+
+  // Absolute-first middleware: log every inbound HTTP request before any
+  // business logic runs. This is the safety net for "zero trace" incidents —
+  // if a request reaches Node but is never processed (middleware crash, async
+  // error before logger), this entry still appears in Render's log stream.
+  app.use((req, _res, next) => {
+    logEvent("info", "http.request_received", {
+      method: req.method,
+      path: req.path,
+      ip: req.ip,
+    });
+    next();
+  });
 
   app.use(attachRequestContext);
   app.use(morgan(":method :url :status :response-time ms req_id=:request-id"));
@@ -249,9 +263,11 @@ export function createApp() {
         const reconnectUrl = new URL("/auth", env.shopifyAppUrl);
         reconnectUrl.searchParams.set("shop", shop);
         reconnectUrl.searchParams.set("returnTo", req.path);
-        if (typeof req.query.host === "string" && req.query.host) {
-          reconnectUrl.searchParams.set("host", req.query.host);
-        }
+        // Always include host so App Bridge has the parent-frame origin.
+        const existingHost = typeof req.query.host === "string" && req.query.host
+          ? req.query.host
+          : Buffer.from(`https://${shop}/admin`).toString("base64url");
+        reconnectUrl.searchParams.set("host", existingHost);
 
         return redirectTopLevel(res, reconnectUrl.toString(), shop);
       }

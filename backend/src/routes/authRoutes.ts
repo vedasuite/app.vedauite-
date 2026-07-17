@@ -8,6 +8,15 @@ import {
   verifyShopifyOAuthState,
 } from "../lib/shopifyOAuthState";
 import type { OAuthStateResult } from "../lib/shopifyOAuthState";
+
+// Construct the base64-encoded host value that Shopify expects as the ?host
+// query parameter in embedded app URLs.  App Bridge reads this to determine
+// the parent-frame origin it should target for postMessage — if it's absent,
+// App Bridge falls back to using the app URL itself, causing a cross-origin
+// postMessage failure visible in the browser console.
+function buildHostParam(shop: string): string {
+  return Buffer.from(`https://${shop}/admin`).toString("base64url");
+}
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
 import { logEvent } from "../services/observabilityService";
@@ -31,54 +40,6 @@ type OAuthAccessTokenResponse = {
 
 type TokenAcquisitionMode = "offline_expiring" | "offline_legacy";
 
-// Escaping an iframe with script (window.top.location = url) is blocked by
-// Chrome's (and other browsers') popup/redirect protections when it isn't
-// tied to a direct user click — this is stricter in Incognito and can leave
-// the merchant on a blank page with no way forward. A real <a target="_top">
-// click is never blocked by any browser, so it's the primary mechanism here,
-// not a hidden fallback. We still attempt an automatic redirect for the
-// common case where it isn't blocked, but the visible button is what
-// guarantees this page never dead-ends.
-function redirectTopLevel(res: Response, url: string, shop?: string) {
-  const safeUrl = JSON.stringify(url);
-  const escapeUrl = shop ? `https://${shop}/admin` : null;
-  return res
-    .status(200)
-    .type("html")
-    .send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Continue to VedaSuite</title>
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
-      .card { text-align: center; }
-      .btn { display: inline-block; margin-top: 16px; padding: 10px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; }
-      .escape { display: block; margin-top: 14px; color: #6d7175; font-size: 13px; text-decoration: underline; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <p>Continuing to VedaSuite...</p>
-      <a class="btn" id="continue-link" href="${url}" target="_top" rel="noopener">Continue</a>
-      ${escapeUrl ? `<a class="escape" href="${escapeUrl}" target="_top" rel="noopener">Return to Shopify admin instead</a>` : ""}
-    </div>
-    <script>
-      (function () {
-        var target = ${safeUrl};
-        try {
-          var destination = window.top && window.top !== window ? window.top : window;
-          destination.location.replace(target);
-        } catch (e) {
-          // Cross-origin top navigation was blocked — the visible button
-          // above (a real user click) always works as the fallback.
-        }
-      })();
-    </script>
-  </body>
-</html>`);
-}
 
 function normalizeReturnPath(returnTo?: string | null) {
   if (!returnTo || typeof returnTo !== "string") {
@@ -115,9 +76,12 @@ function buildEmbeddedReturnUrl(options: {
   const returnTo = normalizeReturnPath(options.returnTo);
   const url = new URL(returnTo, env.shopifyAppUrl);
   url.searchParams.set("shop", options.shop);
-  if (options.host) {
-    url.searchParams.set("host", options.host);
-  }
+  // Always include ?host so App Bridge can determine the Shopify Admin
+  // parent-frame origin for postMessage.  If the OAuth flow didn't carry a
+  // host value (e.g. install initiated from the App Store listing rather than
+  // from within the Shopify Admin), construct the canonical admin host from
+  // the shop domain — App Bridge accepts this as a valid fallback.
+  url.searchParams.set("host", options.host ?? buildHostParam(options.shop));
   url.searchParams.set("embedded", "1");
   return url.toString();
 }
@@ -292,7 +256,13 @@ function startOAuth(req: Request, res: Response) {
     stateIssuedAt: new Date().toISOString(),
   });
 
-  return redirectTopLevel(res, buildInstallUrl(normalizedShop, state), normalizedShop);
+  // /auth/install and /auth/reconnect are always top-level browser navigations
+  // (Shopify or the merchant navigates their browser directly to this URL —
+  // it is never loaded inside an iframe).  A plain 302 is instant and cannot
+  // fail, unlike the JS window.top.location approach which relies on script
+  // execution and silently falls back to requiring a manual click when blocked
+  // by cross-origin restrictions in an iframe context.
+  return res.redirect(302, buildInstallUrl(normalizedShop, state));
 }
 
 authRouter.get("/install", (req, res) => startOAuth(req, res));
@@ -349,9 +319,8 @@ authRouter.get("/callback", async (req, res) => {
       // State token expired (TTL exceeded). This is not a security issue — the
       // HMAC on the callback was already verified above, so we know the request
       // is genuine. Restart OAuth from the top with a fresh state token so the
-      // merchant/reviewer never hits a dead-end. A human reviewer who takes
-      // longer than the TTL window between clicking install and approving on
-      // Shopify's consent screen would otherwise see a raw 400.
+      // merchant/reviewer never hits a dead-end. The callback is a top-level
+      // navigation, so a plain 302 is always safe here.
       logEvent("info", "shopify.auth.callback_state_expired_restarting", {
         shop,
         route: "auth.callback",
@@ -361,7 +330,7 @@ authRouter.get("/callback", async (req, res) => {
           ? req.query.host
           : null;
       const freshState = createShopifyOAuthState({ shop, host, returnTo: "/" });
-      return redirectTopLevel(res, buildInstallUrl(shop, freshState), shop);
+      return res.redirect(302, buildInstallUrl(shop, freshState));
     }
     return res.status(400).send("OAuth state validation failed.");
   }
@@ -425,9 +394,15 @@ authRouter.get("/callback", async (req, res) => {
       hasRefreshToken: !!tokenData.refresh_token,
       tokenAcquisitionMode,
       accessTokenExpiresAt: accessTokenExpiresAt?.toISOString() ?? null,
+      returnUrl,
     });
 
-    return redirectTopLevel(res, returnUrl, shop);
+    // The callback is a top-level browser navigation (Shopify redirects the
+    // merchant's browser directly here after OAuth approval — it is never in
+    // an iframe).  A plain 302 sends the merchant to the embedded app URL
+    // instantly and reliably, with no HTML page, no JavaScript, and no
+    // possibility of requiring a manual click.
+    return res.redirect(302, returnUrl);
   } catch (error) {
     await prisma.store.upsert({
       where: { shop },
