@@ -48,7 +48,7 @@ export type OnboardingState = {
     stateLabel: string;
   };
   stateSummary: {
-    tone: "success" | "info" | "attention" | "critical";
+    tone: "success" | "info" | "critical";
     title: string;
     description: string;
     ctaLabel: string;

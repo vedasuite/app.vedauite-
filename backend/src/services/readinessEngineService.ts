@@ -248,7 +248,7 @@ function buildSetupSummary(input: {
     : !input.sync.ready
     ? "Store insights are being prepared"
     : !input.billing.ready
-    ? "Billing still needs confirmation"
+    ? "Select a plan to activate your features"
     : !minimumComplete
     ? "Complete setup to begin receiving insights"
     : allCoreModulesReady

@@ -390,15 +390,27 @@ export function OnboardingPage() {
               const isConnectionIssue = /reconnect|session|reauthoriz|expired/i.test(
                 actionError
               );
+              // Billing/plan messages are guided next steps, not errors —
+              // use info tone so they don't read as something broken.
+              const isBillingStep = /billing|plan|subscri/i.test(actionError);
+              const bannerTone = isConnectionIssue ? "critical" : isBillingStep ? "info" : "warning";
+              const bannerTitle = isConnectionIssue
+                ? "Shopify connection needs attention"
+                : isBillingStep
+                ? "Select a plan to continue"
+                : "Step could not be completed";
               return (
-                <Banner
-                  title={isConnectionIssue ? "Shopify connection needs attention" : "Setup action needs attention"}
-                  tone={isConnectionIssue ? "critical" : "warning"}
-                >
+                <Banner title={bannerTitle} tone={bannerTone}>
                   <BlockStack gap="200">
                     <p>{actionError}</p>
                     <InlineStack gap="300">
-                      <Button onClick={() => void refresh()}>Try again</Button>
+                      {isBillingStep ? (
+                        <Button variant="primary" onClick={() => navigateEmbedded("/app/billing")}>
+                          Go to billing
+                        </Button>
+                      ) : (
+                        <Button onClick={() => void refresh()}>Try again</Button>
+                      )}
                       {isConnectionIssue && reauthorizeUrl ? (
                         <Button variant="primary" url={reauthorizeUrl} target="_top">
                           Reconnect Shopify
@@ -546,7 +558,7 @@ export function OnboardingPage() {
                             </List>
                           </BlockStack>
                         </InlineStack>
-                        <Badge tone={module.available ? "success" : "attention"}>
+                        <Badge tone={module.available ? "success" : "info"}>
                           {module.available ? "Included" : "Locked"}
                         </Badge>
                       </InlineStack>
@@ -632,7 +644,7 @@ export function OnboardingPage() {
                   {onboarding.dataReadiness.syncReason}
                 </Text>
                 {onboarding.limitedDataReason ? (
-                  <Banner title="Limited insights" tone="attention">
+                  <Banner title="Limited insights" tone="info">
                     <p>{onboarding.limitedDataReason}</p>
                   </Banner>
                 ) : null}
@@ -653,7 +665,7 @@ export function OnboardingPage() {
                   <Text as="h2" variant="headingLg">
                     Billing summary
                   </Text>
-                  <Badge tone={onboarding.planSummary.billingActive ? "success" : "attention"}>
+                  <Badge tone={onboarding.planSummary.billingActive ? "success" : "info"}>
                     {onboarding.planSummary.planName}
                   </Badge>
                 </InlineStack>
@@ -674,6 +686,12 @@ export function OnboardingPage() {
                       : ["No current blockers"]).join(", ")}
                   </List.Item>
                 </List>
+                <Banner title="Testing on a development store?" tone="info">
+                  <p>
+                    Development stores create test charges only — no real billing applies.
+                    Select any plan to activate full feature access and complete setup.
+                  </p>
+                </Banner>
                 <Button onClick={() => navigateEmbedded("/app/billing")}>
                   Go to billing
                 </Button>

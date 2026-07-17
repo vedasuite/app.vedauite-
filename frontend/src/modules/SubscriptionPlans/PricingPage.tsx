@@ -547,7 +547,7 @@ export function PricingPage() {
         (management.pendingIntent.status === "CREATING" ||
           management.pendingIntent.status === "PENDING_APPROVAL") ? (
           <Layout.Section>
-            <Banner title="Awaiting Shopify approval" tone="warning">
+            <Banner title="Awaiting Shopify approval" tone="info">
               <BlockStack gap="200">
                 <p>
                   VedaSuite is still waiting for Shopify approval for{" "}

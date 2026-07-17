@@ -22,6 +22,7 @@ Latest approval hardening update: `2026-05-15T00:00:00+05:30`
 - Reviewer-risk “unfinished feature” wording was removed from live app surfaces, public routes, launch docs, and submission checklists.
 - Reviewer instructions now use real competitor domains such as `gymshark.com` and `allbirds.com`, and listing guidance is limited to verifiable claims.
 - Latest hardening verification passed: backend build, frontend production build, reviewer-risk wording scan, and targeted regressions for bootstrap, billing, competitor, pricing, and readiness.
+- Competitor domain ingestion was hardened so pasted URLs normalize cleanly and public competitor catalog products can be detected even when the merchant catalog does not share exact product handles.
 
 ## Local code verification
 

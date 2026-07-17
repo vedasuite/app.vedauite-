@@ -15,6 +15,13 @@ Latest approval hardening timestamp: `2026-05-15T00:00:00+05:30`
 - Limited review/listing guidance to claims reviewers can verify quickly: competitor pricing analysis, refund risk analysis, customer risk insights, and AI-generated pricing suggestions.
 - Verification passed: backend build, frontend production build, reviewer-risk wording scan, and targeted regressions for bootstrap, billing capabilities, competitor service, pricing/profit overview, and readiness engine.
 
+## 2026-05-15 competitor domain ingestion hardening
+
+- Fixed competitor domain entry so pasted URLs, newline-separated domains, and domains with paths normalize to a clean host such as `gymshark.com`.
+- Competitor analysis no longer relies only on exact `/products/<shopify-handle>` matches. It now also reads public competitor catalog data when available and captures competitor products/prices as market references when direct product matches are not found.
+- Competitor rows now clearly identify catalog observations and link to the competitor product instead of implying a Shopify product link when the product is not in the merchant catalog.
+- Verification passed: backend build, frontend production build, competitor service regression tests, pricing/profit overview test, and readiness engine test.
+
 ## 2026-05-13 final merchant experience polish
 
 This pass is intentionally limited to wording, merchant-facing copy, empty states, dashboard simplification, and Shopify approval polish. It does not rewrite backend architecture, billing logic, database models, or entitlement systems.

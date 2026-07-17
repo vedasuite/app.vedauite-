@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   filterCompetitorSourceProducts,
   deriveCompetitorPrimaryState,
+  normalizeCompetitorDomainInput,
 } = require("../dist/services/competitorService.js");
 
 test("filterCompetitorSourceProducts excludes archived, draft, gift-card-like, and price-missing products", () => {
@@ -21,6 +22,13 @@ test("filterCompetitorSourceProducts excludes archived, draft, gift-card-like, a
   assert.equal(result.excluded.draft, 1);
   assert.equal(result.excluded.giftCardLike, 1);
   assert.equal(result.excluded.missingPrice, 1);
+});
+
+test("normalizeCompetitorDomainInput accepts pasted URLs and rejects invalid domains", () => {
+  assert.equal(normalizeCompetitorDomainInput("https://www.gymshark.com/products/arrival-t-shirt"), "gymshark.com");
+  assert.equal(normalizeCompetitorDomainInput(" allbirds.com "), "allbirds.com");
+  assert.equal(normalizeCompetitorDomainInput("https://invalid-domain"), null);
+  assert.equal(normalizeCompetitorDomainInput("not a domain"), null);
 });
 
 test("deriveCompetitorPrimaryState returns setup incomplete when no domains are configured", () => {

@@ -383,7 +383,7 @@ export async function getOnboardingState(shopDomain: string) {
           ctaLabel: readiness.setup.nextAction.label,
         }
       : {
-          tone: "attention" as const,
+          tone: "info" as const,
           title: readiness.setup.summaryTitle,
           description: readiness.setup.summaryDescription,
           ctaLabel: readiness.setup.nextAction.label,

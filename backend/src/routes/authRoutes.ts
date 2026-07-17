@@ -82,7 +82,6 @@ function buildEmbeddedReturnUrl(options: {
   // from within the Shopify Admin), construct the canonical admin host from
   // the shop domain — App Bridge accepts this as a valid fallback.
   url.searchParams.set("host", options.host ?? buildHostParam(options.shop));
-  url.searchParams.set("embedded", "1");
   return url.toString();
 }
 
