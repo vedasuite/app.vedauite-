@@ -332,12 +332,12 @@ export function AppFrame({ children }: Props) {
             </Banner>
           ) : null}
           {!bootstrapGate && billingState?.lifecycle === "pending_approval" ? (
-            <Banner title={billingState.merchantTitle} tone="warning">
+            <Banner title={billingState.merchantTitle} tone="info">
               <p>{billingState.merchantDescription}</p>
             </Banner>
           ) : null}
           {!bootstrapGate && appState?.connection.status === "attention" ? (
-            <Banner title={appState.connection.title} tone="warning">
+            <Banner title={appState.connection.title} tone="info">
               <p>{appState.connection.description}</p>
             </Banner>
           ) : null}

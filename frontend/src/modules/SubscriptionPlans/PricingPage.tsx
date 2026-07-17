@@ -188,15 +188,20 @@ function starterLabel(moduleKey: StarterModule | null) {
     : "Not selected";
 }
 
-// Best-effort only — script-driven cross-origin iframe navigation is
-// blocked by browsers (especially Incognito) when it isn't a direct user
-// click. Callers must always also render a real <a target="_top"> button
-// as the guaranteed path; this just makes the common, unblocked case
-// instant instead of requiring an extra click.
+// App Bridge v3 navigate uses postMessage to the trusted Shopify Admin parent
+// frame — never blocked by Chrome's cross-origin iframe guard. Raw
+// window.top.location.replace() IS blocked in that context. Callers must
+// still render a real <a target="_top"> button as the guaranteed fallback
+// for non-embedded contexts.
 function attemptTopLevelRedirect(url: string) {
   try {
-    const destination = window.top && window.top !== window ? window.top : window;
-    destination.location.replace(url);
+    const shopify = (window as unknown as { shopify?: { navigate?: (u: string) => void } }).shopify;
+    if (shopify && typeof shopify.navigate === "function") {
+      shopify.navigate(url);
+      return;
+    }
+    // Not inside Shopify Admin — plain top-level redirect.
+    (window.top || window).location.replace(url);
   } catch {
     // Blocked — the visible button rendered by the caller is the fallback.
   }

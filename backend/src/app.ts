@@ -126,12 +126,11 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
-  // Escaping an iframe with script (window.top.location = url) is blocked by
-  // Chrome's (and other browsers') popup/redirect protections when it isn't
-  // tied to a direct user click — stricter in Incognito, can leave the
-  // merchant on a blank page. A real <a target="_top"> click is never
-  // blocked by any browser, so it's the primary mechanism, not a hidden
-  // fallback. The automatic redirect is still attempted for the common case.
+  // App Bridge v3 (CDN) communicates with the Shopify Admin parent frame via
+  // postMessage — it is never blocked by Chrome's cross-origin iframe
+  // navigation guard. window.top.location.replace() IS blocked in that
+  // context (Chrome shows "Redirect blocked" in the address bar). Using
+  // window.shopify.navigate() instead avoids this entirely.
   function redirectTopLevel(res: express.Response, url: string, shop?: string) {
     const safeUrl = JSON.stringify(url);
     const escapeUrl = shop ? `https://${shop}/admin` : null;
@@ -143,6 +142,8 @@ export function createApp() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="shopify-api-key" content="${env.shopifyApiKey}" />
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
     <title>Continue to VedaSuite</title>
     <style>
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
@@ -160,12 +161,17 @@ export function createApp() {
     <script>
       (function () {
         var target = ${safeUrl};
+        // App Bridge v3 navigate uses postMessage to the trusted Shopify Admin
+        // parent frame — not blocked by Chrome's cross-origin iframe guard.
+        if (window.shopify && typeof window.shopify.navigate === "function") {
+          window.shopify.navigate(target);
+          return;
+        }
+        // Not inside Shopify Admin (e.g. direct URL access) — plain redirect.
         try {
-          var destination = window.top && window.top !== window ? window.top : window;
-          destination.location.replace(target);
-        } catch (e) {
-          // Cross-origin top navigation was blocked — the visible button
-          // above (a real user click) always works as the fallback.
+          (window.top || window).location.replace(target);
+        } catch (_) {
+          // Blocked; the Continue button above always works as fallback.
         }
       })();
     </script>

@@ -302,6 +302,9 @@ export function OnboardingPage() {
       case "VIEW_FIRST_INSIGHT":
         await openFirstInsight();
         return;
+      case "GOTO_BILLING":
+        navigateEmbedded("/app/billing");
+        return;
       case "CONFIRM_PLAN":
         await handleConfirmPlan();
         return;

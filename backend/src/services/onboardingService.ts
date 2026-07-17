@@ -26,6 +26,7 @@ export type OnboardingActionKey =
   | "SYNC_LIVE_DATA"
   | "CHOOSE_MODULE"
   | "VIEW_FIRST_INSIGHT"
+  | "GOTO_BILLING"
   | "CONFIRM_PLAN"
   | "OPEN_DASHBOARD";
 
@@ -341,11 +342,17 @@ export async function getOnboardingState(shopDomain: string) {
           route: selectedModule ? moduleRoute(selectedModule) : "/app/onboarding",
         }
       : stage === "PLAN_CONFIRMATION"
-      ? {
-          key: "CONFIRM_PLAN" as const,
-          label: "Confirm Plan",
-          route: "/app/billing",
-        }
+      ? readiness.billing.ready
+        ? {
+            key: "CONFIRM_PLAN" as const,
+            label: "Confirm Plan",
+            route: "/app/onboarding",
+          }
+        : {
+            key: "GOTO_BILLING" as const,
+            label: "Go to billing to select a plan",
+            route: "/app/billing",
+          }
       : {
           key: "OPEN_DASHBOARD" as const,
           label: "Open Dashboard",
