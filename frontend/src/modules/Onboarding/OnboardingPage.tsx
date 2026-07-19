@@ -448,9 +448,6 @@ export function OnboardingPage() {
                 >
                   {primaryLabel}
                 </Button>
-                <Button onClick={() => navigateEmbedded("/app/billing")}>
-                  Go to billing
-                </Button>
               </InlineStack>
             </BlockStack>
           </Card>
