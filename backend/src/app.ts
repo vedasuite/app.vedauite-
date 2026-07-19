@@ -161,17 +161,40 @@ export function createApp() {
     <script>
       (function () {
         var target = ${safeUrl};
-        // App Bridge v3 navigate uses postMessage to the trusted Shopify Admin
-        // parent frame — not blocked by Chrome's cross-origin iframe guard.
-        if (window.shopify && typeof window.shopify.navigate === "function") {
-          window.shopify.navigate(target);
-          return;
+        var attempts = 0;
+
+        // App Bridge CDN defers its own initialization to DOMContentLoaded
+        // internally, so window.shopify is not set when an inline script fires
+        // immediately after body parse.  Poll until it is ready (up to 2 s),
+        // then call navigate() which uses postMessage to the parent Shopify
+        // Admin frame — that path is never blocked by Chrome's cross-origin
+        // iframe navigation guard.
+        function tryNavigate() {
+          if (window.shopify && typeof window.shopify.navigate === "function") {
+            window.shopify.navigate(target);
+            return;
+          }
+          if (attempts < 40) {
+            attempts++;
+            setTimeout(tryNavigate, 50);
+            return;
+          }
+          // App Bridge never became available.  Only attempt a programmatic
+          // redirect when we ARE the top frame — inside a cross-origin iframe
+          // window.top.location.replace() is blocked by Chrome and would show
+          // "Redirect blocked".  In that case the Continue button is the only
+          // option and we leave the UI as-is.
+          try {
+            if (window === window.top) {
+              window.location.replace(target);
+            }
+          } catch (_) {}
         }
-        // Not inside Shopify Admin (e.g. direct URL access) — plain redirect.
-        try {
-          (window.top || window).location.replace(target);
-        } catch (_) {
-          // Blocked; the Continue button above always works as fallback.
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", tryNavigate);
+        } else {
+          tryNavigate();
         }
       })();
     </script>

@@ -193,6 +193,11 @@ function starterLabel(moduleKey: StarterModule | null) {
 // window.top.location.replace() IS blocked in that context. Callers must
 // still render a real <a target="_top"> button as the guaranteed fallback
 // for non-embedded contexts.
+//
+// This function is called from user-gesture handlers (button clicks), so
+// DOMContentLoaded has long since fired and window.shopify is reliably set.
+// The window.top fallback is restricted to the top-frame case only to avoid
+// the "Redirect blocked" Chrome error inside Shopify's cross-origin iframe.
 function attemptTopLevelRedirect(url: string) {
   try {
     const shopify = (window as unknown as { shopify?: { navigate?: (u: string) => void } }).shopify;
@@ -200,8 +205,12 @@ function attemptTopLevelRedirect(url: string) {
       shopify.navigate(url);
       return;
     }
-    // Not inside Shopify Admin — plain top-level redirect.
-    (window.top || window).location.replace(url);
+    // Not inside Shopify Admin (App Bridge unavailable) — only redirect
+    // programmatically when we are the top-level frame. Inside a cross-origin
+    // iframe window.top.location is blocked by Chrome; the button is the fallback.
+    if (window === window.top) {
+      window.location.replace(url);
+    }
   } catch {
     // Blocked — the visible button rendered by the caller is the fallback.
   }
