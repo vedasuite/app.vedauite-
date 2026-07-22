@@ -124,6 +124,21 @@ async function handleAppUninstalled(req: any, res: any) {
       });
     }
 
+    // Cancel any pending billing intents so they don't surface as stale
+    // "awaiting approval" state on reinstall.
+    await tx.billingPlanIntent.updateMany({
+      where: {
+        storeId: store.id,
+        status: { in: ["CREATING", "PENDING_APPROVAL"] },
+      },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        errorCode: "APP_UNINSTALLED",
+        errorMessage: "Cancelled because the app was uninstalled.",
+      },
+    });
+
     await tx.store.update({
       where: { id: store.id },
       data: {
@@ -140,6 +155,11 @@ async function handleAppUninstalled(req: any, res: any) {
         lastConnectionError: "Shopify app uninstall webhook received.",
         authErrorCode: "UNINSTALLED",
         authErrorMessage: "Shopify app uninstall webhook received.",
+        onboardingCompletedAt: null,
+        onboardingDismissedAt: null,
+        onboardingPlanConfirmedAt: null,
+        onboardingFirstInsightViewedAt: null,
+        onboardingSelectedModule: null,
       },
     });
   });

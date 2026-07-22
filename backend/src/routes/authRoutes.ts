@@ -151,7 +151,7 @@ async function persistInstallationRecord(params: {
     existingStore?.trialEndsAt ??
     new Date(params.installedAt.getTime() + env.billing.trialDays * 24 * 60 * 60 * 1000);
 
-  return prisma.store.upsert({
+  const store = await prisma.store.upsert({
     where: { shop: params.shop },
     create: {
       shop: params.shop,
@@ -196,6 +196,25 @@ async function persistInstallationRecord(params: {
       trialEndsAt,
     },
   });
+
+  // Cancel any pending billing intents that survived from before this install.
+  // This handles the race where the uninstall webhook is slow/delayed and a
+  // merchant reinstalls before it processes — without this, the stale
+  // PENDING_APPROVAL intent would surface on the Billing page as if still active.
+  await prisma.billingPlanIntent.updateMany({
+    where: {
+      storeId: store.id,
+      status: { in: ["CREATING", "PENDING_APPROVAL"] },
+    },
+    data: {
+      status: "CANCELLED",
+      cancelledAt: new Date(),
+      errorCode: "APP_REINSTALLED",
+      errorMessage: "Cancelled because the app was reinstalled with a fresh OAuth token.",
+    },
+  });
+
+  return store;
 }
 
 // Fire-and-forget: webhook registration and the initial sync both call out

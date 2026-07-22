@@ -269,7 +269,42 @@ export async function getBillingManagementState(
     resolveBillingState(shopDomain),
   ]);
 
-  const latestIntent = await getLatestRelevantIntent(store.id);
+  let latestIntent = await getLatestRelevantIntent(store.id);
+
+  // Live validation: if the latest intent is still pending, check Shopify's
+  // current active subscription. If Shopify has no matching subscription (e.g.
+  // after an uninstall/reinstall where the webhook was slow, or any other path
+  // that leaves local state stale), cancel the intent so the Billing page
+  // shows a clean default state instead of a phantom "awaiting approval" banner.
+  if (
+    latestIntent &&
+    (latestIntent.status === "CREATING" || latestIntent.status === "PENDING_APPROVAL")
+  ) {
+    const activeShopifySubscription = await getActiveAppSubscription(shopDomain).catch(
+      () => null
+    );
+    const chargeMatchesIntent =
+      latestIntent.shopifyChargeId &&
+      activeShopifySubscription?.id === latestIntent.shopifyChargeId;
+    if (!activeShopifySubscription || !chargeMatchesIntent) {
+      latestIntent = await prisma.billingPlanIntent.update({
+        where: { id: latestIntent.id },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          errorCode: "SHOPIFY_NO_ACTIVE_SUBSCRIPTION",
+          errorMessage:
+            "Cancelled because Shopify has no matching active subscription for this intent.",
+        },
+      });
+      logEvent("info", "billing.stale_intent_cancelled_on_load", {
+        shop: shopDomain,
+        intentId: latestIntent.id,
+        hadShopifySubscription: !!activeShopifySubscription,
+        chargeMatchesIntent: !!chargeMatchesIntent,
+      });
+    }
+  }
 
   return {
     subscription,
