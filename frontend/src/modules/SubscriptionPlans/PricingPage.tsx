@@ -268,6 +268,7 @@ export function PricingPage() {
     billingFlowState,
     billingError,
     startBillingRedirect,
+    cancelBillingRedirect,
     retryBillingConfirmation,
   } = useSubscriptionPlan();
   const billingBusy =
@@ -511,7 +512,10 @@ export function PricingPage() {
                   >
                     Continue to Shopify
                   </Button>
-                  <Button onClick={() => setPendingConfirmationUrl(null)}>
+                  <Button onClick={() => {
+                    setPendingConfirmationUrl(null);
+                    cancelBillingRedirect();
+                  }}>
                     Not now
                   </Button>
                 </InlineStack>

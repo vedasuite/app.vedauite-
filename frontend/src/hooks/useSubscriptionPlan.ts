@@ -41,6 +41,7 @@ export function useSubscriptionPlan() {
       billingMessage: null,
       billingError: null,
       startBillingRedirect: () => undefined,
+      cancelBillingRedirect: () => undefined,
       retryBillingConfirmation: async () => undefined,
       dismissBillingMessage: () => undefined,
       clearBillingError: () => undefined,

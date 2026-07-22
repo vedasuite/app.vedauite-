@@ -301,10 +301,15 @@ export function AppFrame({ children }: Props) {
     }
   }, [bootstrap, installState?.description, installState?.title, refresh]);
 
+  // Only gate the full app shell when the user has RETURNED from Shopify
+  // billing and we are actively confirming the subscription. REDIRECTING_TO_SHOPIFY
+  // must NOT gate here — at that point the user is still on the billing page and
+  // the PricingPage already renders its own "Continue to Shopify" banner. Gating
+  // in REDIRECTING_TO_SHOPIFY disables ALL navigation and makes the retry/cancel
+  // buttons non-functional because billingFlowGate replaces children entirely.
   const billingFlowGate =
     billingFlowState === "RETURNED_FROM_SHOPIFY" ||
-    billingFlowState === "CONFIRMING_BACKEND_STATE" ||
-    billingFlowState === "REDIRECTING_TO_SHOPIFY" ? (
+    billingFlowState === "CONFIRMING_BACKEND_STATE" ? (
       <BillingRedirectState
         state={billingFlowState}
         onRetry={() => {

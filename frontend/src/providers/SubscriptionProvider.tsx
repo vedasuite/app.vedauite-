@@ -38,6 +38,7 @@ type SubscriptionContextValue = {
   billingMessage: string | null;
   billingError: string | null;
   startBillingRedirect: () => void;
+  cancelBillingRedirect: () => void;
   retryBillingConfirmation: () => Promise<void>;
   dismissBillingMessage: () => void;
   clearBillingError: () => void;
@@ -256,6 +257,12 @@ export function SubscriptionProvider({ children }: Props) {
     setBillingMessage(null);
   }, []);
 
+  const cancelBillingRedirect = useCallback(() => {
+    setBillingFlowState((current) =>
+      current === "REDIRECTING_TO_SHOPIFY" ? "IDLE" : current
+    );
+  }, []);
+
   const retryBillingConfirmation = useCallback(async () => {
     await confirmBillingReturn();
   }, [confirmBillingReturn]);
@@ -357,6 +364,7 @@ export function SubscriptionProvider({ children }: Props) {
       billingMessage,
       billingError,
       startBillingRedirect,
+      cancelBillingRedirect,
       retryBillingConfirmation,
       dismissBillingMessage,
       clearBillingError,
@@ -366,6 +374,7 @@ export function SubscriptionProvider({ children }: Props) {
       billingState,
       billingFlowState,
       billingMessage,
+      cancelBillingRedirect,
       clearBillingError,
       dismissBillingMessage,
       entitlements,
