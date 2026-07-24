@@ -109,6 +109,19 @@ async function handleAppUninstalled(req: any, res: any) {
     return res.status(200).send("ok");
   }
 
+  // If the store already has an access token, a reinstall completed before this
+  // webhook was processed. Shopify can deliver APP_UNINSTALLED webhooks with
+  // significant delay — acknowledging and ignoring prevents the delayed webhook
+  // from overwriting the fresh installation record and triggering the reconnect
+  // banner on a store that is already correctly installed.
+  if (store.accessToken) {
+    logEvent("info", "webhook.app_uninstalled.skipped_reinstalled", {
+      shop: envelope.shopDomain,
+      reauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
+    });
+    return res.status(200).send("ok");
+  }
+
   await prisma.$transaction(async (tx) => {
     if (store.subscription) {
       await tx.storeSubscription.update({
