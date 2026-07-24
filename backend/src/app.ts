@@ -18,7 +18,6 @@ import {
   setShopifySessionCookie,
 } from "./lib/shopifySessionCookie";
 import {
-  getConnectionHealth,
   normalizeShopDomain,
 } from "./services/shopifyConnectionService";
 import { shopifyGraphQL } from "./services/shopifyAdminService";
@@ -126,82 +125,6 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
-  // App Bridge v3 (CDN) communicates with the Shopify Admin parent frame via
-  // postMessage — it is never blocked by Chrome's cross-origin iframe
-  // navigation guard. window.top.location.replace() IS blocked in that
-  // context (Chrome shows "Redirect blocked" in the address bar). Using
-  // window.shopify.navigate() instead avoids this entirely.
-  function redirectTopLevel(res: express.Response, url: string, shop?: string) {
-    const safeUrl = JSON.stringify(url);
-    const escapeUrl = shop ? `https://${shop}/admin` : null;
-    return res
-      .status(200)
-      .type("html")
-      .send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="shopify-api-key" content="${env.shopifyApiKey}" />
-    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-    <title>Continue to VedaSuite</title>
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f6f6f7; }
-      .card { text-align: center; }
-      .btn { display: inline-block; margin-top: 16px; padding: 10px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 600; }
-      .escape { display: block; margin-top: 14px; color: #6d7175; font-size: 13px; text-decoration: underline; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <p>Continuing to VedaSuite...</p>
-      <a class="btn" id="continue-link" href="${url}" target="_top" rel="noopener">Continue</a>
-      ${escapeUrl ? `<a class="escape" href="${escapeUrl}" target="_top" rel="noopener">Return to Shopify admin instead</a>` : ""}
-    </div>
-    <script>
-      (function () {
-        var target = ${safeUrl};
-        var attempts = 0;
-
-        // App Bridge CDN defers its own initialization to DOMContentLoaded
-        // internally, so window.shopify is not set when an inline script fires
-        // immediately after body parse.  Poll until it is ready (up to 2 s),
-        // then call navigate() which uses postMessage to the parent Shopify
-        // Admin frame — that path is never blocked by Chrome's cross-origin
-        // iframe navigation guard.
-        function tryNavigate() {
-          if (window.shopify && typeof window.shopify.navigate === "function") {
-            window.shopify.navigate(target);
-            return;
-          }
-          if (attempts < 40) {
-            attempts++;
-            setTimeout(tryNavigate, 50);
-            return;
-          }
-          // App Bridge never became available.  Only attempt a programmatic
-          // redirect when we ARE the top frame — inside a cross-origin iframe
-          // window.top.location.replace() is blocked by Chrome and would show
-          // "Redirect blocked".  In that case the Continue button is the only
-          // option and we leave the UI as-is.
-          try {
-            if (window === window.top) {
-              window.location.replace(target);
-            }
-          } catch (_) {}
-        }
-
-        if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", tryNavigate);
-        } else {
-          tryNavigate();
-        }
-      })();
-    </script>
-  </body>
-</html>`);
-  }
-
   app.use(
     express.static(frontendDistPath, {
       index: false,
@@ -282,30 +205,12 @@ export function createApp() {
         (req.query.shop as string | undefined) ?? readShopifySessionCookie(req)
       );
 
-      if (!shop) {
-        return res.sendFile(frontendIndexPath);
+      if (shop) {
+        if (env.enableGuidedBootstrap) {
+          await ensureStoreBootstrapped(shop);
+        }
+        setShopifySessionCookie(res, shop);
       }
-
-      const connectionHealth = await getConnectionHealth(shop, { probeApi: false });
-
-      if (!connectionHealth.installationFound || !connectionHealth.hasOfflineToken) {
-        const reconnectUrl = new URL("/auth", env.shopifyAppUrl);
-        reconnectUrl.searchParams.set("shop", shop);
-        reconnectUrl.searchParams.set("returnTo", req.path);
-        // Always include host so App Bridge has the parent-frame origin.
-        const existingHost = typeof req.query.host === "string" && req.query.host
-          ? req.query.host
-          : Buffer.from(`https://${shop}/admin`).toString("base64url");
-        reconnectUrl.searchParams.set("host", existingHost);
-
-        return redirectTopLevel(res, reconnectUrl.toString(), shop);
-      }
-
-      if (env.enableGuidedBootstrap) {
-        await ensureStoreBootstrapped(shop);
-      }
-
-      setShopifySessionCookie(res, shop);
 
       return res.sendFile(frontendIndexPath);
     } catch (err) {
