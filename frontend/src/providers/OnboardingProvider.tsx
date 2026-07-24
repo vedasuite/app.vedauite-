@@ -58,6 +58,7 @@ export type OnboardingState = {
     title: string;
     route: string;
     summary: string;
+    planLabel: string;
     benefits: string[];
     available: boolean;
     lockReason: string | null;

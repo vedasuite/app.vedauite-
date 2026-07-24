@@ -167,7 +167,8 @@ export async function getOnboardingState(shopDomain: string) {
       key: "fraud" as const,
       title: "Fraud Intelligence",
       route: moduleRoute("fraud"),
-      summary: "Detect refund abuse, flag risky customers, and reduce chargeback exposure.",
+      summary: "Flags risky customers, detects refund abuse, and surfaces chargeback-risk orders.",
+      planLabel: "Starter · Growth · Pro",
       benefits: [
         "Detect refund abuse",
         "Flag risky customers",
@@ -176,13 +177,14 @@ export async function getOnboardingState(shopDomain: string) {
       available: subscription.enabledModules.fraud,
       lockReason: subscription.enabledModules.fraud
         ? null
-        : "Upgrade your plan to unlock Fraud Intelligence.",
+        : "Included in Starter plan (choose Fraud Intelligence as your starter feature), Growth, and Pro. Go to Billing to choose a plan.",
     },
     {
       key: "competitor" as const,
       title: "Competitor Intelligence",
       route: moduleRoute("competitor"),
-      summary: "Track competitor pricing, monitor promotions, and detect ad activity.",
+      summary: "Tracks competitor prices, monitors promotions, and surfaces ad activity on your product handles.",
+      planLabel: "Growth · Pro",
       benefits: [
         "Track competitor pricing",
         "Monitor promotions",
@@ -191,13 +193,14 @@ export async function getOnboardingState(shopDomain: string) {
       available: subscription.enabledModules.competitor,
       lockReason: subscription.enabledModules.competitor
         ? null
-        : "Upgrade your plan to unlock Competitor Intelligence.",
+        : "Included in Growth and Pro plans. Go to Billing to choose a plan.",
     },
     {
       key: "pricing" as const,
       title: "AI Pricing Engine",
       route: moduleRoute("pricing"),
-      summary: "Suggest optimal pricing, balance margin versus demand, and improve conversion.",
+      summary: "Recommends optimal prices for your products, balancing margin and demand signals.",
+      planLabel: "Growth · Pro",
       benefits: [
         "Suggest optimal pricing",
         "Balance margin vs demand",
@@ -206,7 +209,7 @@ export async function getOnboardingState(shopDomain: string) {
       available: subscription.enabledModules.pricing,
       lockReason: subscription.enabledModules.pricing
         ? null
-        : "Upgrade to Growth or Pro to unlock AI Pricing Engine.",
+        : "Included in Growth and Pro plans. Go to Billing to choose a plan.",
     },
   ];
 
@@ -252,41 +255,44 @@ export async function getOnboardingState(shopDomain: string) {
     },
     {
       key: "MODULE_SELECTION",
-      label: "Step 2: Choose Module",
+      label: "Step 2: Pick a feature to start with",
       complete: moduleSelectionComplete,
       description:
-        "Pick one module to start with so the first guided workflow is clear and focused.",
+        "Choose which VedaSuite feature to open first: Fraud Intelligence, Competitor Intelligence, or AI Pricing Engine.",
       helper:
         !readiness.initialSync.ready
-          ? "Finish syncing Shopify data before choosing the first workflow."
+          ? "Finish syncing Shopify data first, then pick a feature below."
           : !selectedModule
-          ? "Choose any module to start with — you can pick a plan afterward."
+          ? "Pick any feature to start with — you can switch later from the dashboard."
           : selectedModuleAvailable && selectedModuleReadiness?.ready
-          ? `${moduleTitle(selectedModule)} is selected and ready for the first guided review.`
+          ? `${moduleTitle(selectedModule)} is selected and ready to open.`
           : selectedModuleAvailable && selectedModuleReadiness
           ? `${moduleTitle(selectedModule)} is selected, but ${selectedModuleReadiness.description.toLowerCase()}`
-          : `${moduleTitle(selectedModule)} is selected. Choose a plan on Billing to unlock its real data.`,
-      ctaLabel: selectedModule ? "Module selected" : "Choose Module",
+          : `${moduleTitle(selectedModule)} is selected. It is included in your plan once you choose one on the Billing page.`,
+      ctaLabel: selectedModule ? `${moduleTitle(selectedModule)} selected` : "Pick a feature",
     },
     {
       key: "FIRST_INSIGHT_VIEW",
-      label: "Step 3: View First Insight",
+      label: selectedModule
+        ? `Step 3: Open ${moduleTitle(selectedModule)}`
+        : "Step 3: Open your first feature",
       complete: firstInsightViewedComplete,
-      description:
-        "Open the selected module and see what it offers before moving into the dashboard.",
+      description: selectedModule
+        ? `Open ${moduleTitle(selectedModule)} and see what it offers before moving to the dashboard.`
+        : "Open the feature you selected and take a look at what it offers.",
       helper:
         !moduleSelectionComplete
-          ? "Select a starting module first."
+          ? "Pick a feature to start with first (Step 2 above)."
           : store.onboardingFirstInsightViewedAt
-          ? "First insight viewed."
+          ? `${selectedModule ? moduleTitle(selectedModule) : "Feature"} opened successfully.`
           : !selectedModuleAvailable
-          ? `Open ${moduleTitle(selectedModule!)} to see a preview — choose a plan on Billing to unlock its real data.`
+          ? `You can open ${moduleTitle(selectedModule!)} now to see a preview. To unlock its full data, choose a plan on the Billing page.`
           : selectedModuleReadiness && !selectedModuleReadiness.ready
           ? selectedModuleReadiness.description
           : !hasAnyProcessedData
-          ? "VedaSuite is still turning synced Shopify data into dashboard-ready outputs."
-          : "Review the first insight in the selected module.",
-      ctaLabel: "View First Insight",
+          ? "VedaSuite is still processing synced Shopify data — this takes a minute."
+          : `Open ${selectedModule ? moduleTitle(selectedModule) : "your chosen feature"} to see the first insight.`,
+      ctaLabel: selectedModule ? `Open ${moduleTitle(selectedModule)}` : "Open first feature",
     },
     {
       key: "PLAN_CONFIRMATION",
@@ -332,13 +338,13 @@ export async function getOnboardingState(shopDomain: string) {
       : stage === "MODULE_SELECTION"
       ? {
           key: "CHOOSE_MODULE" as const,
-          label: "Choose Module",
+          label: "Pick a feature to start with",
           route: "/app/onboarding",
         }
       : stage === "FIRST_INSIGHT_VIEW"
       ? {
           key: "VIEW_FIRST_INSIGHT" as const,
-          label: "Open First Module",
+          label: selectedModule ? `Open ${moduleTitle(selectedModule)}` : "Open first feature",
           route: selectedModule ? moduleRoute(selectedModule) : "/app/onboarding",
         }
       : stage === "PLAN_CONFIRMATION"

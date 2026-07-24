@@ -328,11 +328,18 @@ export function OnboardingPage() {
     [onboarding, pendingModule]
   );
 
+  const featureName =
+    pendingModule === "fraud"
+      ? "Fraud Intelligence"
+      : pendingModule === "competitor"
+      ? "Competitor Intelligence"
+      : "AI Pricing Engine";
+
   const primaryLabel =
     onboarding?.canAccessDashboard
       ? "Open dashboard"
       : onboarding?.primaryAction.key === "CHOOSE_MODULE"
-      ? "Open selected workflow"
+      ? `Start with ${featureName}`
       : onboarding?.primaryAction.label ?? "Start setup";
 
   const runPrimaryAction = async () => {
@@ -467,15 +474,15 @@ export function OnboardingPage() {
                   Setup progress
                 </Text>
                 <Badge tone="info">
-                  {`${onboarding.progress.percent}% complete`}
+                  {onboarding.canAccessDashboard
+                    ? "Complete"
+                    : `Step ${onboarding.progress.completedSteps + 1} of ${onboarding.progress.totalSteps}`}
                 </Badge>
               </InlineStack>
               <Text as="p" tone="subdued">
-                Current step:{" "}
-                {
-                  onboarding.steps.find((step) => step.active)?.label ??
-                  (onboarding.canAccessDashboard ? "Setup complete" : "Continue setup")
-                }
+                {onboarding.canAccessDashboard
+                  ? "All steps done — open the dashboard to get started."
+                  : onboarding.steps.find((step) => step.active)?.label ?? "Continue setup"}
               </Text>
               <ProgressBar progress={onboarding.progress.percent} size="small" />
               <BlockStack gap="250">
@@ -533,10 +540,10 @@ export function OnboardingPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  What VedaSuite helps with
+                  What each feature does
                 </Text>
                 <Text as="p" tone="subdued">
-                  Each workflow has its own page. This summary helps you decide where to start first.
+                  Three features, each on its own page. Pick one to open first.
                 </Text>
                 <BlockStack gap="250">
                   {onboarding.moduleOverview.map((module) => (
@@ -551,15 +558,13 @@ export function OnboardingPage() {
                             <Text as="p" tone="subdued">
                               {module.summary}
                             </Text>
-                            <List type="bullet">
-                              {module.benefits.map((benefit) => (
-                                <List.Item key={benefit}>{benefit}</List.Item>
-                              ))}
-                            </List>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Plans: {module.planLabel}
+                            </Text>
                           </BlockStack>
                         </InlineStack>
                         <Badge tone={module.available ? "success" : "info"}>
-                          {module.available ? "Included" : "Locked"}
+                          {module.available ? "Included in your plan" : "Requires plan upgrade"}
                         </Badge>
                       </InlineStack>
                     </div>
@@ -572,10 +577,10 @@ export function OnboardingPage() {
               <div id="module-selection" />
               <BlockStack gap="300">
                 <Text as="h2" variant="headingLg">
-                  Choose your starting workflow
+                  Pick a feature to start with
                 </Text>
                 <Text as="p" tone="subdued">
-                  Pick one workflow to review first. This keeps the first experience focused.
+                  Choose one feature to open first. You can use all features later — this just sets your starting point.
                 </Text>
                 <BlockStack gap="200">
                   {onboarding.moduleOverview.map((module) => (
@@ -583,11 +588,11 @@ export function OnboardingPage() {
                       key={module.key}
                       id={`module-${module.key}`}
                       name="starting-module"
-                      label={module.title}
+                      label={`${module.title} — ${module.planLabel}`}
                       helpText={
                         module.available
                           ? module.summary
-                          : module.lockReason ?? "This workflow is unavailable on the current plan."
+                          : module.lockReason ?? "Not included in the current plan. Go to Billing to upgrade."
                       }
                       checked={pendingModule === module.key}
                       disabled={!module.available}
@@ -596,8 +601,8 @@ export function OnboardingPage() {
                   ))}
                 </BlockStack>
                 {selectedModuleDetails ? (
-                  <Banner title="Selected starting workflow" tone="info">
-                    <p>{selectedModuleDetails.title} will be the first workflow VedaSuite opens after setup.</p>
+                  <Banner title={`Starting with ${selectedModuleDetails.title}`} tone="info">
+                    <p>VedaSuite will open {selectedModuleDetails.title} after setup completes. You can switch features any time from the dashboard.</p>
                   </Banner>
                 ) : null}
               </BlockStack>
