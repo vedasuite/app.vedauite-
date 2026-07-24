@@ -324,6 +324,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         logBootstrap("installation.fetch.requires_reconnect", {
           shop,
           installStatus: nextAppState.install.status,
+          reconnectUrl: nextAppState.install.reauthorizeUrl ?? "(none)",
         });
         setStatus("error");
         setError(nextAppState.install.description);

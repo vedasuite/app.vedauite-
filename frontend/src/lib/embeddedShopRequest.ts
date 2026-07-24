@@ -147,15 +147,23 @@ function isRetriableError(error: unknown) {
 }
 
 async function getShopifySessionToken(): Promise<string | null> {
+  const t0 = Date.now();
   try {
     const shopify = (window as unknown as { shopify?: { idToken?: () => Promise<string> } }).shopify;
     if (typeof shopify?.idToken === "function") {
-      return await shopify.idToken();
+      const token = await shopify.idToken();
+      // eslint-disable-next-line no-console
+      console.info("[vedasuite.auth] session_token_acquired", { ms: Date.now() - t0, tokenLength: token.length });
+      return token;
     }
-  } catch {
+    // eslint-disable-next-line no-console
+    console.warn("[vedasuite.auth] shopify.idToken_unavailable — App Bridge not ready yet", { ms: Date.now() - t0 });
+  } catch (err) {
     // App Bridge not ready — return null so the request proceeds without
     // a Bearer header. The backend returns 401, which propagates as an auth
     // error and the user is shown a reconnect prompt.
+    // eslint-disable-next-line no-console
+    console.warn("[vedasuite.auth] shopify.idToken_threw", { ms: Date.now() - t0, error: err instanceof Error ? err.message : String(err) });
   }
   return null;
 }
@@ -197,6 +205,14 @@ export async function embeddedShopRequest<T = unknown>(
           responseResult.response.headers.get(
             "x-shopify-retry-invalid-session-request"
           ) === "1";
+        // eslint-disable-next-line no-console
+        console.warn("[vedasuite.auth] 401_received", {
+          path,
+          attempt,
+          retries,
+          shopifyWantsRetry,
+          willRetry: shopifyWantsRetry && attempt < retries,
+        });
         if (shopifyWantsRetry && attempt < retries) {
           attempt += 1;
           await new Promise((r) => setTimeout(r, 800 * attempt));

@@ -9,13 +9,21 @@ import {
 } from "../lib/shopifyOAuthState";
 import type { OAuthStateResult } from "../lib/shopifyOAuthState";
 
-// Construct the base64-encoded host value that Shopify expects as the ?host
-// query parameter in embedded app URLs.  App Bridge reads this to determine
-// the parent-frame origin it should target for postMessage — if it's absent,
-// App Bridge falls back to using the app URL itself, causing a cross-origin
-// postMessage failure visible in the browser console.
+// Construct the base64url-encoded host value that Shopify expects as the ?host
+// query parameter in embedded app URLs.  App Bridge decodes this to determine
+// both the parent-frame origin for postMessage and the admin URL to redirect to
+// when the app is opened outside the Shopify Admin iframe.
+//
+// Format: base64url("admin.shopify.com/store/<handle>")
+// The handle is the subdomain portion of the *.myshopify.com store domain.
+//
+// IMPORTANT: the old format was base64url("https://<shop>/admin"), which
+// caused App Bridge to redirect to https://<shop>/admin/apps/<api_key>/ —
+// a legacy URL that Shopify no longer hosts (NXDOMAIN). Always use the
+// admin.shopify.com format.
 function buildHostParam(shop: string): string {
-  return Buffer.from(`https://${shop}/admin`).toString("base64url");
+  const handle = shop.replace(/\.myshopify\.com$/i, "");
+  return Buffer.from(`admin.shopify.com/store/${handle}`).toString("base64url");
 }
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
