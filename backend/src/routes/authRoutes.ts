@@ -200,6 +200,15 @@ async function persistInstallationRecord(params: {
       authErrorCode: null,
       authErrorMessage: null,
       lastWebhookRegistrationStatus: "PENDING",
+      // Reset sync status so deriveSyncStatus doesn't see the old UNINSTALLED
+      // value on first load after reinstall.
+      lastSyncStatus: "PENDING",
+      // Reset onboarding so reinstalls always start from Step 1.
+      onboardingCompletedAt: null,
+      onboardingDismissedAt: null,
+      onboardingPlanConfirmedAt: null,
+      onboardingFirstInsightViewedAt: null,
+      onboardingSelectedModule: null,
       trialStartedAt,
       trialEndsAt,
     },
