@@ -103,7 +103,7 @@ const resourceName = {
 
 export function FraudPage() {
   const api = useApiClient();
-  const { appState } = useAppState();
+  const { appState, refresh } = useAppState();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getOrderUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
@@ -134,7 +134,9 @@ export function FraudPage() {
         writeModuleCache("fraud-orders", ordersResponse.data.orders);
         writeModuleCache("fraud-overview", overviewResponse.data.overview);
       })
-      .catch(() => {
+      .catch((err) => {
+        const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "REAUTHORIZE_REQUIRED") { void refresh(); return; }
         setOrders([]);
         setOverview(null);
       });

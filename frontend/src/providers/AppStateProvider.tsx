@@ -303,7 +303,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       const response = await embeddedShopRequest<{ appState?: CanonicalAppState }>(
         "/api/app-state",
-        { timeoutMs: 30000, retries: 1 }
+        { timeoutMs: 30000, retries: 3 }
       );
       if (!isCanonicalAppState(response.appState)) {
         const invalidPayloadError = new Error(

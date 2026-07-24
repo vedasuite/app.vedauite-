@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApiClient } from "../../api/client";
+import { useAppState } from "../../hooks/useAppState";
 import { ModuleGate } from "../../components/ModuleGate";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
@@ -60,6 +61,7 @@ const resourceName = {
 
 export function PricingPage() {
   const api = useApiClient();
+  const { refresh } = useAppState();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
@@ -97,6 +99,7 @@ export function PricingPage() {
       })
       .catch((err) => {
         const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "REAUTHORIZE_REQUIRED") { void refresh(); return; }
         if (code === "FEATURE_LOCKED") {
           setPlanLocked(true);
           return;

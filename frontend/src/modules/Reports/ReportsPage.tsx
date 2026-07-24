@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleGate } from "../../components/ModuleGate";
 import { useApiClient } from "../../api/client";
+import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
@@ -146,6 +147,7 @@ function buildFallbackReport(): WeeklyReport {
 
 export function ReportsPage() {
   const api = useApiClient();
+  const { refresh } = useAppState();
   const { navigateEmbedded } = useEmbeddedNavigation();
   const { getCustomersSearchUrl, getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
@@ -177,6 +179,7 @@ export function ReportsPage() {
       })
       .catch((err) => {
         const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "REAUTHORIZE_REQUIRED") { void refresh(); return; }
         if (code === "FEATURE_LOCKED") {
           setPlanLocked(true);
           return;

@@ -254,22 +254,26 @@ export function AppFrame({ children }: Props) {
               <Banner
                 title={installState?.title ?? "VedaSuite needs to reconnect to Shopify"}
                 tone="critical"
-                action={
-                  bootstrap.reconnectUrl
-                    ? {
-                        content: "Reconnect app",
-                        onAction: () => {
-                          window.location.assign(bootstrap.reconnectUrl as string);
-                        },
-                      }
-                    : undefined
-                }
               >
                 <p>
                   {installState?.description ??
                     bootstrap.errorMessage ??
                     "Open VedaSuite again from Shopify Admin so the store session can be restored."}
                 </p>
+                {bootstrap.reconnectUrl ? (
+                  <div style={{ marginTop: "0.75rem" }}>
+                    {/* Must navigate the top-level window — OAuth pages set X-Frame-Options: deny
+                        and cannot load inside the Shopify Admin iframe. window.top is always
+                        allowed to be navigated by a child frame regardless of cross-origin policy. */}
+                    <Button
+                      variant="primary"
+                      url={bootstrap.reconnectUrl}
+                      target="_top"
+                    >
+                      Reconnect app
+                    </Button>
+                  </div>
+                ) : null}
               </Banner>
             </div>
           </Card>

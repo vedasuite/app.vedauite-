@@ -326,7 +326,7 @@ function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" 
 export function CompetitorPage() {
   const { getProductUrl } = useShopifyAdminLinks();
   const [searchParams] = useSearchParams();
-  const { appState } = useAppState();
+  const { appState, refresh } = useAppState();
   const { subscription, loading: subscriptionLoading } = useSubscriptionPlan();
   const [rows, setRows] = useState<CompetitorRow[]>(
     readModuleCache<CompetitorRow[]>("competitor-rows") ?? []
@@ -420,6 +420,7 @@ export function CompetitorPage() {
       .catch((err) => {
         if (!mounted) return;
         const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+        if (code === "REAUTHORIZE_REQUIRED") { void refresh(); return; }
         if (code === "FEATURE_LOCKED") {
           setPlanLocked(true);
           return;

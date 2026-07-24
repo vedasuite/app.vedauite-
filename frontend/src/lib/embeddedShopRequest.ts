@@ -188,16 +188,32 @@ export async function embeddedShopRequest<T = unknown>(
         signal
       );
 
-      if (
-        responseResult.response.status === 401 ||
-        responseResult.response.status === 403
-      ) {
+      if (responseResult.response.status === 401) {
+        // Shopify signals that a fresh session token should fix this transient
+        // auth failure. Retry within the caller's retry budget before surfacing
+        // a reconnect prompt — this handles the race on fresh install where App
+        // Bridge hasn't issued a valid token yet.
+        const shopifyWantsRetry =
+          responseResult.response.headers.get(
+            "x-shopify-retry-invalid-session-request"
+          ) === "1";
+        if (shopifyWantsRetry && attempt < retries) {
+          attempt += 1;
+          await new Promise((r) => setTimeout(r, 800 * attempt));
+          continue;
+        }
         throw enrichError(
           responseResult.payload,
-          responseResult.response.status === 401
-            ? "Shopify authorization expired. Reconnect the app and retry."
-            : "This feature is not included in your current plan.",
-          responseResult.response.status
+          "Shopify authorization expired. Reconnect the app and retry.",
+          401
+        );
+      }
+
+      if (responseResult.response.status === 403) {
+        throw enrichError(
+          responseResult.payload,
+          "This feature is not included in your current plan.",
+          403
         );
       }
 
