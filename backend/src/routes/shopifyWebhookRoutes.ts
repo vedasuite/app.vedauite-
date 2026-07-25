@@ -109,15 +109,27 @@ async function handleAppUninstalled(req: any, res: any) {
     return res.status(200).send("ok");
   }
 
-  // If the store already has an access token, a reinstall completed before this
-  // webhook was processed. Shopify can deliver APP_UNINSTALLED webhooks with
-  // significant delay — acknowledging and ignoring prevents the delayed webhook
-  // from overwriting the fresh installation record and triggering the reconnect
-  // banner on a store that is already correctly installed.
-  if (store.accessToken) {
+  // Shopify sends an X-Shopify-Triggered-At header with the ISO timestamp of
+  // when the event actually occurred. If the store was reauthorized (reinstalled)
+  // AFTER the webhook event was created, this is a delayed webhook from a
+  // previous uninstall arriving after the fresh reinstall completed — skip it
+  // to prevent overwriting the fresh installation record.
+  const triggeredAtRaw = req.headers["x-shopify-triggered-at"];
+  const webhookTriggeredAt =
+    typeof triggeredAtRaw === "string" && triggeredAtRaw
+      ? new Date(triggeredAtRaw)
+      : null;
+
+  const reinstallAfterThisEvent =
+    webhookTriggeredAt &&
+    store.reauthorizedAt &&
+    store.reauthorizedAt > webhookTriggeredAt;
+
+  if (reinstallAfterThisEvent) {
     logEvent("info", "webhook.app_uninstalled.skipped_reinstalled", {
       shop: envelope.shopDomain,
       reauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
+      webhookTriggeredAt: webhookTriggeredAt.toISOString(),
     });
     return res.status(200).send("ok");
   }
