@@ -1,3 +1,4 @@
+import { bustSessionTokenCache, getEmbeddedSessionToken } from "../shopifyAppBridge";
 import { withRequestTimeout } from "./requestTimeout";
 import { getEmbeddedContext } from "./shopifyEmbeddedContext";
 
@@ -146,12 +147,16 @@ function isRetriableError(error: unknown) {
   );
 }
 
-async function getShopifySessionToken(): Promise<string | null> {
+async function acquireSessionToken(bust = false): Promise<string | null> {
+  // On 401 retry, the cached token was just rejected — force a fresh idToken() call.
+  if (bust) {
+    bustSessionTokenCache();
+  }
+
   const t0 = Date.now();
   try {
-    const shopify = (window as unknown as { shopify?: { idToken?: () => Promise<string> } }).shopify;
-    if (typeof shopify?.idToken === "function") {
-      const token = await shopify.idToken();
+    const token = await getEmbeddedSessionToken();
+    if (token) {
       // eslint-disable-next-line no-console
       console.info("[vedasuite.auth] session_token_acquired", { ms: Date.now() - t0, tokenLength: token.length });
       return token;
@@ -159,9 +164,6 @@ async function getShopifySessionToken(): Promise<string | null> {
     // eslint-disable-next-line no-console
     console.warn("[vedasuite.auth] shopify.idToken_unavailable — App Bridge not ready yet", { ms: Date.now() - t0 });
   } catch (err) {
-    // App Bridge not ready — return null so the request proceeds without
-    // a Bearer header. The backend returns 401, which propagates as an auth
-    // error and the user is shown a reconnect prompt.
     // eslint-disable-next-line no-console
     console.warn("[vedasuite.auth] shopify.idToken_threw", { ms: Date.now() - t0, error: err instanceof Error ? err.message : String(err) });
   }
@@ -179,8 +181,9 @@ export async function embeddedShopRequest<T = unknown>(
 
   while (attempt <= retries) {
     try {
-      // Session tokens expire in 60 s — fetch a fresh one on each attempt
-      const sessionToken = await getShopifySessionToken();
+      // Fetch a session token. Cached (30 s) on first attempt; cache is busted
+      // on 401 retry so we always send a fresh token after a rejection.
+      const sessionToken = await acquireSessionToken(attempt > 0);
       const baseHeaders: Record<string, string> = {
         "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest",

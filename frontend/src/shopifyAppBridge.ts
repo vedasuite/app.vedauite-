@@ -22,6 +22,10 @@ const sessionTokenCache = new Map<
   { token: string; expiresAt: number; inflight?: Promise<string> }
 >();
 
+export function bustSessionTokenCache() {
+  sessionTokenCache.clear();
+}
+
 export function getEmbeddedAppBridge() {
   return window.shopify ?? null;
 }

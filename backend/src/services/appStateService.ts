@@ -211,6 +211,21 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
 
   const install = deriveInstallState(health);
   const connection = deriveConnectionState(health);
+
+  // Log exactly why reconnect is required so it's visible in server logs without
+  // having to query the DB. This is the canonical place to diagnose the banner.
+  if (install.status !== "installed") {
+    logEvent("warn", "app_state.reconnect_required", {
+      shop: shopDomain,
+      installStatus: install.status,
+      healthCode: health.code,
+      reauthRequired: health.reauthRequired,
+      hasOfflineToken: health.hasOfflineToken,
+      authErrorCode: health.authErrorCode,
+      lastConnectionStatus: health.lastConnectionStatus,
+      uninstalledAt: (health as any).uninstalledAt ?? null,
+    });
+  }
   const enabledModules = storeReadiness.billing.enabledModules;
   const lockedModules = Object.entries(enabledModules)
     .filter(([key, value]) =>

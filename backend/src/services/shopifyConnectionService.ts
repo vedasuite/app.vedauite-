@@ -78,10 +78,16 @@ function deriveTokenAcquisitionMode(installation: {
   accessTokenExpiresAt?: Date | null;
   tokenAcquisitionMode?: string | null;
 }) {
-  if (installation.refreshToken || installation.accessTokenExpiresAt) {
+  // Only treat the token as refreshable when a refresh token is actually present.
+  // A token with accessTokenExpiresAt but no refreshToken cannot be refreshed —
+  // treating it as "offline_expiring" triggers TOKEN_REFRESH_FAILED (null refresh
+  // token sent to Shopify), which propagates to the reconnect banner.
+  if (installation.refreshToken) {
     return "offline_expiring";
   }
 
+  // If the stored mode explicitly says expiring but there is no refresh token now
+  // (e.g. it was cleared), fall back to legacy so refresh is not attempted.
   return installation.tokenAcquisitionMode === "offline_expiring"
     ? "offline_legacy"
     : installation.tokenAcquisitionMode ?? "offline_legacy";
