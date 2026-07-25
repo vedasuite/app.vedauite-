@@ -109,27 +109,51 @@ async function handleAppUninstalled(req: any, res: any) {
     return res.status(200).send("ok");
   }
 
-  // Shopify sends an X-Shopify-Triggered-At header with the ISO timestamp of
-  // when the event actually occurred. If the store was reauthorized (reinstalled)
-  // AFTER the webhook event was created, this is a delayed webhook from a
-  // previous uninstall arriving after the fresh reinstall completed — skip it
-  // to prevent overwriting the fresh installation record.
+  // Delayed-webhook guard: skip this uninstall if we can confirm a reinstall
+  // completed AFTER the event that triggered this webhook.
+  //
+  // Primary: Shopify sends X-Shopify-Triggered-At (ISO timestamp of when the
+  // event occurred). Compare against reauthorizedAt (set on every OAuth callback).
+  // Fallback: if the header is absent, check whether the store already has a
+  // fresh access token — that only happens after a successful reinstall OAuth.
+  // If the token is present AND reauthorizedAt is very recent (< 5 min) we treat
+  // this as a race where the reinstall beat the webhook delivery.
   const triggeredAtRaw = req.headers["x-shopify-triggered-at"];
   const webhookTriggeredAt =
     typeof triggeredAtRaw === "string" && triggeredAtRaw
       ? new Date(triggeredAtRaw)
       : null;
 
-  const reinstallAfterThisEvent =
-    webhookTriggeredAt &&
-    store.reauthorizedAt &&
+  logEvent("info", "webhook.app_uninstalled.guard_check", {
+    shop: envelope.shopDomain,
+    hasTriggeredAtHeader: !!webhookTriggeredAt,
+    webhookTriggeredAt: webhookTriggeredAt?.toISOString() ?? null,
+    storeReauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
+    hasAccessToken: !!store.accessToken,
+  });
+
+  // Primary guard: event timestamp vs last reinstall time
+  const reinstallAfterEventTimestamp =
+    webhookTriggeredAt !== null &&
+    store.reauthorizedAt !== null &&
     store.reauthorizedAt > webhookTriggeredAt;
 
-  if (reinstallAfterThisEvent) {
+  // Fallback guard (no event timestamp): if the store has a token AND was
+  // reauthorized within the last 5 minutes, a reinstall just completed and
+  // this webhook is from the previous uninstall cycle.
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const reinstallJustCompletedFallback =
+    webhookTriggeredAt === null &&
+    !!store.accessToken &&
+    store.reauthorizedAt !== null &&
+    store.reauthorizedAt > fiveMinutesAgo;
+
+  if (reinstallAfterEventTimestamp || reinstallJustCompletedFallback) {
     logEvent("info", "webhook.app_uninstalled.skipped_reinstalled", {
       shop: envelope.shopDomain,
+      reason: reinstallAfterEventTimestamp ? "event_timestamp" : "fallback_recent_reauth",
       reauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
-      webhookTriggeredAt: webhookTriggeredAt.toISOString(),
+      webhookTriggeredAt: webhookTriggeredAt?.toISOString() ?? null,
     });
     return res.status(200).send("ok");
   }
