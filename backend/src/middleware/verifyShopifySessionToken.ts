@@ -114,9 +114,16 @@ export function verifyShopifySessionToken(
       );
     }
 
-    (req as Request & { shopifySession?: { shop?: string; sub?: string } }).shopifySession = {
+    (
+      req as Request & {
+        shopifySession?: { shop?: string; sub?: string; token?: string };
+      }
+    ).shopifySession = {
       shop: tokenShop ?? requestedShop ?? undefined,
       sub: typeof payload.sub === "string" ? payload.sub : undefined,
+      // Retain the raw JWT so downstream handlers can exchange it for an
+      // offline Admin API access token when none is stored (token exchange).
+      token,
     };
 
     return next();

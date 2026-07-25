@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ensureOfflineToken } from "../middleware/ensureOfflineToken";
 import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
 import { appStateRouter } from "./appStateRoutes";
 import { authRouter } from "./authRoutes";
@@ -26,6 +27,9 @@ router.use(publicRouter);
 router.use(launchRouter);
 
 router.use("/api", verifyShopifySessionToken);
+// Mint an offline Admin API token from the verified session token whenever one
+// is missing or expired, so no API route can dead-end on a reconnect prompt.
+router.use("/api", ensureOfflineToken);
 
 router.use("/api/billing", billingApiRouter);
 router.use("/api/app-state", appStateRouter);

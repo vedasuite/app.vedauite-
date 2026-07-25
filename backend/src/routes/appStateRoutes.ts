@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { prisma } from "../db/prismaClient";
 import { getMerchantAppState } from "../services/appStateService";
 import { logEvent } from "../services/observabilityService";
 import { resolveAuthenticatedShop } from "./routeShop";
@@ -31,29 +30,9 @@ appStateRouter.get("/", async (req, res) => {
   }
 
   try {
-    // Self-heal: a valid Shopify session token is cryptographic proof that the
-    // app is currently installed (App Bridge only issues tokens for installed apps).
-    // If the DB has uninstalledAt set despite a valid token, a delayed
-    // APP_UNINSTALLED webhook arrived after a fresh reinstall and corrupted the
-    // record — clear it now so the merchant/reviewer doesn't see the reconnect banner.
-    const storeSnapshot = await prisma.store.findUnique({
-      where: { shop },
-      select: { uninstalledAt: true },
-    });
-    if (storeSnapshot?.uninstalledAt) {
-      await prisma.store.update({
-        where: { shop },
-        data: {
-          uninstalledAt: null,
-          authErrorCode: null,
-          authErrorMessage: null,
-          lastConnectionStatus: "OK",
-          lastConnectionError: null,
-        },
-      });
-      logEvent("info", "app_state.self_healed_stale_uninstall", { shop });
-    }
-
+    // The `ensureOfflineToken` middleware has already minted an offline Admin
+    // API token via token exchange if one was missing or expired, so the
+    // connection health computed below reflects a recovered installation.
     logEvent("info", "app_state.installation_fetch_started", { shop });
     const appState = await getMerchantAppState(shop);
 

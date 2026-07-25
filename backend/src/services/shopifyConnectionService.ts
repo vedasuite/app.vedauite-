@@ -270,6 +270,184 @@ async function markReconnectRequired(
   });
 }
 
+/**
+ * Exchange a Shopify session token (the JWT App Bridge issues in the browser)
+ * for an offline Admin API access token.
+ *
+ * This is the modern replacement for relying solely on the OAuth redirect to
+ * obtain the offline token. A valid session token proves the merchant is inside
+ * the installed app, so Shopify will mint a fresh offline token on demand —
+ * no redirect, no "Reconnect" banner.
+ *
+ * Docs: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/token-exchange
+ */
+export async function exchangeSessionTokenForOfflineToken(
+  shop: string,
+  sessionToken: string
+) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    throw new ShopifyConnectionError(
+      "MISSING_SHOP",
+      "Cannot exchange session token: invalid shop domain."
+    );
+  }
+
+  const tokenUrl = `https://${normalizedShop}/admin/oauth/access_token`;
+  const response = await axios.post<RefreshAccessTokenResponse>(
+    tokenUrl,
+    {
+      client_id: env.shopifyApiKey,
+      client_secret: env.shopifyApiSecret,
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      subject_token: sessionToken,
+      subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
+      requested_token_type:
+        "urn:shopify:params:oauth:token-type:offline-access-token",
+    },
+    { timeout: 15000 }
+  );
+
+  const now = new Date();
+  const accessTokenExpiresAt =
+    typeof response.data.expires_in === "number"
+      ? new Date(now.getTime() + response.data.expires_in * 1000)
+      : null;
+  const refreshTokenExpiresAt =
+    typeof response.data.refresh_token_expires_in === "number"
+      ? new Date(now.getTime() + response.data.refresh_token_expires_in * 1000)
+      : null;
+
+  const store = await prisma.store.upsert({
+    where: { shop: normalizedShop },
+    create: {
+      shop: normalizedShop,
+      accessToken: response.data.access_token,
+      grantedScopes: response.data.scope ?? env.shopifyScopes,
+      isOffline: true,
+      installedAt: now,
+      reauthorizedAt: now,
+      accessTokenExpiresAt,
+      refreshToken: response.data.refresh_token ?? null,
+      refreshTokenExpiresAt,
+      tokenAcquisitionMode: response.data.refresh_token
+        ? "offline_expiring"
+        : "offline_legacy",
+      uninstalledAt: null,
+      lastConnectionCheckAt: now,
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
+      lastWebhookRegistrationStatus: "PENDING",
+      lastSyncStatus: "PENDING",
+    },
+    update: {
+      accessToken: response.data.access_token,
+      grantedScopes: response.data.scope ?? env.shopifyScopes,
+      isOffline: true,
+      accessTokenExpiresAt,
+      refreshToken: response.data.refresh_token ?? null,
+      refreshTokenExpiresAt,
+      tokenAcquisitionMode: response.data.refresh_token
+        ? "offline_expiring"
+        : "offline_legacy",
+      reauthorizedAt: now,
+      // A successful exchange proves the app is installed right now.
+      uninstalledAt: null,
+      lastConnectionCheckAt: now,
+      lastConnectionStatus: "OK",
+      lastConnectionError: null,
+      authErrorCode: null,
+      authErrorMessage: null,
+    },
+  });
+
+  logEvent("info", "shopify.connection.session_token_exchanged", {
+    shop: normalizedShop,
+    accessTokenExpiresAt: accessTokenExpiresAt?.toISOString() ?? null,
+    hasRefreshToken: !!response.data.refresh_token,
+    grantedScopes: response.data.scope ?? env.shopifyScopes,
+  });
+
+  return store;
+}
+
+/**
+ * Guarantee the store has a usable offline access token, minting one via token
+ * exchange when it is missing or expired. Safe to call on every authenticated
+ * request — it is a no-op when a healthy token is already stored.
+ *
+ * Returns true when a token is available afterwards.
+ */
+const inflightTokenExchanges = new Map<string, Promise<boolean>>();
+
+export async function ensureOfflineAccessToken(
+  shop: string,
+  sessionToken?: string | null
+): Promise<boolean> {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    return false;
+  }
+
+  // A page load fires several API calls at once. Without this, each one would
+  // trigger its own token exchange against Shopify for the same shop.
+  const inflight = inflightTokenExchanges.get(normalizedShop);
+  if (inflight) {
+    return inflight;
+  }
+
+  const installation = await prisma.store.findUnique({
+    where: { shop: normalizedShop },
+    select: {
+      accessToken: true,
+      accessTokenExpiresAt: true,
+      refreshToken: true,
+      uninstalledAt: true,
+    },
+  });
+
+  const expiringSoon =
+    !!installation?.accessTokenExpiresAt &&
+    installation.accessTokenExpiresAt.getTime() - Date.now() <=
+      ACCESS_TOKEN_EXPIRY_BUFFER_MS;
+
+  const tokenUsable =
+    !!installation?.accessToken && !installation.uninstalledAt && !expiringSoon;
+
+  if (tokenUsable) {
+    return true;
+  }
+
+  if (!sessionToken) {
+    return !!installation?.accessToken;
+  }
+
+  const exchange = (async () => {
+    try {
+      await exchangeSessionTokenForOfflineToken(normalizedShop, sessionToken);
+      logEvent("info", "shopify.connection.offline_token_self_healed", {
+        shop: normalizedShop,
+        hadToken: !!installation?.accessToken,
+        wasUninstalled: !!installation?.uninstalledAt,
+      });
+      return true;
+    } catch (error) {
+      logEvent("warn", "shopify.connection.token_exchange_failed", {
+        shop: normalizedShop,
+        error,
+      });
+      return !!installation?.accessToken;
+    } finally {
+      inflightTokenExchanges.delete(normalizedShop);
+    }
+  })();
+
+  inflightTokenExchanges.set(normalizedShop, exchange);
+  return exchange;
+}
+
 async function exchangeLegacyOfflineToken(
   installation: NonNullable<InstallationRecord>
 ) {
