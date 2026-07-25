@@ -336,11 +336,19 @@ export async function getOnboardingState(shopDomain: string) {
           route: "/app/onboarding",
         }
       : stage === "MODULE_SELECTION"
-      ? {
-          key: "CHOOSE_MODULE" as const,
-          label: "Pick a feature to start with",
-          route: "/app/onboarding",
-        }
+      ? readiness.billing.ready
+        ? {
+            key: "CHOOSE_MODULE" as const,
+            label: "Pick a feature to start with",
+            route: "/app/onboarding",
+          }
+        : // Every module is locked until a plan is active, so sending the
+          // merchant to pick one first is a dead end. Route to billing instead.
+          {
+            key: "GOTO_BILLING" as const,
+            label: "Choose billing plan to unlock features",
+            route: "/app/billing",
+          }
       : stage === "FIRST_INSIGHT_VIEW"
       ? {
           key: "VIEW_FIRST_INSIGHT" as const,

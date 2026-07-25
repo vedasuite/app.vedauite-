@@ -345,11 +345,6 @@ export function AppFrame({ children }: Props) {
               <p>{billingState.merchantDescription}</p>
             </Banner>
           ) : null}
-          {!bootstrapGate && appState?.connection.status === "attention" ? (
-            <Banner title={appState.connection.title} tone="info">
-              <p>{appState.connection.description}</p>
-            </Banner>
-          ) : null}
           {bootstrapGate ?? billingFlowGate ?? children}
         </div>
       </div>

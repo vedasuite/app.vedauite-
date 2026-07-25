@@ -598,11 +598,18 @@ export function CompetitorPage() {
           disabled: ingesting,
         }}
         secondaryActions={[
-          {
-            content: ingesting ? "Running..." : "Run analysis",
-            onAction: () => void ingestCompetitorData(),
-            disabled: ingesting,
-          },
+          // Only offer a separate "Run analysis" when the primary action does
+          // something else (it navigates to a tab in these two states).
+          // Otherwise the header would render two identical buttons.
+          ...(primaryState === "CHANGES_DETECTED" || primaryState === "LOW_CONFIDENCE"
+            ? [
+                {
+                  content: ingesting ? "Running..." : "Run analysis",
+                  onAction: () => void ingestCompetitorData(),
+                  disabled: ingesting,
+                },
+              ]
+            : []),
           { content: "Update domains", onAction: () => setModalOpen(true) },
         ]}
       >
