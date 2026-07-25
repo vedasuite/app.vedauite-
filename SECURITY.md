@@ -13,6 +13,12 @@ Include:
 - reproduction steps
 - impact assessment
 
+## Data Protection Policies
+
+Access control, data loss prevention, incident response, and retention policies
+are documented in [docs/DATA_PROTECTION_POLICIES.md](docs/DATA_PROTECTION_POLICIES.md).
+These back the Data protection details declaration in the Shopify Partner Dashboard.
+
 ## Current Security Posture
 
 The app currently includes:
