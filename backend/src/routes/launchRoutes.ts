@@ -223,10 +223,45 @@ async function sendSanityResponse(req: Request, res: Response) {
   });
 }
 
+// These are internal deployment diagnostics. They accept a ?shop= parameter and
+// report that store's install state (offline token present, last sync status,
+// webhook registration), so leaving them open would let anyone enumerate which
+// stores have the app installed. They sit outside /api and therefore outside
+// verifyShopifySessionToken, so they are gated on a shared secret instead.
+//
+// Set LAUNCH_DIAGNOSTICS_TOKEN in the environment and call them with
+// ?token=<value>. With no token configured they are disabled entirely, so the
+// secure state is the default. Store-specific state is also available, already
+// authenticated, from /api/shopify/diagnostics inside the embedded app.
+function authorizeLaunchDiagnostics(req: Request, res: Response) {
+  const expected = process.env.LAUNCH_DIAGNOSTICS_TOKEN;
+
+  if (!expected) {
+    res.status(404).send("Not found");
+    return false;
+  }
+
+  const provided =
+    typeof req.query.token === "string" ? req.query.token : undefined;
+
+  if (provided !== expected) {
+    res.status(404).send("Not found");
+    return false;
+  }
+
+  return true;
+}
+
 launchRouter.get("/launch/sanity", async (req, res) => {
+  if (!authorizeLaunchDiagnostics(req, res)) {
+    return;
+  }
   await sendSanityResponse(req, res);
 });
 
 launchRouter.get("/launch/audit", async (req, res) => {
+  if (!authorizeLaunchDiagnostics(req, res)) {
+    return;
+  }
   await sendSanityResponse(req, res);
 });

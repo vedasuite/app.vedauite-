@@ -20,7 +20,6 @@ import {
 import {
   normalizeShopDomain,
 } from "./services/shopifyConnectionService";
-import { shopifyGraphQL } from "./services/shopifyAdminService";
 
 const embeddedAppRoutes = [
   "/",
@@ -156,46 +155,13 @@ export function createApp() {
     return res.redirect(redirectUrl.toString());
   });
 
-  app.get("/products", async (req, res) => {
-    try {
-      const shop = normalizeShopDomain(req.query.shop as string | undefined);
-
-      if (!shop) {
-        return res.status(400).send("Missing shop");
-      }
-
-      const data = await shopifyGraphQL<{
-        products: {
-          edges: Array<{
-            node: {
-              id: string;
-              handle: string;
-              title: string;
-            };
-          }>;
-        };
-      }>(
-        shop,
-        `
-          query EmbeddedProducts {
-            products(first: 20, sortKey: UPDATED_AT, reverse: true) {
-              edges {
-                node {
-                  id
-                  handle
-                  title
-                }
-              }
-            }
-          }
-        `
-      );
-
-      return res.status(200).json(data);
-    } catch (err) {
-      return res.status(500).send("Error fetching products");
-    }
-  });
+  // NOTE: do not add routes that return Shopify store data here. Everything
+  // between the static handler above and `app.use(router)` below runs *before*
+  // the session-token middleware, which is mounted at `/api` inside `router`.
+  // Store-data endpoints belong under `/api` so `verifyShopifySessionToken`
+  // authenticates them. A `GET /products` route previously sat here and served
+  // any installed shop's catalog from an unvalidated `?shop=` query parameter,
+  // with no authentication at all.
 
   app.use(router);
 
