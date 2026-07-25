@@ -6,7 +6,10 @@ import {
   type StarterModule,
 } from "../billing/capabilities";
 import { getConnectionHealth } from "./shopifyConnectionService";
-import { getUnifiedReadinessState } from "./readinessEngineService";
+import {
+  getUnifiedReadinessState,
+  resolveEntitledModule,
+} from "./readinessEngineService";
 import { getCurrentSubscription, resolveBillingState } from "./subscriptionService";
 import {
   deriveSyncStatus,
@@ -156,11 +159,13 @@ export async function getOnboardingState(shopDomain: string) {
   const webhooksReady =
     !!store.webhooksRegisteredAt &&
     store.lastWebhookRegistrationStatus !== "FAILED";
-  const selectedModule =
-    normalizeOnboardingModule(store.onboardingSelectedModule) ??
-    (subscription.planName === "STARTER"
-      ? normalizeOnboardingModule(subscription.starterModule)
-      : null);
+  // Resolved against current entitlements so a downgrade cannot leave the flow
+  // pinned to a module the plan no longer includes. See resolveEntitledModule.
+  const selectedModule = resolveEntitledModule(
+    store.onboardingSelectedModule,
+    subscription.planName === "STARTER" ? subscription.starterModule : null,
+    subscription.enabledModules
+  );
 
   const moduleAvailability = [
     {
@@ -586,9 +591,24 @@ export async function confirmOnboardingPlan(shopDomain: string) {
     where: { shop: shopDomain },
     data: {
       onboardingPlanConfirmedAt: new Date(),
-      onboardingCompletedAt: onboarding.canAccessDashboard ? new Date() : null,
       onboardingDismissedAt: null,
     } as any,
+  });
+
+  // Completion must be evaluated from state that already includes the
+  // confirmation just written. The previous version read `canAccessDashboard`
+  // from the snapshot taken before this update, where planConfirmationComplete
+  // was still false by definition — so it could never mark onboarding complete,
+  // and it cleared any earlier completion, sending a merchant who was already
+  // finished (e.g. after changing plans) back to the start.
+  const confirmed = await getOnboardingState(shopDomain);
+  if (!confirmed.canAccessDashboard) {
+    return confirmed;
+  }
+
+  await prisma.store.update({
+    where: { shop: shopDomain },
+    data: { onboardingCompletedAt: new Date() },
   });
 
   return getOnboardingState(shopDomain);

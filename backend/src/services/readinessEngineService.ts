@@ -285,6 +285,53 @@ function normalizeSelectedModule(value?: string | null) {
   return null;
 }
 
+export type SelectedModuleKey = "fraud" | "competitor" | "pricing";
+
+/**
+ * Resolve which module the onboarding flow should treat as "selected",
+ * accounting for the merchant's current entitlements.
+ *
+ * A downgrade can strip entitlement for a module the merchant picked while on a
+ * higher plan. `deriveReadinessState` reports an unentitled module as "locked",
+ * which is never "ready", so `setup.minimumComplete` — and therefore
+ * `canAccessDashboard` — could never become true again. That left the merchant
+ * bounced between the dashboard and onboarding with no way forward, since no
+ * amount of confirming the plan could satisfy a permanently locked module.
+ * Upgrades never hit this because entitlements only ever grow.
+ *
+ * The stored preference is left untouched in the database, so returning to a
+ * higher plan restores the merchant's original pick.
+ */
+export function resolveEntitledModule(
+  storedSelection: string | null | undefined,
+  starterModule: string | null | undefined,
+  enabledModules: Partial<Record<SelectedModuleKey, boolean>>
+): SelectedModuleKey | null {
+  const isEntitled = (key: SelectedModuleKey) => enabledModules[key] === true;
+
+  const stored = normalizeSelectedModule(storedSelection);
+  if (stored && isEntitled(stored)) {
+    return stored;
+  }
+
+  const starter = normalizeSelectedModule(starterModule);
+  if (starter && isEntitled(starter)) {
+    return starter;
+  }
+
+  const firstEntitled = (["fraud", "competitor", "pricing"] as const).find(
+    isEntitled
+  );
+  if (firstEntitled) {
+    return firstEntitled;
+  }
+
+  // Nothing is entitled yet (no active plan). Keep showing the merchant's
+  // preference so onboarding still reflects their pick; billing readiness is
+  // what gates progress in that case, not the module.
+  return stored ?? starter;
+}
+
 export function deriveReadinessState(input: {
   entitled: boolean;
   connectionHealthy: boolean;
@@ -710,9 +757,11 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     }),
   };
 
-  const selectedModule =
-    normalizeSelectedModule(operational.store.onboardingSelectedModule) ??
-    normalizeSelectedModule(subscription.starterModule);
+  const selectedModule = resolveEntitledModule(
+    operational.store.onboardingSelectedModule,
+    subscription.starterModule,
+    subscription.enabledModules
+  );
   const selectedModuleState =
     selectedModule === "fraud"
       ? fraudReadiness.state
