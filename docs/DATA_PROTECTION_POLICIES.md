@@ -115,14 +115,25 @@ reflexively — but it *is* rotated whenever exposure is plausible.
 
 ## 5. Retention
 
-- Merchant and customer data is retained while the app is installed, because the
+**Retention period: personal data is retained for no longer than 90 days after a
+store uninstalls.**
+
+- While the app is installed, merchant and customer data is retained because the
   app's function (fraud history, refund-behaviour trends, competitor tracking)
   depends on historical records.
-- On `shop/redact`, all store data is deleted: orders, customers, fraud signals,
+- On `shop/redact` — which Shopify normally sends about 48 hours after an
+  uninstall — all store data is deleted: orders, customers, fraud signals,
   competitor data, price history, profit data, subscription, and the store
-  record. This is implemented as a single transaction in `privacyService.ts`.
+  record. This is a single transaction in `privacyService.ts`.
 - On `customers/redact`, the identified customer's records are removed.
 - `customers/data_request` returns the data held for the identified customer.
+- **Backstop sweep.** A scheduled job runs every 24 hours and deletes all data
+  for any store whose `uninstalledAt` is older than the retention period, using
+  the same deletion path as `shop/redact`. This bounds retention even if a
+  redact webhook is never delivered or fails permanently. Implemented in
+  `dataRetentionService.ts`; the period is set by `DATA_RETENTION_DAYS`
+  (default 90). A reinstall clears `uninstalledAt`, so active installations are
+  never affected.
 
 ## 6. Review
 
@@ -134,9 +145,6 @@ data collected changes, or an incident occurs.
 
 Tracked honestly so the declaration stays accurate:
 
-- **No automated time-based purge.** Data is deleted on uninstall/redact, not on
-  a fixed schedule. If a defined retention period is required, a scheduled job
-  must enforce it before claiming one.
 - **No automated alerting** on repeated auth or webhook failures; detection
   currently depends on reviewing Render logs.
 - **No independent security audit.** The "Audits and certifications" field in the

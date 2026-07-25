@@ -38,6 +38,15 @@ export const env = {
       (process.env.SHOPIFY_BILLING_TEST_MODE || "true").toLowerCase() !==
       "false",
   },
+  dataRetention: {
+    // Days after uninstall before a store's remaining personal data is purged.
+    // Shopify normally delivers shop/redact ~48h after uninstall and that path
+    // already deletes everything; this is the backstop for a redact webhook that
+    // never arrives or fails permanently, so a bounded retention period holds
+    // even then. Set to 0 to disable the sweep.
+    uninstalledStoreDays: Number(process.env.DATA_RETENTION_DAYS ?? 90),
+    sweepIntervalHours: Number(process.env.DATA_RETENTION_SWEEP_HOURS ?? 24),
+  },
   enableGuidedBootstrap:
     (process.env.VEDASUITE_ENABLE_GUIDED_BOOTSTRAP || "false").toLowerCase() ===
     "true",

@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { prisma } from "./db/prismaClient";
+import { startDataRetentionSweep } from "./services/dataRetentionService";
 import { logEvent } from "./services/observabilityService";
 
 // Catch anything that escaped Express's async error handler.  Without these,
@@ -36,6 +37,10 @@ async function startServer() {
   }
 
   const app = createApp();
+
+  // Backstop for shop/redact webhooks that never arrive, so a bounded retention
+  // period holds even when Shopify's deletion signal is missed.
+  startDataRetentionSweep();
 
   app.listen(env.port, () => {
     logEvent("info", "server.started", { port: env.port });
