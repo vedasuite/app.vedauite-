@@ -46,8 +46,8 @@ publicRouter.get("/legal/privacy", (_req, res) => {
           <p>VedaSuite AI provides AI-powered competitor and refund intelligence for Shopify merchants, including fraud support, pricing guidance, shopper trust scoring, and profit insights.</p>
           <h2>Data We Process</h2>
           <p>Depending on merchant configuration and scopes, we may process store metadata, order and customer records, refund behavior, fraud-related signals, merchant-defined settings, and tracked competitor domains.</p>
-          <h2>Anonymized Fraud Pattern Insights</h2>
-          <p>If a merchant explicitly enables anonymized fraud pattern insights, VedaSuite AI limits that behavior to anonymized or pseudonymized fraud signals intended to reduce fraud and return abuse risk. Raw customer contact data is not exposed cross-merchant through this feature.</p>
+          <h2>No Cross-Merchant Data Sharing</h2>
+          <p>Store data is processed in isolation for the merchant it belongs to. VedaSuite AI does not pool, share, or compare customer or order data across merchants, and does not sell data to anyone.</p>
           <h3>Categories of Data</h3>
           <ul>
             <li>merchant account and store installation information</li>
