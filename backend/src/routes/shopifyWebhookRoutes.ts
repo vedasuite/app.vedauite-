@@ -87,11 +87,23 @@ async function handleWebhookEnvelope(req: any, res: any) {
     return res.status(400).send("Missing shop domain");
   }
 
-  return {
-    rawBody,
-    shopDomain,
-    payload: JSON.parse(rawBody.toString("utf8")),
-  };
+  // A malformed body should not become a 5xx. The HMAC already passed, so this
+  // is not an attack path, but retrying unparseable JSON can never succeed —
+  // acknowledge it and log instead of failing the delivery.
+  try {
+    return {
+      rawBody,
+      shopDomain,
+      payload: JSON.parse(rawBody.toString("utf8")),
+    };
+  } catch (error) {
+    logEvent("error", "webhook.payload_parse_failed", {
+      shop: shopDomain,
+      topic: req.path,
+      error,
+    });
+    return res.status(200).send("ok");
+  }
 }
 
 async function handleAppUninstalled(req: any, res: any) {
@@ -100,13 +112,40 @@ async function handleAppUninstalled(req: any, res: any) {
     return envelope;
   }
 
+  // Acknowledge before doing any database work. Shopify counts every non-200 as
+  // a delivery failure, and a transient DB error here would otherwise surface as
+  // a 5xx and inflate the app's webhook failure rate. The processing below is
+  // retried internally instead.
+  const triggeredAtRaw = req.headers["x-shopify-triggered-at"];
+  res.status(200).send("ok");
+
+  void withRetry(
+    () => processAppUninstalled(envelope.shopDomain, triggeredAtRaw),
+    {
+      attempts: 3,
+      delayMs: 500,
+      operationName: "webhook.app_uninstalled",
+      context: { shop: envelope.shopDomain },
+    }
+  ).catch((error) => {
+    logEvent("error", "webhook.app_uninstalled_failed", {
+      shop: envelope.shopDomain,
+      error,
+    });
+  });
+}
+
+async function processAppUninstalled(
+  shopDomain: string,
+  triggeredAtRaw: unknown
+) {
   const store = await prisma.store.findUnique({
-    where: { shop: envelope.shopDomain },
+    where: { shop: shopDomain },
     include: { subscription: true },
   });
 
   if (!store) {
-    return res.status(200).send("ok");
+    return;
   }
 
   // Delayed-webhook guard: skip this uninstall if we can confirm a reinstall
@@ -118,14 +157,13 @@ async function handleAppUninstalled(req: any, res: any) {
   // fresh access token — that only happens after a successful reinstall OAuth.
   // If the token is present AND reauthorizedAt is very recent (< 5 min) we treat
   // this as a race where the reinstall beat the webhook delivery.
-  const triggeredAtRaw = req.headers["x-shopify-triggered-at"];
   const webhookTriggeredAt =
     typeof triggeredAtRaw === "string" && triggeredAtRaw
       ? new Date(triggeredAtRaw)
       : null;
 
   logEvent("info", "webhook.app_uninstalled.guard_check", {
-    shop: envelope.shopDomain,
+    shop: shopDomain,
     hasTriggeredAtHeader: !!webhookTriggeredAt,
     webhookTriggeredAt: webhookTriggeredAt?.toISOString() ?? null,
     storeReauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
@@ -150,12 +188,12 @@ async function handleAppUninstalled(req: any, res: any) {
 
   if (reinstallAfterEventTimestamp || reinstallJustCompletedFallback) {
     logEvent("info", "webhook.app_uninstalled.skipped_reinstalled", {
-      shop: envelope.shopDomain,
+      shop: shopDomain,
       reason: reinstallAfterEventTimestamp ? "event_timestamp" : "fallback_recent_reauth",
       reauthorizedAt: store.reauthorizedAt?.toISOString() ?? null,
       webhookTriggeredAt: webhookTriggeredAt?.toISOString() ?? null,
     });
-    return res.status(200).send("ok");
+    return;
   }
 
   await prisma.$transaction(async (tx) => {
@@ -214,10 +252,8 @@ async function handleAppUninstalled(req: any, res: any) {
   });
 
   logEvent("info", "webhook.app_uninstalled", {
-    shop: envelope.shopDomain,
+    shop: shopDomain,
   });
-
-  return res.status(200).send("ok");
 }
 
 async function handleCustomersDataRequest(req: any, res: any) {
@@ -307,24 +343,45 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
     currentPeriodEnd?: string;
   };
 
-  await reconcileStoreSubscriptionFromWebhook({
-    shopDomain: envelope.shopDomain,
-    shopifyChargeId: payload.admin_graphql_api_id ?? null,
-    planName: payload.name ?? null,
-    status: payload.status ?? null,
-    currentPeriodEnd: payload.current_period_end ?? payload.currentPeriodEnd ?? null,
-  });
+  // Acknowledge before reconciling. A transient DB failure while reconciling a
+  // plan change would otherwise return 5xx and count against the app's webhook
+  // failure rate; the retry below handles it instead.
+  res.status(200).send("ok");
 
-  logEvent("info", "webhook.app_subscription_updated", {
-    shop: envelope.shopDomain,
-    route: req.path,
-    processedAt: new Date().toISOString(),
-    subscriptionId: payload.admin_graphql_api_id ?? null,
-    status: payload.status ?? null,
-    planName: payload.name ?? null,
-  });
-
-  return res.status(200).send("ok");
+  void withRetry(
+    () =>
+      reconcileStoreSubscriptionFromWebhook({
+        shopDomain: envelope.shopDomain,
+        shopifyChargeId: payload.admin_graphql_api_id ?? null,
+        planName: payload.name ?? null,
+        status: payload.status ?? null,
+        currentPeriodEnd:
+          payload.current_period_end ?? payload.currentPeriodEnd ?? null,
+      }),
+    {
+      attempts: 3,
+      delayMs: 500,
+      operationName: "webhook.app_subscription_updated",
+      context: { shop: envelope.shopDomain },
+    }
+  )
+    .then(() => {
+      logEvent("info", "webhook.app_subscription_updated", {
+        shop: envelope.shopDomain,
+        route: req.path,
+        processedAt: new Date().toISOString(),
+        subscriptionId: payload.admin_graphql_api_id ?? null,
+        status: payload.status ?? null,
+        planName: payload.name ?? null,
+      });
+    })
+    .catch((error) => {
+      logEvent("error", "webhook.app_subscription_updated_failed", {
+        shop: envelope.shopDomain,
+        subscriptionId: payload.admin_graphql_api_id ?? null,
+        error,
+      });
+    });
 }
 
 shopifyWebhookRouter.post("/orders_create", handleSyncWebhook);
