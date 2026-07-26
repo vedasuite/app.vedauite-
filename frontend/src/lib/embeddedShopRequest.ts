@@ -10,6 +10,11 @@ type EmbeddedRequestOptions = {
   signal?: AbortSignal;
 };
 
+// Retries reserved for expired/invalid session tokens, independent of the
+// caller's retry budget. Two is enough: the first fetches a fresh token, the
+// second covers App Bridge still initialising on a cold load.
+const AUTH_RETRIES = 2;
+
 function buildUrl(path: string) {
   const url = new URL(path, window.location.origin);
   const isProtectedApiRoute = path.startsWith("/api/");
@@ -179,11 +184,18 @@ export async function embeddedShopRequest<T = unknown>(
   const requestBody = buildRequestBody(path, method, body);
   let attempt = 0;
 
+  // Auth retries are tracked separately from the caller's retry budget.
+  // Shopify session tokens expire after ~60 seconds, so an expired token is a
+  // normal condition on any screen the merchant leaves open — not an error.
+  // Callers that pass retries: 0 (most of them) would otherwise surface
+  // "Invalid Shopify session token" to the merchant on the first expiry.
+  let authAttempt = 0;
+
   while (attempt <= retries) {
     try {
-      // Fetch a session token. Cached (30 s) on first attempt; cache is busted
-      // on 401 retry so we always send a fresh token after a rejection.
-      const sessionToken = await acquireSessionToken(attempt > 0);
+      // Fetch a session token. Cached (30 s) normally; the cache is busted on
+      // an auth retry so a rejected token is never sent twice.
+      const sessionToken = await acquireSessionToken(authAttempt > 0);
       const baseHeaders: Record<string, string> = {
         "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest",
@@ -200,25 +212,27 @@ export async function embeddedShopRequest<T = unknown>(
       );
 
       if (responseResult.response.status === 401) {
-        // Shopify signals that a fresh session token should fix this transient
-        // auth failure. Retry within the caller's retry budget before surfacing
-        // a reconnect prompt — this handles the race on fresh install where App
-        // Bridge hasn't issued a valid token yet.
+        // Shopify sets this header to say a fresh session token should fix the
+        // failure. Retry on our own budget rather than the caller's: the common
+        // case is simply an expired 60-second token, which must never reach the
+        // merchant as an error. Only after AUTH_RETRIES consecutive failures do
+        // we treat it as a genuine authorization problem.
         const shopifyWantsRetry =
           responseResult.response.headers.get(
             "x-shopify-retry-invalid-session-request"
           ) === "1";
+        const willRetry = shopifyWantsRetry && authAttempt < AUTH_RETRIES;
         // eslint-disable-next-line no-console
         console.warn("[vedasuite.auth] 401_received", {
           path,
-          attempt,
-          retries,
+          authAttempt,
           shopifyWantsRetry,
-          willRetry: shopifyWantsRetry && attempt < retries,
+          willRetry,
         });
-        if (shopifyWantsRetry && attempt < retries) {
-          attempt += 1;
-          await new Promise((r) => setTimeout(r, 800 * attempt));
+        if (willRetry) {
+          authAttempt += 1;
+          // Short backoff — a fresh idToken() is normally instant.
+          await new Promise((r) => setTimeout(r, 250 * authAttempt));
           continue;
         }
         throw enrichError(

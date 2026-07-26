@@ -26,6 +26,45 @@ export function bustSessionTokenCache() {
   sessionTokenCache.clear();
 }
 
+// Shopify session tokens carry an `exp` claim and live for about 60 seconds.
+// Caching on a fixed timer alone can hand back a token that expired while the
+// tab was backgrounded or during a slow request, which the backend then
+// rejects with 401. Read the real expiry and stop serving the token 10 seconds
+// before it lapses, so it is still valid when the request lands.
+const TOKEN_EXPIRY_SAFETY_MS = 10_000;
+const MAX_TOKEN_CACHE_MS = 30_000;
+
+function readTokenExpiry(token: string): number | null {
+  try {
+    const [, payloadSegment] = token.split(".");
+    if (!payloadSegment) {
+      return null;
+    }
+    // JWT uses base64url; atob expects standard base64.
+    const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "="
+    );
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheExpiryFor(token: string): number {
+  const now = Date.now();
+  const ceiling = now + MAX_TOKEN_CACHE_MS;
+  const tokenExpiry = readTokenExpiry(token);
+
+  if (tokenExpiry === null) {
+    return ceiling;
+  }
+
+  return Math.min(ceiling, tokenExpiry - TOKEN_EXPIRY_SAFETY_MS);
+}
+
 export function getEmbeddedAppBridge() {
   return window.shopify ?? null;
 }
@@ -55,7 +94,7 @@ export async function getEmbeddedSessionToken(): Promise<string | null> {
   ).then((token) => {
     sessionTokenCache.set(cacheKey, {
       token,
-      expiresAt: Date.now() + 30_000,
+      expiresAt: cacheExpiryFor(token),
     });
     return token;
   });

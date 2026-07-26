@@ -621,6 +621,14 @@ export async function fetchCompetitorSnapshot(
             }
           );
 
+          // A 404/410 means the competitor simply doesn't carry this product —
+          // the expected outcome for most handles, not a failure. Returning
+          // instead of throwing avoids two pointless retries and an
+          // error-level log line for every unmatched product.
+          if (response.status === 404 || response.status === 410) {
+            return null;
+          }
+
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
