@@ -64,7 +64,7 @@ model Store {
 
 model ProductSnapshot {
   id               String   @id @default(cuid())
-  store            Store    @relation(fields: [storeId], references: [id])
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId          String
   shopifyProductId String
   handle           String
@@ -111,7 +111,7 @@ model SubscriptionPlan {
 
 model StoreSubscription {
   id              String           @id @default(cuid())
-  store           Store            @relation("StoreToSubscription", fields: [storeId], references: [id])
+  store           Store            @relation("StoreToSubscription", fields: [storeId], references: [id], onDelete: Cascade)
   storeId         String           @unique
   plan            SubscriptionPlan @relation(fields: [planId], references: [id])
   planId          String
@@ -134,7 +134,7 @@ model StoreSubscription {
 
 model BillingAuditLog {
   id                  String             @id @default(cuid())
-  store               Store              @relation(fields: [storeId], references: [id])
+  store               Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId             String
   subscription        StoreSubscription? @relation(fields: [subscriptionId], references: [id])
   subscriptionId      String?
@@ -150,7 +150,7 @@ model BillingAuditLog {
 
 model BillingPlanIntent {
   id                   String   @id @default(cuid())
-  store                Store    @relation(fields: [storeId], references: [id])
+  store                Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId              String
   requestedPlanName    String
   requestedStarterModule String?
@@ -173,7 +173,7 @@ model BillingPlanIntent {
 
 model Customer {
   id                 String   @id @default(cuid())
-  store              Store    @relation(fields: [storeId], references: [id])
+  store              Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId            String
   shopifyCustomerId  String
   email              String?
@@ -194,7 +194,7 @@ model Customer {
 
 model Order {
   id              String    @id @default(cuid())
-  store           Store     @relation(fields: [storeId], references: [id])
+  store           Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId         String
   customer        Customer? @relation(fields: [customerId], references: [id])
   customerId      String?
@@ -222,7 +222,7 @@ model Order {
 
 model FraudSignal {
   id         String    @id @default(cuid())
-  store      Store     @relation(fields: [storeId], references: [id])
+  store      Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId    String
   order      Order?    @relation(fields: [orderId], references: [id])
   orderId    String?
@@ -246,7 +246,7 @@ model FraudSignal {
 
 model CompetitorDomain {
   id        String   @id @default(cuid())
-  store     Store    @relation(fields: [storeId], references: [id])
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId   String
   domain    String
   label     String?
@@ -255,7 +255,7 @@ model CompetitorDomain {
 
 model CompetitorData {
   id             String   @id @default(cuid())
-  store          Store    @relation(fields: [storeId], references: [id])
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId        String
   productHandle  String
   competitorName String
@@ -271,7 +271,7 @@ model CompetitorData {
 
 model PriceHistory {
   id                  String   @id @default(cuid())
-  store               Store    @relation(fields: [storeId], references: [id])
+  store               Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId             String
   productHandle       String
   currentPrice        Float
@@ -284,7 +284,7 @@ model PriceHistory {
 
 model ProfitOptimizationData {
   id                      String   @id @default(cuid())
-  store                   Store    @relation(fields: [storeId], references: [id])
+  store                   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId                 String
   productHandle           String
   productCost             Float
@@ -304,7 +304,7 @@ model ProfitOptimizationData {
 
 model TimelineEvent {
   id           String    @id @default(cuid())
-  store        Store     @relation(fields: [storeId], references: [id])
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId      String
   customer     Customer? @relation(fields: [customerId], references: [id])
   customerId   String?
@@ -325,7 +325,7 @@ model TimelineEvent {
 
 model SyncJob {
   id           String   @id @default(cuid())
-  store        Store    @relation(fields: [storeId], references: [id])
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId      String
   jobType      String
   triggerSource String

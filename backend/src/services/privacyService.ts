@@ -236,20 +236,17 @@ export async function redactShopData(shopDomain: string) {
     };
   }
 
+  // Every foreign key to Store is ON DELETE CASCADE, so this single statement
+  // erases the store and all of its related rows atomically.
+  //
+  // Do not reintroduce per-table deleteMany calls here. This function
+  // previously maintained its own list, which silently fell out of step with
+  // the schema as tables were added: ProductSnapshot, BillingAuditLog,
+  // BillingPlanIntent, TimelineEvent and SyncJob were all missing from it, and
+  // their RESTRICT constraints made every redaction fail. The database is now
+  // the single source of truth for what "all of a store's data" means, so a
+  // table added later is covered automatically.
   await prisma.$transaction(async (tx) => {
-    if (store.subscription) {
-      await tx.storeSubscription.delete({
-        where: { id: store.subscription.id },
-      });
-    }
-
-    await tx.fraudSignal.deleteMany({ where: { storeId: store.id } });
-    await tx.order.deleteMany({ where: { storeId: store.id } });
-    await tx.customer.deleteMany({ where: { storeId: store.id } });
-    await tx.competitorData.deleteMany({ where: { storeId: store.id } });
-    await tx.competitorDomain.deleteMany({ where: { storeId: store.id } });
-    await tx.priceHistory.deleteMany({ where: { storeId: store.id } });
-    await tx.profitOptimizationData.deleteMany({ where: { storeId: store.id } });
     await tx.store.delete({ where: { id: store.id } });
   });
 
