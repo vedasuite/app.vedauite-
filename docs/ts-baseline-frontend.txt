@@ -1,0 +1,32 @@
+src/components/ModuleGate.tsx(19,8): error TS7016: Could not find a declaration file for module '../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/layout/AppFrame.tsx(12,8): error TS7016: Could not find a declaration file for module '../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/modules/CompetitorIntelligence/CompetitorPage.tsx(1043,29): error TS2322: Type '"success" | "info" | "subdued" | "attention"' is not assignable to type 'Tone | undefined'.
+src/modules/CompetitorIntelligence/CompetitorPage.tsx(25,40): error TS7016: Could not find a declaration file for module '../../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/modules/CompetitorIntelligence/CompetitorPage.tsx(735,29): error TS2322: Type '"250"' is not assignable to type 'Gap | undefined'.
+src/modules/CompetitorIntelligence/CompetitorPage.tsx(770,29): error TS2322: Type '"250"' is not assignable to type 'Gap | undefined'.
+src/modules/Dashboard/DashboardPage.tsx(1194,17): error TS18047: 'metrics' is possibly 'null'.
+src/modules/Dashboard/DashboardPage.tsx(1197,15): error TS2322: Type '"critical" | "success" | "info" | "attention"' is not assignable to type 'BannerTone | undefined'.
+src/modules/Dashboard/DashboardPage.tsx(1197,69): error TS18047: 'metrics' is possibly 'null'.
+src/modules/Dashboard/DashboardPage.tsx(1202,21): error TS18047: 'metrics' is possibly 'null'.
+src/modules/Dashboard/DashboardPage.tsx(1268,15): error TS2322: Type '"critical" | "success" | "attention"' is not assignable to type 'BannerTone | undefined'.
+src/modules/Dashboard/DashboardPage.tsx(366,27): error TS2339: Property 'status' does not exist on type 'never'.
+src/modules/Dashboard/DashboardPage.tsx(370,33): error TS2339: Property 'reason' does not exist on type 'never'.
+src/modules/Dashboard/DashboardPage.tsx(376,33): error TS2339: Property 'reason' does not exist on type 'never'.
+src/modules/Dashboard/DashboardPage.tsx(382,33): error TS2339: Property 'reason' does not exist on type 'never'.
+src/modules/Dashboard/DashboardPage.tsx(388,33): error TS2339: Property 'reason' does not exist on type 'never'.
+src/modules/Dashboard/DashboardPage.tsx(927,5): error TS2322: Type '{ processed: boolean; status: string; reason: string; } | null' is not assignable to type 'null | undefined'.
+src/modules/Dashboard/DashboardPage.tsx(933,5): error TS2322: Type '{ processed: boolean; status: string; reason: string; } | null' is not assignable to type 'null | undefined'.
+src/modules/Dashboard/DashboardPage.tsx(939,5): error TS2322: Type '{ processed: boolean; status: string; reason: string; } | null' is not assignable to type 'null | undefined'.
+src/modules/FraudIntelligence/FraudPage.tsx(25,40): error TS7016: Could not find a declaration file for module '../../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/modules/Onboarding/OnboardingPage.tsx(488,27): error TS2322: Type '"250"' is not assignable to type 'Gap | undefined'.
+src/modules/Onboarding/OnboardingPage.tsx(548,29): error TS2322: Type '"250"' is not assignable to type 'Gap | undefined'.
+src/modules/Onboarding/OnboardingPage.tsx(735,28): error TS2322: Type 'string | null' is not assignable to type 'string'.
+src/modules/PricingProfit/PricingProfitPage.tsx(607,96): error TS2322: Type '"subdued"' is not assignable to type 'Tone | undefined'.
+src/modules/PricingProfit/PricingProfitPage.tsx(630,34): error TS2322: Type '"success" | "info" | "subdued" | "attention"' is not assignable to type 'Tone | undefined'.
+src/modules/Settings/SettingsPage.tsx(24,66): error TS7016: Could not find a declaration file for module '../../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/modules/SubscriptionPlans/PricingPage.tsx(27,59): error TS7016: Could not find a declaration file for module './starterModuleMutation'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/modules/SubscriptionPlans/starterModuleMutation.js' implicitly has an 'any' type.
+src/modules/SubscriptionPlans/PricingPage.tsx(732,17): error TS2322: Type '"critical" | "success" | "info" | "warning" | "attention"' is not assignable to type 'BannerTone | undefined'.
+src/modules/TrustAbuse/TrustAbusePage.tsx(23,40): error TS7016: Could not find a declaration file for module '../../lib/backendModuleAccess'. 'C:/Users/Abhimanyu/OneDrive/Desktop/untitled folder/vedasuite-shopify-app/app-repo/frontend/src/lib/backendModuleAccess.js' implicitly has an 'any' type.
+src/modules/TrustAbuse/TrustAbusePage.tsx(602,164): error TS18048: 'overview.automationRules' is possibly 'undefined'.
+src/modules/TrustAbuse/TrustAbusePage.tsx(637,44): error TS2322: Type 'number' is not assignable to type 'string'.
+src/providers/OnboardingProvider.tsx(176,21): error TS2352: Conversion of type '{ stage: string; isCompleted: boolean; canAccessDashboard: boolean; nextRoute: string; title: string; description: string; }' to type 'OnboardingState' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.

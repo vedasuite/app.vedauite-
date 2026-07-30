@@ -111,15 +111,22 @@ A repo-wide search for `opportunityScore`, `executiveSummary`, `revenueLeak`, `w
 
 ## 4. New values derivable deterministically from existing data (audit item 4)
 
+> **Amended 2026-07-30** — formulas below are governed by the amended implementation plan (§7). Two facts were confirmed by code audit and constrain what is derivable:
+> - **No competitor-revenue-impact formula exists** in the codebase (`competitorService` computes match/price-gap/priority signals only; nothing links a price gap to revenue).
+> - **No order line items exist** in the schema (`Order` has `totalAmount` but no per-product breakdown). True per-product revenue is therefore **not** directly available; the only per-product revenue signal is the `ProfitOptimizationData` proxy `sellingPrice × salesVelocity`.
+
 All of the following can be computed from data already in the DB, with **no new Shopify scopes and no new external calls**:
 
-- **Margin %** = `(sellingPrice − productCost) / sellingPrice` (from `ProfitOptimizationData`).
+- **Margin %** = `(sellingPrice − productCost) / sellingPrice` (from `ProfitOptimizationData`), only when `productCost > 0`.
 - **Margin-vs-guardrail status** = compare derived margin to `Store.profitGuardrail`.
-- **Opportunity Score** (per insight) = deterministic function of `financialImpact` (existing), `confidence` (existing), `recency` (existing timestamps), and `severity`/`riskLevel` (existing). See implementation plan for the exact formula and caps.
-- **Revenue Leak total** = sum of already-computed negative-impact items: refund exposure (`Order.refunded`/`refundRequested` × `totalAmount`), margin left on table (`expectedProfitGain` for un-actioned `PriceHistory` rows), competitor undercut exposure. All inputs already stored.
-- **Urgency** = deterministic bucket from `severity`/`riskLevel` + `financialImpact` + recency.
-- **Executive Summary** = deterministic templated roll-up of the existing decision-center items + dashboard metrics (counts, top item, revenue-leak total). **Templated/deterministic, not a live LLM call in the request path** — see compliance safeguards.
-- **Data-quality flag** = derived from row counts and `lastSyncAt` recency per module.
+- **Opportunity Score** (per insight) = deterministic weighted sum of five normalized factors — **financial impact 35% · urgency 25% · confidence 20% · ease of action 10% · recency 10%** — with every component score returned to the UI. Missing impact or confidence **excludes** the item from ranking (never scored high). See implementation plan §7.1–7.2.
+- **Revenue Leak** = **two separate groups, never summed** — *potential upside* (underpricing / margin / safe-pricing profit opportunities) and *revenue at risk* (competitor-price pressure / return-abuse / high-risk-order exposure). Each is a bounded range with confidence + data coverage. No combined "total exposure". See §7.3.
+- **Competitor revenue impact** = conservative **bounded range** from the velocity revenue proxy × capped price gap × confidence factor × importance, or **`impact_not_quantifiable`** when inputs are missing/stale/low-confidence. See §7.4.
+- **Urgency** = deterministic bucket from `severity`/`riskLevel`.
+- **Executive Summary** = deterministic templated roll-up of decision-center items + dashboard metrics. **Templated/deterministic, not a live LLM call.**
+- **Data-quality / coverage** = derived from row counts and `lastSyncAt` recency per module.
+
+**Evidence exposure (amended):** explainability evidence is **aggregate-only** (return rate, order/refund/address counts, order-frequency band, risk-signal count). Raw PII — full email, full address, IP, device/payment fingerprint, raw Shopify payloads — is **never** placed in generic evidence responses or logs (implementation plan §16).
 
 ---
 
