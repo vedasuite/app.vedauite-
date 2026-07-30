@@ -17,6 +17,8 @@ import { reportsRouter } from "./reportsRoutes";
 import { settingsRouter } from "./settingsRoutes";
 import { shopifyRouter } from "./shopifyRoutes";
 import { subscriptionDebugRouter, subscriptionRouter } from "./subscriptionRoutes";
+import { supportAdminRouter } from "./supportAdminRoutes";
+import { supportRouter } from "./supportRoutes";
 import { trustAbuseRouter } from "./trustAbuseRoutes";
 
 export const router = Router();
@@ -25,6 +27,9 @@ router.use("/auth", authRouter);
 router.use("/billing", billingRouter);
 router.use(publicRouter);
 router.use(launchRouter);
+// Developer support console — gated by SUPPORT_ADMIN_TOKEN inside the router,
+// mounted OUTSIDE /api since the developer has no Shopify session token.
+router.use("/support-admin", supportAdminRouter);
 
 router.use("/api", verifyShopifySessionToken);
 // Mint an offline Admin API token from the verified session token whenever one
@@ -45,6 +50,8 @@ router.use("/api/credit-score", creditScoreRouter);
 router.use("/api/profit", profitRouter);
 router.use("/api/reports", reportsRouter);
 router.use("/api/settings", settingsRouter);
+// Merchant support — session-token authenticated, no plan capability required.
+router.use("/api/support", supportRouter);
 router.use("/api/shopify", shopifyRouter);
 router.use("/api/internal/debug", shopifyRouter);
 

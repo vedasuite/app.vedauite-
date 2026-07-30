@@ -8,32 +8,32 @@ datasource db {
 }
 
 model Store {
-  id          String @id @default(cuid())
-  shop        String @unique
-  accessToken String?
-  grantedScopes String? @map("scope")
-  tokenAcquisitionMode String? @default("offline_expiring")
-  isOffline   Boolean @default(true)
-  installedAt DateTime?
-  reauthorizedAt DateTime?
-  webhooksRegisteredAt DateTime?
-  lastWebhookRegistrationStatus String?
-  lastConnectionCheckAt DateTime?
-  lastConnectionStatus String?
-  lastConnectionError String?
-  authErrorCode String?
-  authErrorMessage String?
-  accessTokenExpiresAt DateTime?
-  refreshToken String?
-  refreshTokenExpiresAt DateTime?
-  uninstalledAt DateTime?
-  lastSyncAt DateTime?
-  lastSyncStatus String? @map("syncStatus")
-  onboardingCompletedAt DateTime?
-  onboardingDismissedAt DateTime?
-  onboardingSelectedModule String?
+  id                             String    @id @default(cuid())
+  shop                           String    @unique
+  accessToken                    String?
+  grantedScopes                  String?   @map("scope")
+  tokenAcquisitionMode           String?   @default("offline_expiring")
+  isOffline                      Boolean   @default(true)
+  installedAt                    DateTime?
+  reauthorizedAt                 DateTime?
+  webhooksRegisteredAt           DateTime?
+  lastWebhookRegistrationStatus  String?
+  lastConnectionCheckAt          DateTime?
+  lastConnectionStatus           String?
+  lastConnectionError            String?
+  authErrorCode                  String?
+  authErrorMessage               String?
+  accessTokenExpiresAt           DateTime?
+  refreshToken                   String?
+  refreshTokenExpiresAt          DateTime?
+  uninstalledAt                  DateTime?
+  lastSyncAt                     DateTime?
+  lastSyncStatus                 String?   @map("syncStatus")
+  onboardingCompletedAt          DateTime?
+  onboardingDismissedAt          DateTime?
+  onboardingSelectedModule       String?
   onboardingFirstInsightViewedAt DateTime?
-  onboardingPlanConfirmedAt DateTime?
+  onboardingPlanConfirmedAt      DateTime?
 
   trialStartedAt DateTime?
   trialEndsAt    DateTime?
@@ -45,18 +45,19 @@ model Store {
 
   subscription StoreSubscription? @relation("StoreToSubscription")
 
-  competitorDomains CompetitorDomain[]
-  productSnapshots  ProductSnapshot[]
-  orders            Order[]
-  customers         Customer[]
-  fraudSignals      FraudSignal[]
-  competitorData    CompetitorData[]
-  priceHistory      PriceHistory[]
-  profitData        ProfitOptimizationData[]
-  billingAuditLogs  BillingAuditLog[]
+  competitorDomains  CompetitorDomain[]
+  productSnapshots   ProductSnapshot[]
+  orders             Order[]
+  customers          Customer[]
+  fraudSignals       FraudSignal[]
+  competitorData     CompetitorData[]
+  priceHistory       PriceHistory[]
+  profitData         ProfitOptimizationData[]
+  billingAuditLogs   BillingAuditLog[]
   billingPlanIntents BillingPlanIntent[]
-  timelineEvents    TimelineEvent[]
-  syncJobs          SyncJob[]
+  timelineEvents     TimelineEvent[]
+  syncJobs           SyncJob[]
+  supportTickets     SupportTicket[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -84,15 +85,15 @@ model ProductSnapshot {
 }
 
 model VariantSnapshot {
-  id               String          @id @default(cuid())
-  product          ProductSnapshot @relation(fields: [productSnapshotId], references: [id], onDelete: Cascade)
+  id                String          @id @default(cuid())
+  product           ProductSnapshot @relation(fields: [productSnapshotId], references: [id], onDelete: Cascade)
   productSnapshotId String
-  shopifyVariantId String
-  title            String
-  price            Float
-  currency         String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  shopifyVariantId  String
+  title             String
+  price             Float
+  currency          String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@unique([productSnapshotId, shopifyVariantId])
 }
@@ -110,63 +111,63 @@ model SubscriptionPlan {
 }
 
 model StoreSubscription {
-  id              String           @id @default(cuid())
-  store           Store            @relation("StoreToSubscription", fields: [storeId], references: [id], onDelete: Cascade)
-  storeId         String           @unique
-  plan            SubscriptionPlan @relation(fields: [planId], references: [id])
-  planId          String
-  starterModule   String?
-  shopifyChargeId String? // link to Shopify Billing
-  active          Boolean          @default(true)
-  billingStatus   String           @default("ACTIVE")
-  startedAt       DateTime         @default(now())
-  planActivatedAt DateTime         @default(now())
-  cancelledAt     DateTime?
-  endsAt          DateTime?
-  lastBillingSyncAt DateTime?
+  id                            String           @id @default(cuid())
+  store                         Store            @relation("StoreToSubscription", fields: [storeId], references: [id], onDelete: Cascade)
+  storeId                       String           @unique
+  plan                          SubscriptionPlan @relation(fields: [planId], references: [id])
+  planId                        String
+  starterModule                 String?
+  shopifyChargeId               String? // link to Shopify Billing
+  active                        Boolean          @default(true)
+  billingStatus                 String           @default("ACTIVE")
+  startedAt                     DateTime         @default(now())
+  planActivatedAt               DateTime         @default(now())
+  cancelledAt                   DateTime?
+  endsAt                        DateTime?
+  lastBillingSyncAt             DateTime?
   lastBillingWebhookProcessedAt DateTime?
-  lastBillingResolutionSource String?
-  lastBillingSubscriptionName String?
-  moduleSwitchedAt  DateTime?
+  lastBillingResolutionSource   String?
+  lastBillingSubscriptionName   String?
+  moduleSwitchedAt              DateTime?
 
   auditLogs BillingAuditLog[]
 }
 
 model BillingAuditLog {
-  id                  String             @id @default(cuid())
-  store               Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  storeId             String
-  subscription        StoreSubscription? @relation(fields: [subscriptionId], references: [id])
-  subscriptionId      String?
-  eventType           String
-  previousPlanName    String?
-  nextPlanName        String?
+  id                    String             @id @default(cuid())
+  store                 Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId               String
+  subscription          StoreSubscription? @relation(fields: [subscriptionId], references: [id])
+  subscriptionId        String?
+  eventType             String
+  previousPlanName      String?
+  nextPlanName          String?
   previousStarterModule String?
-  nextStarterModule   String?
-  billingStatus       String?
-  metadataJson        String?
-  createdAt           DateTime           @default(now())
+  nextStarterModule     String?
+  billingStatus         String?
+  metadataJson          String?
+  createdAt             DateTime           @default(now())
 }
 
 model BillingPlanIntent {
-  id                   String   @id @default(cuid())
-  store                Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  storeId              String
-  requestedPlanName    String
+  id                     String    @id @default(cuid())
+  store                  Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId                String
+  requestedPlanName      String
   requestedStarterModule String?
-  actionType           String
-  status               String   @default("CREATING")
-  confirmationUrl      String?
-  shopifyChargeId      String?
-  host                 String?
-  returnPath           String?
-  errorCode            String?
-  errorMessage         String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  confirmedAt          DateTime?
-  cancelledAt          DateTime?
-  expiresAt            DateTime?
+  actionType             String
+  status                 String    @default("CREATING")
+  confirmationUrl        String?
+  shopifyChargeId        String?
+  host                   String?
+  returnPath             String?
+  errorCode              String?
+  errorMessage           String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  confirmedAt            DateTime?
+  cancelledAt            DateTime?
+  expiresAt              DateTime?
 
   @@index([storeId, status, createdAt])
 }
@@ -187,32 +188,32 @@ model Customer {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  orders       Order[]
-  fraudSignals FraudSignal[]
+  orders         Order[]
+  fraudSignals   FraudSignal[]
   timelineEvents TimelineEvent[]
 }
 
 model Order {
-  id              String    @id @default(cuid())
-  store           Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  storeId         String
-  customer        Customer? @relation(fields: [customerId], references: [id])
-  customerId      String?
-  shopifyOrderId  String    @unique
-  shopifyOrderGid String?
+  id                   String    @id @default(cuid())
+  store                Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId              String
+  customer             Customer? @relation(fields: [customerId], references: [id])
+  customerId           String?
+  shopifyOrderId       String    @unique
+  shopifyOrderGid      String?
   shopifyLegacyOrderId String?
-  orderName       String?
-  totalAmount     Float
-  currency        String
-  fraudScore      Int       @default(0)
-  fraudRiskLevel  String    @default("Low")
-  refundRequested Boolean   @default(false)
-  refunded        Boolean   @default(false)
-  status          String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  orderName            String?
+  totalAmount          Float
+  currency             String
+  fraudScore           Int       @default(0)
+  fraudRiskLevel       String    @default("Low")
+  refundRequested      Boolean   @default(false)
+  refunded             Boolean   @default(false)
+  status               String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  fraudSignals FraudSignal[]
+  fraudSignals   FraudSignal[]
   timelineEvents TimelineEvent[]
 
   @@index([shopifyOrderGid])
@@ -324,18 +325,42 @@ model TimelineEvent {
 }
 
 model SyncJob {
-  id           String   @id @default(cuid())
-  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  storeId      String
-  jobType      String
+  id            String    @id @default(cuid())
+  store         Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId       String
+  jobType       String
   triggerSource String
-  status       String   @default("PENDING")
-  summaryJson  String?
-  errorMessage String?
-  startedAt    DateTime?
-  finishedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  status        String    @default("PENDING")
+  summaryJson   String?
+  errorMessage  String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
+}
+
+model SupportTicket {
+  id            String    @id @default(cuid())
+  // onDelete: Cascade so a shop/redact erases the merchant's tickets with the
+  // rest of their data — a ticket holds the merchant's message and optional
+  // contact email, which is personal data.
+  store         Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId       String
+  // Denormalized shop domain for the admin list view. Erased with the row.
+  shop          String
+  subject       String
+  category      String    @default("general")
+  message       String
+  contactEmail  String?
+  // OPEN | IN_PROGRESS | RESOLVED
+  status        String    @default("OPEN")
+  adminResponse String?
+  respondedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([storeId, createdAt])
   @@index([status, createdAt])

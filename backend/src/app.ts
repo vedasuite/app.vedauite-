@@ -31,6 +31,7 @@ const embeddedAppRoutes = [
   "/app/ai-pricing-engine",
   "/app/billing",
   "/app/settings",
+  "/app/support",
   "/dashboard",
   "/onboarding",
   "/modules/fraud",

@@ -7,6 +7,7 @@ import { AppFrame } from "./layout/AppFrame";
 import { DashboardPage } from "./modules/Dashboard/DashboardPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
 import { SettingsPage } from "./modules/Settings/SettingsPage";
+import { SupportPage } from "./modules/Support/SupportPage";
 import { PricingPage } from "./modules/SubscriptionPlans/PricingPage";
 import { PricingProfitPage } from "./modules/PricingProfit/PricingProfitPage";
 import { TrustAbusePage } from "./modules/TrustAbuse/TrustAbusePage";
@@ -127,6 +128,7 @@ export default function App() {
         />
         <Route path="/app/billing" element={withRouteBoundary("Billing", <PricingPage />)} />
         <Route path="/app/settings" element={withRouteBoundary("Settings", <SettingsPage />)} />
+        <Route path="/app/support" element={withRouteBoundary("Support", <SupportPage />)} />
 
         <Route path="/onboarding" element={<Navigate to="/app/onboarding" replace />} />
         <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
