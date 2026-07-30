@@ -268,19 +268,22 @@ async function handleCustomersDataRequest(req: any, res: any) {
       envelope.payload
     );
 
+    // Success, including "unknown shop" and "customer not found" — those are
+    // normal returns, not thrown errors, so they land here as 200.
     return res.status(200).json({
       ok: true,
       shop: envelope.shopDomain,
       ...result,
     });
   } catch (error) {
-    // Always return 200 to Shopify — retrying a data export is harmless but a
-    // 5xx causes Shopify to flag the compliance endpoint as unhealthy.
+    // A thrown error is now a genuine failure (DB error, filesystem error).
+    // Report it honestly with 500 so a real, persistent problem surfaces rather
+    // than hiding behind an unconditional 200. Shopify retries on 5xx.
     logEvent("error", "webhook.customers_data_request_failed", {
       shop: envelope.shopDomain,
       error,
     });
-    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+    return res.status(500).json({ ok: false, shop: envelope.shopDomain });
   }
 }
 
@@ -293,17 +296,22 @@ async function handleCustomersRedact(req: any, res: any) {
   try {
     const result = await redactCustomerData(envelope.shopDomain, envelope.payload);
 
+    // Success, including unknown-shop / customer-not-found / missing-id — all
+    // normal returns. There is nothing to erase in those cases, which is not a
+    // failure.
     return res.status(200).json({
       ok: true,
       shop: envelope.shopDomain,
       ...result,
     });
   } catch (error) {
+    // Genuine failure (DB error mid-transaction). Honest 500 so it is not
+    // silently retried-into-nowhere; Shopify redelivers on 5xx.
     logEvent("error", "webhook.customers_redact_failed", {
       shop: envelope.shopDomain,
       error,
     });
-    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+    return res.status(500).json({ ok: false, shop: envelope.shopDomain });
   }
 }
 
@@ -316,16 +324,25 @@ async function handleShopRedact(req: any, res: any) {
   try {
     const result = await redactShopData(envelope.shopDomain);
 
+    // All three non-throwing outcomes are success:
+    //   deleted                -> data erased
+    //   not_found              -> unknown shop, or already erased on a retry
+    //   skipped_active_install -> shop reinstalled; must not erase a live store
+    // None is an error, so all return 200.
     return res.status(200).json({
       ok: true,
+      shop: envelope.shopDomain,
       ...result,
     });
   } catch (error) {
+    // A throw is a genuine failure — a DB error during the delete. This is the
+    // case that was silently returning 200 and hiding the fact that redaction
+    // never happened. Report it honestly with 500; Shopify retries on 5xx.
     logEvent("error", "webhook.shop_redact_failed", {
       shop: envelope.shopDomain,
       error,
     });
-    return res.status(200).json({ ok: false, shop: envelope.shopDomain });
+    return res.status(500).json({ ok: false, shop: envelope.shopDomain });
   }
 }
 

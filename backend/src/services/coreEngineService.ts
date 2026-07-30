@@ -345,6 +345,12 @@ function buildTimelineEvents(store: StoreSnapshot) {
   for (const order of store.orders.slice(0, 25)) {
     const risk = buildOrderRisk(order);
     const orderLabel = getMerchantOrderLabelOrNull(order);
+    // GDPR invariant: customerId here can be null (guest orders), and
+    // customers/redact erases a customer's timeline rows by customerId. So this
+    // event must NEVER carry customer PII (email, name, address) in
+    // title/detail/metadataJson — a null-customerId row would survive redaction.
+    // It currently carries only order label, amounts and risk scores. Keep it
+    // that way, or move the PII onto the customer-scoped trust event instead.
     events.push({
       storeId: store.id,
       customerId: order.customerId,

@@ -1,7 +1,7 @@
 import { env } from "../config/env";
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
-import { redactShopData } from "./privacyService";
+import { deleteStoreCompletely } from "./privacyService";
 
 let sweepTimer: NodeJS.Timeout | null = null;
 
@@ -32,7 +32,7 @@ export async function purgeExpiredUninstalledStores() {
     where: {
       uninstalledAt: { not: null, lt: cutoff },
     },
-    select: { shop: true, uninstalledAt: true },
+    select: { id: true, shop: true, uninstalledAt: true },
   });
 
   if (expired.length === 0) {
@@ -41,19 +41,21 @@ export async function purgeExpiredUninstalledStores() {
 
   let purged = 0;
   let failed = 0;
+  let skippedActive = 0;
 
   for (const store of expired) {
     try {
-      // Reuse the compliance deletion path so retention and shop/redact can
-      // never drift apart on what counts as "all of a store's data".
-      await redactShopData(store.shop);
-      purged += 1;
-
-      logEvent("info", "data_retention.store_purged", {
-        shop: store.shop,
-        uninstalledAt: store.uninstalledAt?.toISOString() ?? null,
-        retentionDays,
-      });
+      // Route through the single guarded deletion path. The guard also refuses
+      // to erase a store that reinstalled since the scan, so retention can never
+      // delete a live install.
+      const result = await deleteStoreCompletely(store.id, "retention_sweep");
+      if (result.outcome === "deleted") {
+        purged += 1;
+      } else if (result.outcome === "skipped_active_install") {
+        skippedActive += 1;
+      }
+      // "not_found" means another delivery already erased it — neither a purge
+      // nor a failure.
     } catch (error) {
       failed += 1;
       logEvent("error", "data_retention.store_purge_failed", {
@@ -67,6 +69,7 @@ export async function purgeExpiredUninstalledStores() {
     scanned: expired.length,
     purged,
     failed,
+    skippedActive,
     retentionDays,
     cutoff: cutoff.toISOString(),
   });

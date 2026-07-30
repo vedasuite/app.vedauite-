@@ -1,4 +1,3 @@
-import { HttpError } from "../lib/httpError";
 import fs from "fs/promises";
 import path from "path";
 import { env } from "../config/env";
@@ -29,23 +28,111 @@ function redactEmail(email?: string | null) {
   return `redacted+${Date.now()}@vedasuite.local`;
 }
 
-async function getStore(shopDomain: string) {
-  const store = await prisma.store.findUnique({
+// Returns null for an unknown shop rather than throwing. A compliance webhook
+// for a shop we never stored is a SUCCESS — there is nothing to export or
+// erase — not an error. The previous throw was swallowed by the handlers'
+// try/catch and reported as 200 {ok:false}, hiding the (benign) case inside the
+// same channel as genuine failures. Callers now branch on null explicitly.
+async function findStore(shopDomain: string) {
+  return prisma.store.findUnique({
     where: { shop: shopDomain },
+  });
+}
+
+export type StoreDeletionOutcome =
+  | { outcome: "deleted"; storeId: string; shop: string }
+  | { outcome: "skipped_active_install"; storeId: string; shop: string }
+  | { outcome: "not_found" };
+
+/**
+ * The SOLE permitted caller of prisma.store.delete(). Do not call store.delete()
+ * or store.deleteMany() anywhere else — route every store deletion through here.
+ *
+ * Every FK to Store is ON DELETE CASCADE, so deleting the row erases all related
+ * data atomically. Because that is now irreversible in a single statement, this
+ * function refuses to delete an ACTIVE install — accessToken present AND
+ * uninstalledAt null — and reports "skipped_active_install" instead. That guard
+ * is the safety catch the RESTRICT constraints used to provide implicitly.
+ *
+ * The guard is enforced inside deleteMany's WHERE, so it is atomic: a store that
+ * becomes active between the read and the delete matches zero rows and is
+ * skipped, with no time-of-check/time-of-use race.
+ */
+export async function deleteStoreCompletely(
+  storeId: string,
+  reason: "shop_redact" | "retention_sweep"
+): Promise<StoreDeletionOutcome> {
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    select: { id: true, shop: true, accessToken: true, uninstalledAt: true },
   });
 
   if (!store) {
-    throw new HttpError(404, "Store not found.");
+    return { outcome: "not_found" };
   }
 
-  return store;
+  const isActiveInstall =
+    store.accessToken !== null && store.uninstalledAt === null;
+
+  if (isActiveInstall) {
+    logEvent("warn", "privacy.store_delete_skipped_active", {
+      storeId: store.id,
+      shop: store.shop,
+      reason,
+    });
+    return { outcome: "skipped_active_install", storeId: store.id, shop: store.shop };
+  }
+
+  // Re-check the guard atomically in the WHERE: delete only if NOT an active
+  // install (accessToken null OR uninstalledAt set).
+  const res = await prisma.store.deleteMany({
+    where: {
+      id: storeId,
+      OR: [{ accessToken: null }, { uninstalledAt: { not: null } }],
+    },
+  });
+
+  if (res.count === 0) {
+    // Zero rows matched after we read it: either it was deleted concurrently,
+    // or it turned into an active install in the gap. Distinguish for honesty.
+    const still = await prisma.store.findUnique({
+      where: { id: storeId },
+      select: { id: true },
+    });
+    if (!still) {
+      return { outcome: "not_found" };
+    }
+    logEvent("warn", "privacy.store_delete_skipped_active", {
+      storeId: store.id,
+      shop: store.shop,
+      reason,
+      note: "became active between read and delete",
+    });
+    return { outcome: "skipped_active_install", storeId: store.id, shop: store.shop };
+  }
+
+  logEvent("info", "privacy.store_deleted", {
+    storeId: store.id,
+    shop: store.shop,
+    reason,
+  });
+  return { outcome: "deleted", storeId: store.id, shop: store.shop };
 }
 
 export async function exportCustomerDataRequest(
   shopDomain: string,
   payload: Record<string, any>
 ) {
-  const store = await getStore(shopDomain);
+  const store = await findStore(shopDomain);
+
+  if (!store) {
+    // Unknown shop — no data held here to export. Success, nothing written.
+    logEvent("info", "privacy.customer_data_request_no_store", {
+      shop: shopDomain,
+    });
+    return { outputPath: null, customerFound: false, orderCount: 0, fraudSignalCount: 0 };
+  }
+
   const customerId = normalizeCustomerId(
     payload.customer?.id ?? payload.customer_id ?? payload.customerId
   );
@@ -138,20 +225,25 @@ export async function redactCustomerData(
   shopDomain: string,
   payload: Record<string, any>
 ) {
-  const store = await getStore(shopDomain);
+  const store = await findStore(shopDomain);
   const customerId = normalizeCustomerId(
     payload.customer?.id ?? payload.customer_id ?? payload.customerId
   );
 
+  if (!store) {
+    // Unknown shop — nothing of this customer's is stored here. Success.
+    return { redacted: false, reason: "store_not_found" };
+  }
+
   if (!customerId) {
+    // Do not log the raw payload: it can contain the customer's email/PII.
     logEvent("warn", "privacy.customer_redact_missing_customer_id", {
       shop: shopDomain,
-      payload,
     });
 
     return {
       redacted: false,
-      reason: "Missing customer id in webhook payload.",
+      reason: "missing_customer_id",
     };
   }
 
@@ -160,20 +252,27 @@ export async function redactCustomerData(
       storeId: store.id,
       shopifyCustomerId: customerId,
     },
-    include: {
-      orders: true,
-      fraudSignals: true,
-    },
   });
 
   if (!customer) {
     return {
       redacted: false,
-      reason: "Customer not found in app data.",
+      reason: "customer_not_found",
     };
   }
 
   await prisma.$transaction(async (tx) => {
+    // TimelineEvent carries customerId plus free-text title/detail/metadataJson,
+    // and metadataJson embeds the raw customer email (see coreEngineService
+    // trust_profile_scored events). These rows are derived analytics,
+    // reconstructible from source data, so they are DELETED rather than
+    // field-stripped — surgically editing opaque JSON is fragile and would
+    // silently miss any field added later. Deleting by customerId is provably
+    // complete for this customer's timeline PII.
+    await tx.timelineEvent.deleteMany({
+      where: { customerId: customer.id },
+    });
+
     await tx.fraudSignal.updateMany({
       where: {
         customerId: customer.id,
@@ -185,6 +284,10 @@ export async function redactCustomerData(
         ipAddress: null,
         deviceFingerprint: null,
         paymentFingerprint: null,
+        // sharedNetworkHash is sha256(email|deviceFP|paymentFP|shippingAddress).
+        // A hash of personal data is still personal data, so nulling the source
+        // fields while keeping the hash would be an incomplete anonymisation.
+        sharedNetworkHash: null,
       },
     });
 
@@ -223,39 +326,35 @@ export async function redactCustomerData(
   };
 }
 
-export async function redactShopData(shopDomain: string) {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    include: { subscription: true },
-  });
+export type ShopRedactResult =
+  | { redacted: true; shop: string }
+  | { redacted: false; reason: "not_found" | "skipped_active_install" };
+
+export async function redactShopData(
+  shopDomain: string
+): Promise<ShopRedactResult> {
+  const store = await findStore(shopDomain);
 
   if (!store) {
-    return {
-      redacted: false,
-      reason: "Store not found.",
-    };
+    // Unknown shop, or already erased by a prior delivery (Shopify retries).
+    // Nothing to do — this is success, not failure.
+    return { redacted: false, reason: "not_found" };
   }
 
-  // Every foreign key to Store is ON DELETE CASCADE, so this single statement
-  // erases the store and all of its related rows atomically.
-  //
-  // Do not reintroduce per-table deleteMany calls here. This function
-  // previously maintained its own list, which silently fell out of step with
-  // the schema as tables were added: ProductSnapshot, BillingAuditLog,
-  // BillingPlanIntent, TimelineEvent and SyncJob were all missing from it, and
-  // their RESTRICT constraints made every redaction fail. The database is now
-  // the single source of truth for what "all of a store's data" means, so a
-  // table added later is covered automatically.
-  await prisma.$transaction(async (tx) => {
-    await tx.store.delete({ where: { id: store.id } });
-  });
+  // All deletion goes through the single guarded path. A throw here is a real
+  // DB failure and must propagate so the webhook handler returns 500.
+  const result = await deleteStoreCompletely(store.id, "shop_redact");
 
-  logEvent("info", "privacy.shop_redacted", {
-    shop: shopDomain,
-  });
-
-  return {
-    redacted: true,
-    shop: shopDomain,
-  };
+  switch (result.outcome) {
+    case "deleted":
+      logEvent("info", "privacy.shop_redacted", { shop: shopDomain });
+      return { redacted: true, shop: shopDomain };
+    case "not_found":
+      return { redacted: false, reason: "not_found" };
+    case "skipped_active_install":
+      // The shop reinstalled since the uninstall that triggered this webhook.
+      // We must not erase a live store; acknowledging without deleting is
+      // correct and the handler returns 200.
+      return { redacted: false, reason: "skipped_active_install" };
+  }
 }
