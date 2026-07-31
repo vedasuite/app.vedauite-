@@ -25,6 +25,7 @@ import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { ModuleInsights } from "../Dashboard/components/ModuleInsights";
 
 type CompetitorPrimaryState =
   | "SETUP_INCOMPLETE"
@@ -614,6 +615,9 @@ export function CompetitorPage() {
         ]}
       >
         <Layout>
+          <Layout.Section>
+            <ModuleInsights modules={["competitor"]} />
+          </Layout.Section>
           {subscriptionLoading ? (
             <Layout.Section>
               <Banner title="Loading competitor analysis" tone="info">

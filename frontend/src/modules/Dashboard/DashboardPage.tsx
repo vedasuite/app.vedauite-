@@ -22,6 +22,7 @@ import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { useOnboardingState } from "../../hooks/useOnboardingState";
+import { InsightsDashboardSections } from "./components/InsightsDashboardSections";
 
 type Metrics = {
   fraudAlertsToday: number;
@@ -1218,6 +1219,12 @@ export function DashboardPage() {
             </Banner>
           </Layout.Section>
         ) : null}
+
+        {/* Phase 1 explainability — additive sections in the required order
+            (Executive Summary → Where to focus → Critical attention → Revenue
+            Leak → Data coverage), rendered above the existing metric cards.
+            Existing dashboard functionality below is unchanged. */}
+        <InsightsDashboardSections />
 
         <Layout.Section>
           <Card>

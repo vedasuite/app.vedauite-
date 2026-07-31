@@ -14,6 +14,9 @@ import * as calc from "./explainabilityCalc";
 
 const MAX_INSIGHTS_PER_MODULE = 10;
 const IMPACT_CAP_FALLBACK = 1000;
+// Bound in-memory rows. Detail lists only surface the top N per module, so these
+// caps never affect the output for typical stores; exact totals come from count().
+const READ_CAPS = { orders: 5000, highRisk: 1000, products: 500 };
 
 function pickCurrency(orderCurrencies: string[]): string {
   const counts = new Map<string, number>();
@@ -62,44 +65,70 @@ export async function getDashboardInsights(
 ): Promise<calc.DashboardInsightsResponse> {
   const nowIso = new Date().toISOString();
 
-  // ---- single store-scoped read (no N+1) ----
-  const store = await prisma.store.findUnique({
+  // ---- bounded, store-scoped reads (fixed query count; no N+1, no unbounded
+  // in-memory loads). Detail rows use where+orderBy+take; exact baseline and
+  // coverage numbers come from DB count() so caps don't change the output. ----
+  const storeCore = await prisma.store.findUnique({
     where: { shop: shopDomain },
-    select: {
-      id: true,
-      lastSyncAt: true,
-      lastSyncStatus: true,
-      lastConnectionStatus: true,
-      orders: {
-        select: {
-          id: true, status: true, refunded: true, refundRequested: true,
-          totalAmount: true, currency: true, fraudRiskLevel: true,
-          fraudScore: true, createdAt: true, customerId: true,
-        },
-      },
-      customers: {
-        select: { id: true, refundRate: true, totalOrders: true, totalRefunds: true, creditCategory: true },
-      },
-      priceHistory: {
-        select: {
-          id: true, productHandle: true, currentPrice: true, recommendedPrice: true,
-          expectedProfitGain: true, expectedMarginDelta: true, createdAt: true,
-        },
-      },
-      profitData: {
-        select: {
-          id: true, productHandle: true, productCost: true, sellingPrice: true,
-          salesVelocity: true, projectedMonthlyProfit: true, projectedMarginIncrease: true,
-          optimalPrice: true, createdAt: true,
-        },
-      },
-      competitorData: {
-        select: { id: true, productHandle: true, price: true, collectedAt: true, insightsJson: true },
-      },
-    },
+    select: { id: true, lastSyncAt: true, lastSyncStatus: true, lastConnectionStatus: true },
   });
+  if (!storeCore) return EMPTY_RESPONSE(nowIso);
+  const storeId = storeCore.id;
+  const lookbackStart = new Date(Date.now() - calc.RETURN_ABUSE.lookbackDays * 86400000);
+  const eligibleStatuses = [...calc.ELIGIBLE_ORDER_STATUSES];
 
-  if (!store) return EMPTY_RESPONSE(nowIso);
+  const [
+    recentOrders, openHighRiskOrders, priceHistory, profitData, competitorData,
+    storeEligibleOrderCount, storeRefundedEligibleCount,
+    orderTotalCount, competitorTotalCount, priceHistoryCount, profitDataCount,
+  ] = await Promise.all([
+    // Recent orders within the return-abuse lookback (bounded).
+    prisma.order.findMany({
+      where: { storeId, createdAt: { gte: lookbackStart } },
+      select: { id: true, status: true, refunded: true, totalAmount: true, currency: true, createdAt: true, customerId: true },
+      orderBy: { createdAt: "desc" }, take: READ_CAPS.orders,
+    }),
+    // Currently-open high-risk orders only (targeted + bounded = exact working set).
+    prisma.order.findMany({
+      where: { storeId, fraudRiskLevel: "High", refunded: false, status: { in: [...calc.OPEN_HIGH_RISK_STATUSES] } },
+      select: { id: true, fraudRiskLevel: true, status: true, refunded: true, totalAmount: true },
+      orderBy: { createdAt: "desc" }, take: READ_CAPS.highRisk,
+    }),
+    prisma.priceHistory.findMany({
+      where: { storeId },
+      select: { id: true, productHandle: true, currentPrice: true, recommendedPrice: true, expectedProfitGain: true, expectedMarginDelta: true, createdAt: true },
+      orderBy: { createdAt: "desc" }, take: READ_CAPS.products,
+    }),
+    prisma.profitOptimizationData.findMany({
+      where: { storeId },
+      select: { id: true, productHandle: true, productCost: true, sellingPrice: true, salesVelocity: true, projectedMonthlyProfit: true, projectedMarginIncrease: true, optimalPrice: true, createdAt: true },
+      orderBy: { createdAt: "desc" }, take: READ_CAPS.products,
+    }),
+    prisma.competitorData.findMany({
+      where: { storeId },
+      select: { id: true, productHandle: true, price: true, collectedAt: true, insightsJson: true },
+      orderBy: { collectedAt: "desc" }, take: READ_CAPS.products,
+    }),
+    // Exact baseline counts (return-abuse) — DB-side, O(1) memory.
+    prisma.order.count({ where: { storeId, status: { in: eligibleStatuses }, createdAt: { gte: lookbackStart } } }),
+    prisma.order.count({ where: { storeId, status: { in: eligibleStatuses }, refunded: true, createdAt: { gte: lookbackStart } } }),
+    // Exact coverage counts.
+    prisma.order.count({ where: { storeId } }),
+    prisma.competitorData.count({ where: { storeId } }),
+    prisma.priceHistory.count({ where: { storeId } }),
+    prisma.profitOptimizationData.count({ where: { storeId } }),
+  ]);
+
+  const store = {
+    id: storeCore.id,
+    lastSyncAt: storeCore.lastSyncAt,
+    lastSyncStatus: storeCore.lastSyncStatus,
+    lastConnectionStatus: storeCore.lastConnectionStatus,
+    orders: recentOrders,
+    priceHistory,
+    profitData,
+    competitorData,
+  };
 
   // ---- server-side capability enforcement (reuse existing entitlements) ----
   let enabledModules: string[] = [];
@@ -113,7 +142,7 @@ export async function getDashboardInsights(
   const dataReady =
     store.lastSyncStatus !== "syncing" &&
     store.lastConnectionStatus !== "UNINSTALLED" &&
-    (store.orders.length > 0 || store.priceHistory.length > 0 || store.profitData.length > 0);
+    (orderTotalCount > 0 || priceHistoryCount > 0 || profitDataCount > 0);
 
   const currency = pickCurrency(store.orders.map((o) => o.currency));
   const insights: calc.ExplainableInsight[] = [];
@@ -215,15 +244,7 @@ export async function getDashboardInsights(
     arr.push({ id: o.id, status: o.status, refunded: o.refunded, totalAmount: o.totalAmount, createdAtIso: o.createdAt.toISOString() });
     ordersByCustomer.set(o.customerId, arr);
   }
-  // store baseline (eligible within lookback)
-  const lookbackMs = calc.RETURN_ABUSE.lookbackDays * 86400000;
-  const nowMs = Date.now();
-  const eligibleStore = store.orders.filter(
-    (o) => (["paid", "approved"].includes((o.status || "").toLowerCase())) && (nowMs - o.createdAt.getTime()) <= lookbackMs
-  );
-  const storeEligibleOrderCount = eligibleStore.length;
-  const storeRefundedEligibleCount = eligibleStore.filter((o) => o.refunded).length;
-
+  // store baseline uses the exact DB counts (computed above), not in-memory rows.
   const returnAbuseInsights: calc.ExplainableInsight[] = [];
   for (const [customerId, custOrders] of ordersByCustomer) {
     const r = calc.computeReturnAbuseExposure({
@@ -259,7 +280,7 @@ export async function getDashboardInsights(
 
   // ---------- High-risk open exposure (one aggregate insight) ----------
   const hr = calc.computeHighRiskOpenExposure(
-    store.orders.map((o) => ({ id: o.id, fraudRiskLevel: o.fraudRiskLevel, status: o.status, refunded: o.refunded, totalAmount: o.totalAmount })),
+    openHighRiskOrders.map((o) => ({ id: o.id, fraudRiskLevel: o.fraudRiskLevel, status: o.status, refunded: o.refunded, totalAmount: o.totalAmount })),
     currency
   );
   if (hr.orderCount > 0) {
@@ -318,11 +339,11 @@ export async function getDashboardInsights(
   const dataCoverage: calc.DataCoverage[] = [];
   const lastSyncAt = store.lastSyncAt ? store.lastSyncAt.toISOString() : null;
   if (allowedCaps.has("fraud"))
-    dataCoverage.push({ module: "fraud", rowsAvailable: store.orders.length, lastSyncAt, sufficient: store.orders.length >= 5, note: store.orders.length < 5 ? "More order history needed." : undefined });
+    dataCoverage.push({ module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5, note: orderTotalCount < 5 ? "More order history needed." : undefined });
   if (allowedCaps.has("competitor"))
-    dataCoverage.push({ module: "competitor", rowsAvailable: store.competitorData.length, lastSyncAt, sufficient: store.competitorData.length > 0, note: store.competitorData.length === 0 ? "Add competitor domains to enable pressure estimates." : undefined });
+    dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "Add competitor domains to enable pressure estimates." : undefined });
   if (allowedCaps.has("pricing") || allowedCaps.has("profit"))
-    dataCoverage.push({ module: "pricing", rowsAvailable: store.priceHistory.length + store.profitData.length, lastSyncAt, sufficient: store.priceHistory.length + store.profitData.length > 0, note: store.profitData.every((p) => !p.productCost) ? "Add product cost to quantify margin." : undefined });
+    dataCoverage.push({ module: "pricing", rowsAvailable: priceHistoryCount + profitDataCount, lastSyncAt, sufficient: priceHistoryCount + profitDataCount > 0, note: store.profitData.every((p) => !p.productCost) ? "Add product cost to quantify margin." : undefined });
 
   const executiveSummary = calc.buildExecutiveSummary({ nowIso, dataReady, opportunities, criticalAttention, revenueLeak });
 

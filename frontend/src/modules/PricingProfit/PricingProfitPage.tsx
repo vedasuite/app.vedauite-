@@ -15,6 +15,7 @@ import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { ModuleInsights } from "../Dashboard/components/ModuleInsights";
 
 type BackendStatus =
   | "syncing"
@@ -396,6 +397,9 @@ export function PricingProfitPage() {
         subtitle="Optimize pricing for margin and demand with clearer pricing workflows."
       >
         <Layout>
+          <Layout.Section>
+            <ModuleInsights modules={["pricing", "profit"]} />
+          </Layout.Section>
           <Layout.Section>
             <Banner title="Upgrade required: Growth or Pro" tone="info">
               <p>AI Pricing Engine unlocks on Growth and expands fully on Pro.</p>

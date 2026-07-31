@@ -24,6 +24,7 @@ import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
+import { ModuleInsights } from "../Dashboard/components/ModuleInsights";
 
 type OrderRow = {
   id: string;
@@ -251,6 +252,9 @@ export function FraudPage() {
         subtitle="Review payment risk, return abuse, chargeback exposure, and shopper trust signals."
       >
       <Layout>
+        <Layout.Section>
+          <ModuleInsights modules={["fraud", "trust", "return_abuse"]} />
+        </Layout.Section>
         <Layout.Section>
           <Banner title="Fraud queue is active" tone="warning">
             <p>
