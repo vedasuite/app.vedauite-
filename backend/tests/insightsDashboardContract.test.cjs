@@ -24,6 +24,7 @@ const state = {
   storeEligibleOrderCount: 0,
   storeRefundedEligibleCount: 0,
   orderTotalCount: 0,
+  orderWindowTotalCount: 0,
   competitorTotalCount: 0,
   priceHistoryCount: 0,
   profitDataCount: 0,
@@ -43,6 +44,7 @@ const fakePrisma = {
       const w = args.where || {};
       if (w.refunded === true) return state.storeRefundedEligibleCount;
       if (w.status && w.createdAt) return state.storeEligibleOrderCount;
+      if (w.createdAt && !w.status) return state.orderWindowTotalCount;
       return state.orderTotalCount;
     },
   },
@@ -93,7 +95,7 @@ function resetState() {
     shop: SHOP, enabledModules: ["fraud", "competitor", "pricing", "profit"],
     store: { id: "store-1", lastSyncStatus: "ready", lastConnectionStatus: "OK", lastSyncAt: new Date() },
     recentOrders: [], openHighRisk: [], priceHistory: [], profitData: [], competitorData: [],
-    storeEligibleOrderCount: 0, storeRefundedEligibleCount: 0, orderTotalCount: 0,
+    storeEligibleOrderCount: 0, storeRefundedEligibleCount: 0, orderTotalCount: 0, orderWindowTotalCount: 0,
     competitorTotalCount: 0, priceHistoryCount: 0, profitDataCount: 0, throwOnStore: false,
   });
 }
@@ -110,7 +112,8 @@ function seedRichStore() {
   state.profitData = [{ id: "pd1", productHandle: "shirt", productCost: 40, sellingPrice: 100, salesVelocity: 10, projectedMonthlyProfit: null, projectedMarginIncrease: 3, optimalPrice: 120, createdAt: now }];
   state.competitorData = [{ id: "cd1", productHandle: "shirt", price: 80, collectedAt: now, insightsJson: JSON.stringify({ confidenceLabel: "high" }) }];
   state.storeEligibleOrderCount = 100; state.storeRefundedEligibleCount = 5;
-  state.orderTotalCount = 100; state.competitorTotalCount = 1; state.priceHistoryCount = 1; state.profitDataCount = 1;
+  state.orderTotalCount = 100; state.orderWindowTotalCount = state.recentOrders.length;
+  state.competitorTotalCount = 1; state.priceHistoryCount = 1; state.profitDataCount = 1;
 }
 
 // ---------------- Tests ----------------
@@ -179,6 +182,29 @@ test("controlled service error => 503", async () => {
   const r = await get("/api/insights/dashboard");
   assert.equal(r.status, 503);
   assert.equal(r.json.error.code, "INSIGHTS_UNAVAILABLE");
+});
+
+test("return-abuse: order window within the bounded read produces a normal insight", async () => {
+  resetState(); seedRichStore();
+  const r = await get("/api/insights/dashboard");
+  const all = [...r.json.opportunities, ...r.json.criticalAttention];
+  assert.ok(all.some((i) => i.module === "return_abuse"), "expected a return_abuse insight when the order window is within the bounded read");
+});
+
+test("return-abuse: truncated order window suppresses return-abuse insights instead of computing them from partial data", async () => {
+  resetState(); seedRichStore();
+  // Simulate a merchant whose true 90-day order volume exceeds the bounded
+  // read (READ_CAPS.orders = 5000) — `recentOrders` no longer represents the
+  // complete window, so per-customer grouping can no longer be trusted.
+  state.orderWindowTotalCount = 5001;
+  const r = await get("/api/insights/dashboard");
+  const all = [...r.json.opportunities, ...r.json.criticalAttention];
+  assert.ok(!all.some((i) => i.module === "return_abuse"), "return-abuse insights must not be computed from a truncated order window");
+  const fraudCoverage = r.json.dataCoverage.find((c) => c.module === "fraud");
+  assert.ok(fraudCoverage, "fraud coverage entry missing");
+  assert.match(fraudCoverage.note || "", /exceeds the analysis bound/i);
+  // Other modules must be unaffected by the return-abuse truncation.
+  assert.ok(all.some((i) => i.module === "competitor"), "unrelated competitor insight should be unaffected");
 });
 
 test("no forbidden PII in the serialized JSON", async () => {

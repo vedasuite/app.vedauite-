@@ -1,7 +1,132 @@
 # Phase 1 Frontend Implementation Report — Interactive Intelligence UI
 
-Repository: `app-repo` (branch `main`, based on commit `55ec8c2` — Phase 1 backend)
-Status: Complete, committed locally, **not pushed, not deployed**.
+Repository: `app-repo`
+Branch: `phase-1-intelligence-ui` (created off `main` at commit `55ec8c2` — Phase 1 backend)
+Commit: `0f71d24` — "feat: add phase 1 interactive intelligence UI"
+Status: Complete, committed locally on `phase-1-intelligence-ui`, **not merged to `main`, not pushed, not deployed**.
+
+## 0. Phase 1 final verification pass (post-`0f71d24`)
+
+A follow-up correctness/QA verification was performed against commit
+`0f71d24` before manual QA. It found and fixed one genuine correctness bug
+in the return-abuse calculation under large order volumes; all other areas
+checked out with no code changes required. Fixed and committed separately
+as `fix: phase 1 verification corrections`.
+
+### 0.1 Return-abuse correctness under large datasets — bug found and fixed
+
+**The bug.** `explainabilityService.ts` loads orders for the 90-day
+return-abuse window with a bounded query:
+`order.findMany({ where: { storeId, createdAt: { gte: lookbackStart } }, orderBy: { createdAt: "desc" }, take: 5000 })`.
+Per-customer grouping (`ordersByCustomer`) was built entirely from this
+bounded, in-memory row set. For a store with **more than 5,000 orders in
+the trailing 90 days** (~56/day), the query silently drops the oldest
+orders in that window. Any customer whose orders straddle that truncation
+boundary would get an incomplete order list — their computed refund rate,
+excess-rate, and monetary exposure could be silently wrong, and a customer
+whose orders fell entirely outside the retained 5,000 would be missing
+from return-abuse analysis entirely, with no indication anything was
+truncated.
+
+**Direct answers:**
+
+| Question | Answer |
+|---|---|
+| Does every eligible order always participate? | No — only if total orders in the 90-day window are ≤ 5,000. Above that, only the most recent 5,000 (by `createdAt`) are read. |
+| Can a merchant with >5,000 eligible orders receive incomplete customer grouping? | Yes — this was the bug. Customers whose orders fall in the truncated (older) portion of the window are dropped or partially represented. |
+| Do the `count()` queries alone guarantee correctness? | No. `storeEligibleOrderCount` / `storeRefundedEligibleCount` are exact DB-side aggregates and were already correct, but they say nothing about *per-customer* grouping, which is still built from the bounded, in-memory `recentOrders` rows. |
+| Is pagination required? | Not chosen here — full pagination would still do unbounded work in the worst case (a store that never stops growing past 90 days of volume) and was explicitly out of scope ("do not introduce unbounded queries"). |
+| Is aggregation required? | For a fully general fix at arbitrary scale, DB-side `groupBy` per customer would be the more scalable long-term answer (see "recommended improvement" below). For the immediate correctness gap, detection + graceful degradation was the smallest safe fix. |
+| Should the result become `impact_not_quantifiable` if truncation occurs? | Yes for the affected module. Implemented as: suppress return-abuse insights entirely for the request (not per-customer patching, since which customers are affected can't be determined from the truncated set), and surface the condition in `dataCoverage`. |
+
+**The fix (`backend/src/services/explainabilityService.ts`).** Added one
+additional bounded, DB-side `count()` query —
+`order.count({ where: { storeId, createdAt: { gte: lookbackStart } } })`
+(no `take`, O(1) round trip) — to get the *exact* total order count in the
+90-day window, independent of the 5,000-row cap. If that exact total
+exceeds `READ_CAPS.orders` (5,000), the per-customer return-abuse loop is
+skipped entirely for that request (no insights of module `return_abuse`
+are emitted from a data set known to be incomplete), and the `fraud`
+`dataCoverage` entry's `note` is set to
+`"Order volume exceeds the analysis bound for this period; return-abuse exposure not quantified."`
+No other module, no schema, and no query bound was changed — this only
+gates the return-abuse code path, and only when truncation is detected.
+No unbounded query was introduced.
+
+**Regression tests added** (`backend/tests/insightsDashboardContract.test.cjs`):
+1. `return-abuse: order window within the bounded read produces a normal insight` — confirms the existing (pre-fix) behavior is unchanged when the store is under the cap.
+2. `return-abuse: truncated order window suppresses return-abuse insights instead of computing them from partial data` — simulates a store with 5,001 orders in the window; asserts no `return_abuse` insight is emitted, the `fraud` coverage note explains why, and unrelated modules (e.g. `competitor`) are unaffected.
+
+Phase 1 backend test count is now **35/35 passing** (26 calc + 9 contract,
+up from 33/33 — the 2 new regression tests).
+
+### 0.2 Frontend ↔ backend contract validation — no discrepancy found
+
+Compared `frontend/src/lib/insightsTypes.ts` field-by-field against
+`backend/src/services/explainabilityCalc.ts` (the source of truth for the
+`GET /api/insights/dashboard` response shape): `Confidence`, `Urgency`,
+`InsightModule`, `ImpactPeriod`, `EaseOfAction`, `AggregateEvidence`,
+the `FinancialImpact` discriminated union (`quantified` /
+`impact_not_quantifiable`), `OpportunityScoreBreakdown` (including the
+5-component weight breakdown), `Methodology`, `ExplainableInsight`
+(including optional `isCriticalNonMonetary`), `LeakItem`, `LeakGroup`,
+`RevenueLeakModel`, `ExecutiveSummary`, `DataCoverage` (`module:
+InsightModule | "all"`), and `DashboardInsightsResponse` all match exactly
+— same field names, same optionality, same enum value sets. The only
+difference is that the backend's `OpportunityScoreBreakdown.weights` uses
+TypeScript numeric-literal types (`0.35`, `0.25`, …) while the frontend
+types them as plain `number` — a safe widening, not a contract mismatch,
+since the serialized JSON values are identical either way. No fix
+required.
+
+### 0.3 Safe deep-link validation — no vulnerability found
+
+Every `insight.route` value in `explainabilityService.ts` is a hardcoded
+string literal — `"/app/ai-pricing-engine"`, `"/app/competitor-intelligence"`,
+or `"/app/fraud-intelligence"` (×2, for return-abuse and high-risk-open) —
+never interpolated from order, customer, competitor, or any other
+merchant/DB-controlled data. Confirmed via a repo-wide search for `route:`
+assignments; explainability is the only producer of `ExplainableInsight`
+objects and all four call sites are literals. On the frontend,
+`navigateEmbedded` (`useEmbeddedNavigation.ts`) passes the path through
+React Router's `navigate()`, which performs in-SPA client-side routing
+only — it does not set `window.location.href`, so even a hypothetical
+attacker-controlled string could not force full-page navigation to an
+external origin. No code change made. **Recommended improvement (not a
+blocker):** add a small allowlist check (e.g. a `Set` of the known
+`/app/...` routes) at the point `ExplainableInsightCard` calls
+`navigateEmbedded(insight.route)`, as defense-in-depth against a future
+contributor accidentally making `route` data-derived. `route` is typed as
+plain `string` today, not a literal union, so nothing currently enforces
+this at the type level.
+
+### 0.4 Query performance review — no remaining concern
+
+Reviewed `explainabilityService.ts` end to end:
+- **No N+1 queries.** All reads happen once, up front, in a single
+  `Promise.all` of 11 independent, flat queries (5 bounded `findMany` +
+  6 `count`, including the new count added in 0.1). Nothing loops and
+  issues a query per row/customer/product.
+- **Bounded reads.** Every `findMany` has `take` (5,000 orders / 1,000
+  open-high-risk / 500 each for price history, profit data, competitor
+  data) plus a targeted `where`.
+- **Minimal selected columns.** Every query uses an explicit `select`
+  listing only the fields actually consumed downstream (confirmed no
+  `include` of full relations anywhere in the file).
+- **Appropriate `orderBy`.** All bounded reads order by recency
+  (`createdAt`/`collectedAt` desc) so the `take` cap keeps the most
+  relevant rows.
+- **Appropriate `where` filters.** Order queries are scoped to
+  `storeId` + the 90-day window (or targeted `fraudRiskLevel`/`status`
+  for the open-high-risk read) — no full-table scans.
+- **No unnecessary relations.** No Prisma relation traversal (`include`)
+  is used; all cross-entity joins (e.g. profit data by product handle)
+  are done in memory via `Map`, which is O(n) over already-bounded data.
+- **In-memory work is bounded and linear.** Per-customer grouping,
+  dedup, and scoring all iterate the capped result sets once; no
+  quadratic passes were found.
+
+No remaining performance concern identified for this phase.
 
 ## 1. Backend hardening (performed before frontend work)
 
@@ -201,15 +326,19 @@ session — see Known Limitations.
 
 ## 10. Build gate results
 
-| Gate | Result |
-|---|---|
-| Backend contract tests (`insightsDashboardContract.test.cjs`) | 7/7 pass |
-| Phase 1 backend tests (calc + contract) | 33/33 pass |
-| Backend TypeScript (`tsc --noEmit`) | 0 errors |
-| Backend production build | success |
-| Full backend suite (`tests/*.test.cjs`) | 100 pass, 6 fail |
-| Frontend TypeScript (`tsc --noEmit`) | 32 errors — identical to recorded baseline; 0 in any Phase 1 file |
-| Frontend production build (`vite build`) | success (1139 modules, no errors) |
+Two passes are recorded: the original implementation pass (commit
+`0f71d24`) and the final verification pass after the return-abuse fix
+(commit `fix: phase 1 verification corrections`).
+
+| Gate | Implementation pass (`0f71d24`) | Verification pass (post-fix) |
+|---|---|---|
+| Backend contract tests | 7/7 pass | 9/9 pass (+2 return-abuse regression tests) |
+| Phase 1 backend tests (calc + contract) | 33/33 pass | **35/35 pass** |
+| Backend TypeScript (`tsc --noEmit`) | 0 errors | 0 errors |
+| Backend production build | success | success |
+| Full backend suite (`tests/*.test.cjs`) | 100 pass, 6 fail | 102 pass, 6 fail (108 total) |
+| Frontend TypeScript (`tsc --noEmit`) | 32 errors — baseline, 0 in Phase 1 files | 32 errors — unchanged |
+| Frontend production build (`vite build`) | success (1139 modules) | success (1139 modules) |
 
 The 6 backend test failures are the pre-existing baseline failures
 (`deriveConnectionState treats webhook gaps as attention...`,
@@ -219,10 +348,20 @@ The 6 backend test failures are the pre-existing baseline failures
 `oauth callback persists offline installation...`,
 `oauth callback preserves first install timestamp...`) — same test names,
 same root cause (the shared Cookie-header integration helper), confirmed
-unchanged from the baseline recorded before Phase 1 work began.
+unchanged from the baseline recorded before Phase 1 work began, and
+unchanged again after the verification-pass fix.
 
 ## 11. Known limitations
 
+**Production blockers:** none identified.
+
+**Recommended improvements** (worth doing before/soon after wider rollout,
+not blocking QA):
+- Add a small frontend allowlist check on `insight.route` before calling
+  `navigateEmbedded()`, as defense-in-depth (Section 0.3). No live
+  vulnerability exists today (all routes are backend literals), but the
+  type is plain `string`, so nothing currently stops a future change from
+  making it data-derived.
 - No live browser-based accessibility/responsive pass (screen reader,
   actual mobile/tablet/desktop rendering) was performed in this session —
   verification above is by code/layout review against Polaris's documented
@@ -231,21 +370,55 @@ unchanged from the baseline recorded before Phase 1 work began.
 - No screenshots are included; this session had no attached browser/preview
   tool pointed at an authenticated embedded session. File paths for the new
   UI are listed in Section 2 for manual review instead.
+
+**Future enhancements** (not needed now, only relevant at larger scale):
+- Return-abuse currently degrades to "not quantified" once a store's
+  90-day order volume exceeds 5,000 orders (Section 0.1), rather than
+  computing an exact answer at that scale. A DB-side `groupBy` per
+  customer (counts + sums, no raw row load) would let return-abuse stay
+  exact at any store size without lifting the bound — worth doing if/when
+  a merchant is observed to actually hit this threshold.
+
+**Accepted, out of scope:**
 - The 6 pre-existing backend integration-test failures remain (Cookie-header
-  issue), as explicitly permitted by the task instructions.
+  issue), as explicitly permitted by the task instructions, unchanged
+  before and after this verification pass.
+
+## 13. Final verification summary
+
+**Result: PASS WITH FIXES**
+
+One genuine correctness bug was found and fixed: return-abuse exposure
+could silently miscompute for merchants with more than 5,000 orders in
+the trailing 90 days, because per-customer grouping was built from a
+bounded, truncated row set while only the store-wide baseline counts were
+exact. Fixed by detecting the truncation via one additional bounded
+`count()` query and suppressing return-abuse insights for that request
+instead of emitting numbers that could be wrong, with the condition
+surfaced in `dataCoverage`. No unbounded query was introduced. Two
+regression tests cover both the truncated and non-truncated cases.
+
+All other verification areas (frontend/backend contract, deep-link
+safety, query performance) were reviewed and found correct with no code
+changes required. All build gates pass, including the newly expanded
+Phase 1 test suite (35/35) and an unchanged frontend TypeScript baseline
+(32/32, none from Phase 1 files) and unchanged pre-existing backend
+integration-test baseline (6 failures, same tests, same root cause).
 
 ## 12. Rollback instructions
 
 All Phase 1 frontend work is isolated to the files listed in Section 2 and
-was committed in a single local commit
-(`feat: add phase 1 interactive intelligence UI`) on top of the Phase 1
-backend commit (`55ec8c2`). To roll back:
+was committed in a single local commit (`0f71d24` — "feat: add phase 1
+interactive intelligence UI") on branch `phase-1-intelligence-ui`, on top
+of the Phase 1 backend commit (`55ec8c2`). The branch has not been merged
+into `main`. To roll back:
 
 ```bash
-git revert <phase-1-frontend-commit-sha>
+git revert 0f71d24
 ```
 
-or, if not yet pushed/shared, `git reset --hard 55ec8c2` to drop it
-entirely (only if no other work has landed on top). No database schema,
+or, since this branch is local-only and unmerged, simply delete it
+(`git branch -D phase-1-intelligence-ui`) or reset it to `55ec8c2` to drop
+the commit entirely. No database schema,
 migration, environment variable, or backend route contract changes are
 part of this commit, so rollback carries no data-migration risk.

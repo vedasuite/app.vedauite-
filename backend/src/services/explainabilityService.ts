@@ -81,6 +81,7 @@ export async function getDashboardInsights(
     recentOrders, openHighRiskOrders, priceHistory, profitData, competitorData,
     storeEligibleOrderCount, storeRefundedEligibleCount,
     orderTotalCount, competitorTotalCount, priceHistoryCount, profitDataCount,
+    orderWindowTotalCount,
   ] = await Promise.all([
     // Recent orders within the return-abuse lookback (bounded).
     prisma.order.findMany({
@@ -117,7 +118,25 @@ export async function getDashboardInsights(
     prisma.competitorData.count({ where: { storeId } }),
     prisma.priceHistory.count({ where: { storeId } }),
     prisma.profitOptimizationData.count({ where: { storeId } }),
+    // Exact count of ALL orders in the return-abuse lookback window (any status),
+    // used only to detect when `recentOrders` (bounded, take: READ_CAPS.orders)
+    // was truncated. Per-customer grouping below is built from `recentOrders`,
+    // so if the true window total exceeds the cap, that grouping can silently
+    // drop or split a customer's orders — see returnAbuseTruncated below.
+    prisma.order.count({ where: { storeId, createdAt: { gte: lookbackStart } } }),
   ]);
+
+  // If the 90-day order window has more rows than the bounded read can hold,
+  // `recentOrders` only contains the most recent READ_CAPS.orders of them, so
+  // per-customer order grouping is no longer guaranteed complete: a customer's
+  // orders can be split across the truncation boundary, silently skewing their
+  // refund rate, or a customer's entire order history in this window can fall
+  // outside the truncated set. Store-wide baseline counts (storeEligibleOrderCount
+  // / storeRefundedEligibleCount) stay exact regardless (DB-side count()), but
+  // that alone cannot make per-customer grouping correct. Rather than emit
+  // return-abuse figures that may be silently wrong, suppress return-abuse
+  // insights entirely for this run and surface the condition via data coverage.
+  const returnAbuseTruncated = orderWindowTotalCount > READ_CAPS.orders;
 
   const store = {
     id: storeCore.id,
@@ -246,7 +265,7 @@ export async function getDashboardInsights(
   }
   // store baseline uses the exact DB counts (computed above), not in-memory rows.
   const returnAbuseInsights: calc.ExplainableInsight[] = [];
-  for (const [customerId, custOrders] of ordersByCustomer) {
+  for (const [customerId, custOrders] of returnAbuseTruncated ? [] : ordersByCustomer) {
     const r = calc.computeReturnAbuseExposure({
       nowIso, currency, customerOrders: custOrders,
       storeEligibleOrderCount, storeRefundedEligibleCount,
@@ -339,7 +358,12 @@ export async function getDashboardInsights(
   const dataCoverage: calc.DataCoverage[] = [];
   const lastSyncAt = store.lastSyncAt ? store.lastSyncAt.toISOString() : null;
   if (allowedCaps.has("fraud"))
-    dataCoverage.push({ module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5, note: orderTotalCount < 5 ? "More order history needed." : undefined });
+    dataCoverage.push({
+      module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5,
+      note: returnAbuseTruncated
+        ? "Order volume exceeds the analysis bound for this period; return-abuse exposure not quantified."
+        : orderTotalCount < 5 ? "More order history needed." : undefined,
+    });
   if (allowedCaps.has("competitor"))
     dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "Add competitor domains to enable pressure estimates." : undefined });
   if (allowedCaps.has("pricing") || allowedCaps.has("profit"))
