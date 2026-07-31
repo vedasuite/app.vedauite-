@@ -1,34 +1,39 @@
 # Phase 1 Risk Register — Explainability & Prioritization
 
-Date: 2026-07-30 · Amended: 2026-07-30 (see `docs/phase-1-plan-amendment-summary.md`)
-Companion to: `docs/approved-baseline-audit.md`, `docs/phase-1-implementation-plan.md`
-Scope: risks introduced by the additive, read-only Phase-1 layer on an **already-approved, publicly listed** Shopify app.
+Date: 2026-07-30 · Amended: 2026-07-30 · Finalized: 2026-07-31
+Companion to: `docs/approved-baseline-audit.md`, `docs/phase-1-implementation-plan.md`, `docs/phase-1-final-readiness-check.md`
+Scope: risks from the additive, read-only Phase-1 layer on an **already-approved, publicly listed** Shopify app.
 
 Severity = impact if unmitigated. Likelihood = with mitigation applied.
 
 | # | Risk | Area | Severity | Likelihood | Mitigation | Verification |
 |---|---|---|---|---|---|---|
-| R1 | A change accidentally touches a protected system (auth, billing, webhooks, scopes) and breaks approved behaviour or re-triggers review | Compliance / stability | **Critical** | Low | Hard must-not-change file list; Phase 1 additive-only; aggregator reads existing services, writes nothing | Diff vs must-not-change list before commit; regression smoke on auth/billing/install |
-| R2 | A schema change is destructive under `prisma db push` | Data | **Critical** | Very Low | **AMENDMENT 6: no DB change in first release.** No `InsightReviewStatus`, no migration | Confirm zero schema diff before deploy |
-| R3 | Combining upside and risk into one number implies a confirmed loss / guaranteed profit and misleads merchants | Compliance / trust | High | Low | **AMENDMENT 2: two separate groups, never summed.** No `totalExposure` field exists; copy frames both as estimated ranges | Review UI: no combined total anywhere; both groups labeled as ranges |
-| R4 | A "high priority" is shown when impact or confidence is actually unavailable | Correctness / trust | High | Low | **AMENDMENT 1: missing impact/confidence excludes the item from ranking**, never scores it high; shown in "needs more data" group | Unit test: unquantifiable item is excluded, not top-ranked |
-| R5 | Raw customer PII (email, address, IP, device/payment fingerprint, raw payloads) leaks through new evidence responses or logs | Privacy / compliance | **Critical** | Low | **AMENDMENT 4: strict aggregate-only evidence allowlist**; forbidden fields never in responses/logs; identity capped to what the approved module already shows | Grep responses/logs for PII in QA; allowlist unit test |
-| R6 | Fabricated numbers where data can't support them (margin w/o COGS, low-confidence competitor gap, stale data) | Compliance / trust | High | Low | First-class `insufficient_data`; **AMENDMENT 3: competitor impact returns `impact_not_quantifiable`** unless all inputs present & fresh; impact shown as bounded range labeled estimate | QA matrix: no-COGS, low-confidence, stale competitor data all show insufficient/ not-quantifiable |
-| R7 | Competitor impact overstated (no line-item revenue exists; only a velocity proxy) | Correctness | Medium | Low | Conservative caps: `gapCap=0.15`, `confidenceFactor<1`, `min=0` always; importance-weighted; not-quantifiable fallback | Unit tests on bounds; spot-check against known handles |
-| R8 | New endpoint leaks cross-tenant data | Security | High | Low | Reuse `verifyShopifySessionToken` + `resolveAuthenticatedShop`; every query `storeId`-scoped | Two-shop test; shop-scoped results only |
-| R9 | New code adds to the 32 pre-existing frontend `tsc` errors or breaks the build | Build / deploy | Medium | Low | **AMENDMENT 5: reproducible TS baseline + comparison gate** (no new signatures, count stays 32, no new Phase-1 file in output, backend 0, build green) | `diff` vs `docs/ts-baseline-frontend.txt` empty; `vite build` green |
-| R10 | Aggregate endpoint duplicates work or shows inconsistent timestamps across sections | Performance / correctness | Medium | Low | **AMENDMENT 7: single `GET /api/insights/dashboard`** computes shared reads once, one `generatedAt` | Verify one timestamp; check no duplicate service calls |
-| R11 | Opportunity Score math wrong/unstable across stores | Correctness | Medium | Medium | Deterministic normalized factors (35/25/20/10/10) with per-store cap fallback; unit tests | Unit tests + spot-checks |
-| R12 | Executive Summary as a live LLM call adds latency/non-determinism/egress | Performance / compliance | Medium | Low | Deterministic/templated summary in request path — no live model call | Design constraint enforced in service |
-| R13 | Deploying to a live published app during iteration disrupts merchants | Stability | High | Low | This pass deploys **nothing** (docs only); feature deploys later additive + reversible; baseline snapshotted | "No deploy" this task; rollback documented |
-| R14 | Prohibited automated action implied by UI (auto block/cancel/refund/reprice) or a guarantee | Compliance | High | Low | Advisory only; buttons deep-link to review, never execute; no guarantee copy | Copy review of every action label + summary |
-| R15 | Mobile / accessibility / motion regressions in new UI | UX / a11y | Low | Low | Polaris-only (responsive + a11y); text-not-colour status; `prefers-reduced-motion`; keyboard | Mobile-width + a11y + reduced-motion review |
+| R1 | Change touches a protected system (auth, billing, webhooks, scopes) | Compliance / stability | **Critical** | Low | Hard must-not-change list; additive-only; aggregator reads, never writes | Diff vs list; regression smoke |
+| R2 | Destructive schema change under `db push` | Data | **Critical** | Very Low | **No DB change in first release** (no table, no migration) | Zero schema diff confirmed |
+| R3 | Combined upside+risk implies confirmed loss / guaranteed profit | Compliance / trust | High | Low | Two group families, **never summed**; no total field; ranges labeled estimate | UI review: no combined total |
+| R4 | "High priority" shown when impact/confidence unavailable | Correctness / trust | High | Low | Excluded from **monetary** ranking; critical items handled by the Critical lane (R16) not by fake scores | Unit test: excluded, not top-ranked |
+| R5 | Raw customer PII leaks via evidence responses/logs | Privacy / compliance | **Critical** | Low | Strict aggregate-only allowlist; forbidden fields never emitted; identity capped to approved module | PII grep in QA; allowlist unit test |
+| R6 | Fabricated numbers where data can't support them | Compliance / trust | High | Low | First-class `insufficient_data`/`impact_not_quantifiable`; conservative bounded ranges labeled estimate | QA matrix; not-quantifiable paths |
+| R7 | **Potential-upside double counting** (same product via PriceHistory + ProfitOptimizationData + margin) | Correctness | **High** | Low | **§7.5 canonical `dedupKey` + source-priority hierarchy**; one contribution per product/window; never sum | 5 dedup unit tests (§14.3) |
+| R8 | **Return-abuse monetary estimate misdefined** (totalRefunds is a count, no refund-amount field) | Correctness / trust | High | Low | **§7.3 excess-over-baseline formula** with thresholds, eligibility allowlist, dedupe, hard cap; else not-quantifiable + behavioural finding | Return-abuse unit tests |
+| R9 | **Incompatible periods summed** (open exposure added to monthly estimate) | Correctness / trust | High | Low | **§7.6 explicit `ImpactPeriod`**; period-homogeneous groups only; UI shows period beside every amount | Period unit tests; UI check |
+| R10 | **Competitor importance double-discounts small SKUs** | Correctness | Medium | Low | **§7.4 importance removed from money**; used only for urgency/cap; velocity-proxy already encodes scale | Boundary tests; math review documented |
+| R11 | **Critical non-monetary risk disappears** from "Where to focus" | Safety / trust | **High** | Low | **§7.1 separate Critical attention lane** (Approach A); high-confidence critical surfaces even when `impact_not_quantifiable`; no fabricated score | Critical-lane unit test |
+| R12 | Cross-tenant data leak via new endpoint | Security | High | Low | Reuse `verifyShopifySessionToken`+`resolveAuthenticatedShop`; `storeId`-scoped | Two-shop test |
+| R13 | New code grows the 32 pre-existing frontend `tsc` errors / breaks build | Build / deploy | Medium | Low | Reproducible baseline + comparison gate; new files tsc-clean | `diff` empty; build green |
+| R14 | Aggregate endpoint duplicates work / inconsistent timestamps | Performance / correctness | Medium | Low | Single `GET /api/insights/dashboard`; shared reads once; one `generatedAt` | One-timestamp check |
+| R15 | Module-page edits accidentally alter routes/gating/controls | Compliance / stability | High | Low | Additive `ExplainableInsightCard` display only; no route/`ModuleGate`/control change | Diff review of the 3 module files |
+| R16 | Executive Summary via live LLM adds latency/non-determinism/egress | Performance / compliance | Medium | Low | Deterministic/templated summary; no live model call | Design constraint enforced |
+| R17 | Prohibited automation implied by UI or a guarantee | Compliance | High | Low | Advisory only; deep-links, never execute; no guarantee copy | Copy review |
+| R18 | Mobile / a11y / motion regressions | UX / a11y | Low | Low | Polaris-only; text-not-colour; reduced-motion; keyboard | Mobile + a11y + motion review |
+| R19 | Deploy disrupts live merchants | Stability | High | Low | This pass deploys nothing; later deploys additive + reversible; baseline snapshotted | "No deploy"; rollback documented |
 
-## Standing constraints (apply to every Phase-1 change)
+## Standing constraints
 
 - No new Shopify scopes; no API-version, app-URL, redirect, or webhook change.
-- No automatic order blocking, cancellation, refunds, or repricing; no chargeback guarantee; no formal credit-scoring claim; no fake sample results in production.
-- **No database migration and no new tables in the first release (Amendment 6).**
-- **No raw customer PII in explainability responses or logs; aggregate evidence allowlist only (Amendment 4).**
-- **Potential upside and revenue-at-risk are never summed or shown as a single confirmed figure (Amendment 2).**
-- No change to existing DB fields used by approved workflows. Do not deploy from the audit/planning pass.
+- No automatic order blocking, cancellation, refunds, repricing; no chargeback guarantee; no formal credit-scoring claim; no fake sample results.
+- **No database migration and no new tables in the first release.**
+- **No raw customer PII in explainability responses or logs — aggregate allowlist only.**
+- **Never sum potential upside and revenue-at-risk, and never sum incompatible periods.**
+- **Never fabricate a monetary score for a non-monetary finding — route it to the Critical attention lane instead.**
+- No change to existing DB fields used by approved workflows. Do not deploy from the planning pass.

@@ -1,10 +1,11 @@
 # Phase 1 Plan — Amendment Summary
 
-Date: 2026-07-31
+Date: 2026-07-31 (two rounds: initial amendment + final correction pass)
 Applies to: `docs/approved-baseline-audit.md`, `docs/phase-1-implementation-plan.md`, `docs/phase-1-risk-register.md`
+Final gate: `docs/phase-1-final-readiness-check.md`
 Status: **Documentation only. No feature code implemented. No deploy.**
 
-This records the mandatory corrections applied to the Phase 1 plan before implementation.
+This records the mandatory corrections applied to the Phase 1 plan before implementation. **Round 1** (items 1–9 below) reweighted scoring, split the revenue model, bounded competitor impact, added the evidence allowlist, established the TS baseline, removed first-release DB persistence, and set the single aggregate endpoint + dashboard hierarchy. **Round 2 — the final correction pass** (section "Final correction pass" below) closed double-counting, defined return-abuse precisely, added impact periods, corrected the competitor formula, added module-level UI, removed the DB contradiction, and protected critical non-monetary findings.
 
 ---
 
@@ -24,7 +25,7 @@ This records the mandatory corrections applied to the Phase 1 plan before implem
 **Why:** must not invent a competitor revenue number.
 **Audit result (code-verified):** **no defensible competitor-revenue-impact formula exists**; and **no order line items exist**, so per-product revenue is only approximable via `ProfitOptimizationData` (`sellingPrice × salesVelocity`).
 **Changed:** plan **§7.4**. Audit **§4** (clarification note). Risk **R6, R7**.
-**Final rule:** conservative bounded range `max = revenueProxy × min(priceGap, 0.15) × confidenceFactor(high 0.6 / medium 0.3) × importanceWeight`, `min = 0` always. Any missing/stale(>14d)/low-confidence input → **`impact_not_quantifiable`** (no invented amount). Caps and assumptions documented in §7.4.
+**Final rule (superseded by Round-2 F4):** conservative bounded range `max = revenueProxy × min(priceGap, 0.15) × confidenceFactor(high 0.6 / medium 0.3)`, `min = 0` always. Product importance is **not** a money multiplier (it affects prioritization only). Any missing/stale(>14d)/low-confidence/null-velocity input → **`impact_not_quantifiable`** (no invented amount). Caps and assumptions documented in §7.4.
 
 ### 4. Protected customer data — strict aggregate-only evidence allowlist
 **Why:** explainability must not widen protected-data exposure beyond the approved modules.
@@ -58,21 +59,60 @@ This records the mandatory corrections applied to the Phase 1 plan before implem
 
 ---
 
+## Final correction pass (2026-07-31) — Round 2
+
+### F1. Prevent potential-upside double counting
+**Why:** underpricing, safe-pricing profit, and margin opportunity could reference the same product/recommendation (shared `PriceHistory.expectedProfitGain`; same handle in `ProfitOptimizationData`).
+**Changed:** plan **§7.5**, **§5** (`id`/`dedupKey`), **§14.3** (5 tests). Risk **R7**.
+**Final rule:** canonical identity `dedupKey = storeId + productHandle + analysisWindow`; source-priority hierarchy (1) valid `PriceHistory.expectedProfitGain` → (2) `ProfitOptimizationData.projectedMonthlyProfit` → (3) supported derived estimate (real velocity only) → (4) `impact_not_quantifiable`. **Exactly one contribution per product/window; never summed.** Multiple `PriceHistory` rows → most-recent valid only.
+
+### F2. Return-abuse defined precisely
+**Why:** the placeholder `refundRate/totalRefunds × totalAmount` is dimensionally meaningless; `totalRefunds` is a **count**, and there is **no refund-amount field**.
+**Changed:** plan **§7.3**; audit **§9/10** (field-semantics table). Risk **R8**.
+**Final rule:** excess-over-store-baseline within a 90-day lookback on eligible orders (`status ∈ {paid,approved}`); thresholds `|E|≥5` customer, `≥50` store; dedupe by `Order.id`; monetary cap at eligible recent order value; else `impact_not_quantifiable` **while still showing the behavioural finding**.
+
+### F3. Correct impact periods
+**Why:** forcing everything to "monthly" and summing point-in-time exposure with monthly estimates is wrong.
+**Changed:** plan **§5** (`ImpactPeriod`), **§7.6**, **§10**. Risk **R9**.
+**Final rule:** periods `per_order | current_open_exposure | last_7_days | last_30_days | monthly_estimate`; only same-period amounts aggregate; groups are period-homogeneous arrays; **UI shows the period beside every amount.** High-risk-order exposure = `current_open_exposure`, never added to monthly pricing/competitor estimates.
+
+### F4. Competitor formula — no double discount
+**Why:** `sellingPrice × salesVelocity` already encodes scale; multiplying by an importance share double-discounts small SKUs, and no code supports it.
+**Changed:** plan **§7.4**; audit **§4**. Risk **R10**.
+**Final formula:** `max = revenueProxy × min(validPriceGap, 0.15) × confidenceFactor`, `min=0`, `period="monthly_estimate"`; importance used only for urgency/absolute cap, **never** as a money multiplier. Requires a **real stored** `salesVelocity` (not the `?? 8` default); else `impact_not_quantifiable`.
+
+### F5. Module-level explainability
+**Why:** explainability must appear where the work happens, not only on the dashboard.
+**Changed:** plan **§2**, **§10.2**, **§14.3**. Risk **R15**.
+**Final scope:** additive `ExplainableInsightCard` on existing major findings in **`FraudPage.tsx`, `CompetitorPage.tsx`, `PricingProfitPage.tsx`**, disclosing what/why/aggregate-evidence/impact-or-not-quantifiable/action/confidence/data-quality/methodology. No redesign, no route/`ModuleGate`/control/gating change.
+
+### F6. Remove the database contradiction
+**Why:** the audit conclusion still implied an optional first-release table.
+**Changed:** audit **§9/10** conclusion + summary; plan **§13**. Risk **R2**.
+**Final decision:** first release = **no `InsightReviewStatus`, no new table, no schema change, no migration.** Any persistence is a separate later enhancement.
+
+### F7. Protect critical non-monetary findings
+**Why:** a high-confidence critical fraud/operational risk must not vanish from "Where to focus" just because money can't be computed.
+**Changed:** plan **§7.1**, **§5** (`criticalAttention`, `isCriticalNonMonetary`), **§10.1**, **§14.3**. Risk **R11**.
+**Final decision — Approach A:** a separate **Critical attention** lane holds `urgency=critical` + `confidence∈{high,medium}` findings even when `impact_not_quantifiable`; ordered by urgency/confidence/recency; labeled "Impact not quantified"; **no fabricated monetary score.** Approach B (into the monetary list under a capped score) explicitly rejected.
+
+---
+
 ## Final agreed types (canonical)
 
 - `OpportunityScoreBreakdown` — total + five component scores + fixed weights `{impact .35, urgency .25, confidence .20, ease .10, recency .10}` + `excludedFromRanking`.
 - `FinancialImpact` — discriminated union: `quantified {min,max,currency,period,basis,isEstimate}` | `impact_not_quantifiable {reason}`.
 - `AggregateEvidence` — `{label, value}` only; no raw PII.
-- `RevenueLeakModel` — `{potentialUpside: LeakGroup, revenueAtRisk: LeakGroup}`; **no combined total**.
-- `LeakGroup` — `{kind, min, max, currency, period, items[], confidence, dataCoverage}`.
-- `DashboardInsightsResponse` — `{executiveSummary, opportunities[], revenueLeak, dataCoverage[], generatedAt}`.
+- `RevenueLeakModel` — `{potentialUpside: LeakGroup[], revenueAtRisk: LeakGroup[]}` (arrays grouped by period; period-homogeneous); **no combined total**.
+- `LeakGroup` — `{kind, period, min, max, currency, items[], confidence}`.
+- `DashboardInsightsResponse` — `{executiveSummary, opportunities[], criticalAttention[], revenueLeak, dataCoverage[], generatedAt}`.
 (Full definitions in implementation plan §5.)
 
 ## Final agreed formulas (canonical)
 
 - **Opportunity Score:** `0.35·impact + 0.25·urgency + 0.20·confidence + 0.10·ease + 0.10·recency` (each 0–100); exclude if impact/confidence unavailable.
 - **Ease of action:** fixed lookup over existing recommendation types → `one_click_review|guided|manual`; default `manual`; no LLM.
-- **Competitor impact (bounded):** `min=0`, `max = revenueProxy × min(gap, 0.15) × confidenceFactor × importance`; else `impact_not_quantifiable`.
+- **Competitor impact (bounded):** `min=0`, `max = revenueProxy × min(gap, 0.15) × confidenceFactor`; importance affects prioritization only, never the money; else `impact_not_quantifiable`.
 - **Revenue leak:** two independent bounded groups; never summed.
 
 ---
@@ -84,10 +124,11 @@ This records the mandatory corrections applied to the Phase 1 plan before implem
 - ✅ **No deploy.** Nothing pushed as part of this amendment task beyond the local commit.
 - ✅ **No database migration** planned for the first release.
 
-## Files changed in this amendment
+## Files changed (both rounds)
 
-- `docs/approved-baseline-audit.md` — §4 clarifications (competitor formula absence, no line items, two-group leak, evidence allowlist).
-- `docs/phase-1-implementation-plan.md` — §2, §5, §6, §7, §10, §11, §13, §14, §15, §16 rewritten/added.
-- `docs/phase-1-risk-register.md` — risks re-issued (R2–R15) reflecting amendments.
-- `docs/ts-baseline-frontend.txt` — **new**, reproducible 32-error baseline.
-- `docs/phase-1-plan-amendment-summary.md` — **new**, this file.
+- `docs/approved-baseline-audit.md` — §4 clarifications; §9/10 DB conclusion corrected (no first-release table); return-abuse field-semantics table added.
+- `docs/phase-1-implementation-plan.md` — reweighted score, two-group leak, competitor formula, evidence allowlist, single endpoint, dashboard hierarchy (round 1); dedup §7.5, return-abuse §7.3, periods §5/§7.6, competitor §7.4, module UI §10.2, DB §13, critical lane §7.1, expanded tests §14 (round 2).
+- `docs/phase-1-risk-register.md` — risks re-issued R1–R19 across both rounds.
+- `docs/ts-baseline-frontend.txt` — reproducible 32-error baseline.
+- `docs/phase-1-plan-amendment-summary.md` — this file.
+- `docs/phase-1-final-readiness-check.md` — **new**, final pre-implementation gate.

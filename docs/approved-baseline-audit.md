@@ -174,11 +174,26 @@ Confirmed present and **out of scope for modification**:
 
 ## 9 & 10. Architecture & DB conclusions (feed the implementation plan)
 
-- **Safest additive architecture:** one new **read-only aggregation service** (`explainabilityService`) that composes existing service outputs into new Phase-1 shapes (`ExplainableInsight`, `OpportunityScore`, `ExecutiveSummary`, `RevenueLeakSummary`), exposed via **new additive read-only endpoints** under `/api/dashboard/*` or a new `/api/insights` router, consumed by **new UI components** that reuse `ModuleGate`/`PageState`. No writes to protected tables in the request path.
-- **DB changes:** Phase 1 is **read/derive-only and needs no schema change** to ship the surfaces. The single optional additive field is a **merchant recommendation status** (e.g. `reviewed`/`dismissed`/`actioned`) on a per-insight basis — if persisted, it is a **new additive table** (`InsightReviewStatus`) or new **nullable** columns, never a change to existing fields, and applied via `prisma db push` producing only `CREATE TABLE`/`ADD COLUMN` (verified non-destructive before any deploy). Detailed in the implementation plan; **not built in this pass.**
+- **Safest additive architecture:** one new **read-only aggregation service** (`explainabilityService`) that composes existing service outputs into new Phase-1 shapes (`ExplainableInsight`, `OpportunityScoreBreakdown`, `ExecutiveSummary`, `RevenueLeakModel`), exposed via a **single additive read-only endpoint** `GET /api/insights/dashboard`, consumed by **new UI components** that reuse `ModuleGate`/`PageState`, and also surfaced on the existing Fraud/Competitor/Pricing-Profit pages via `ExplainableInsightCard`. No writes anywhere in the request path.
+- **DB changes (final):** **The first Phase 1 release makes no database change — no `InsightReviewStatus`, no new table, no Prisma schema change, and no migration.** Phase 1 is read/derive-only. Merchant recommendation-status persistence is **not** part of the first release; it is a separate, later, optional enhancement and is out of scope here.
+
+### Return-abuse field semantics (code-audited, item 2)
+
+For any monetary return-abuse logic, the exact stored meanings are:
+
+| Field | Type / meaning | Source of truth |
+|---|---|---|
+| `Customer.totalRefunds` | **COUNT of refunded orders** (not an amount) | `shopifyAdminService.ts:919` — `customer.orders.filter(o => o.refunded).length` |
+| `Customer.refundRate` | ratio `totalRefunds / totalOrders` (0–1) | `shopifyAdminService.ts:920` |
+| `Order.refunded` / `refundRequested` | booleans | `Order` model |
+| `Order.totalAmount` | order total (float). **No refund-amount / partial-refund field exists** | `Order` model |
+| Eligible/completed order | `Order.status ∈ {"paid","approved"}` (allowlist; synthetic `"baseline"` excluded) | `shopifyAdminService.ts:923` |
+| Customer ↔ Order | `Order.customerId → Customer`; `Customer.orders` | schema |
+
+Consequence: a monetary refund figure can only be built from the **full `totalAmount` of refunded orders** (an upper bound, since no partial-refund amount is stored), which forces the conservative excess-over-baseline formula and hard cap in implementation-plan §7.3, or `impact_not_quantifiable` while still showing the behavioural finding.
 
 ---
 
 ## Summary for reviewers
 
-The heavy lifting for explainability **already exists** in per-module services and in `decisionCenterService`. Phase 1 is predominantly an **additive aggregation + presentation** layer over existing, deterministic data — achievable without touching any protected system, without new scopes, and with at most one additive (non-destructive) table for merchant recommendation status.
+The heavy lifting for explainability **already exists** in per-module services and in `decisionCenterService`. Phase 1 is an **additive, read-only aggregation + presentation** layer over existing, deterministic data — achievable without touching any protected system, **without new scopes, and with no database change in the first release.**

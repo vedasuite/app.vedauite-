@@ -16,6 +16,7 @@ import { profitRouter } from "./profitRoutes";
 import { reportsRouter } from "./reportsRoutes";
 import { settingsRouter } from "./settingsRoutes";
 import { shopifyRouter } from "./shopifyRoutes";
+import { insightsRouter } from "./insightsRoutes";
 import { subscriptionDebugRouter, subscriptionRouter } from "./subscriptionRoutes";
 import { supportAdminRouter } from "./supportAdminRoutes";
 import { supportRouter } from "./supportRoutes";
@@ -50,6 +51,8 @@ router.use("/api/credit-score", creditScoreRouter);
 router.use("/api/profit", profitRouter);
 router.use("/api/reports", reportsRouter);
 router.use("/api/settings", settingsRouter);
+// Phase 1 explainability — additive, read-only aggregate insights.
+router.use("/api/insights", insightsRouter);
 // Merchant support — session-token authenticated, no plan capability required.
 router.use("/api/support", supportRouter);
 router.use("/api/shopify", shopifyRouter);

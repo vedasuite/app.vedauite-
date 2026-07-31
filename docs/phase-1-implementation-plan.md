@@ -1,71 +1,60 @@
 # Phase 1 Implementation Plan — Explainability & Prioritization
 
-Date: 2026-07-30 · Amended: 2026-07-30 (see `docs/phase-1-plan-amendment-summary.md`)
-Depends on: `docs/approved-baseline-audit.md`
-Status: **PLAN ONLY — not implemented in this pass.** No deploy. No feature code.
+Date: 2026-07-30 · Amended: 2026-07-30 · Finalized: 2026-07-31
+Governing amendments: `docs/phase-1-plan-amendment-summary.md`; final gate: `docs/phase-1-final-readiness-check.md`
+Status: **PLAN ONLY — not implemented. No deploy. No feature code.**
 
-Phase 1 goal: turn dashboards into a decision-support layer answering — what happened, why VedaSuite detected it, what evidence supports it, what financial impact, what to review first, and how confident. Delivered as an **additive**, **read-only** layer over existing deterministic data.
+Phase 1 turns dashboards into a decision-support layer answering: what happened, why detected, what evidence, what financial impact (or not quantifiable), what to review first, how confident. Additive, read-only, deterministic.
 
 ---
 
 ## 1. Architecture map
 
 ```
-                    (existing, untouched)
-  fraudService  trustAbuseService  competitorService  pricingService
-  profitService  pricingEngineStateService  decisionCenterService
-  dashboardService                     coreEngineService (writes analytics)
-        │              │             │            │
-        └──────────────┴─────┬───────┴────────────┘
+   existing services (untouched): fraud/trust/competitor/pricing/profit/
+   pricingEngineState/decisionCenter/dashboard/coreEngine
                              ▼
-                 explainabilityService.ts   ← NEW, read-only aggregator
-                 (deterministic composition + scoring; NO LLM in request path,
-                  NO writes, NO raw PII in outputs)
-                             │
+       explainabilityService.ts   ← NEW read-only aggregator
+       (deterministic scoring + dedup + period-aware ranges;
+        NO LLM in request path, NO writes, NO raw PII in output/logs)
                              ▼
-        GET /api/insights/dashboard   ← NEW single aggregate endpoint (§6)
-          → { executiveSummary, opportunities, revenueLeak,
-              dataCoverage, generatedAt }
-                             │
+       GET /api/insights/dashboard  → { executiveSummary, opportunities,
+         criticalAttention, revenueLeak, dataCoverage, generatedAt }
                              ▼
-   Frontend (NEW components, reuse ModuleGate/PageState/embeddedShopRequest)
-     rendered as ADDITIVE, REORDERED sections inside the EXISTING /app/dashboard
+   Frontend (additive):
+     Dashboard: Executive Summary, Where-to-focus, Critical attention,
+                Revenue Leak Detector (reordered sections in existing route)
+     Module pages (Fraud, Competitor, Pricing/Profit): reuse
+                ExplainableInsightCard on existing major findings
 ```
-
-Principle: **new code reads from existing services; it never rewrites them.** The request path performs only deterministic composition — no LLM calls, no Shopify writes, no automated actions, **no raw customer PII in responses or logs**.
 
 ---
 
 ## 2. Files expected to change (additive)
 
-**New files (backend):**
-- `backend/src/services/explainabilityService.ts`
-- `backend/src/routes/insightsRoutes.ts`
-
-**New files (frontend):**
-- `frontend/src/modules/Dashboard/components/ExecutiveSummaryCard.tsx`
-- `frontend/src/modules/Dashboard/components/WhereToFocusToday.tsx`
-- `frontend/src/modules/Dashboard/components/ExplainableInsightCard.tsx` (expandable, with "Why this priority?")
-- `frontend/src/modules/Dashboard/components/RevenueLeakDetector.tsx` (two groups, clickable categories)
-- `frontend/src/lib/insightsTypes.ts` (shared TS types, mirrored server-side)
-
-**Minimally edited existing files (additive only):**
+**New (backend):** `services/explainabilityService.ts`, `routes/insightsRoutes.ts`.
+**New (frontend):** `modules/Dashboard/components/{ExecutiveSummaryCard,WhereToFocusToday,CriticalAttentionLane,ExplainableInsightCard,RevenueLeakDetector}.tsx`, `lib/insightsTypes.ts`.
+**Minimally edited existing (additive only):**
 - `backend/src/routes/index.ts` — one `router.use("/api/insights", insightsRouter)` line.
-- `frontend/src/modules/Dashboard/DashboardPage.tsx` — render new sections and **reorder** sections into the required hierarchy (§10). No capability, route, control, or gating removed.
+- `frontend/src/modules/Dashboard/DashboardPage.tsx` — render + reorder new sections.
+- **Module pages (Amendment item 5), minimally edited to embed `ExplainableInsightCard` on existing major findings only:**
+  - `frontend/src/modules/FraudIntelligence/FraudPage.tsx`
+  - `frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx`
+  - `frontend/src/modules/PricingProfit/PricingProfitPage.tsx`
 
-**NO database changes in the first release (§13).**
+**NO database change in the first release (§13).**
 
 ---
 
 ## 3. Files that MUST NOT change (protected)
 
-`authRoutes.ts`, `verifyShopifySessionToken.ts`, `ensureOfflineToken.ts`, `shopifyConnectionService.ts`, `subscriptionService.ts`, `billingManagementService.ts`, `billing/capabilities.ts`, `billingRoutes.ts`, `requireCapability.ts`, `ModuleGate.tsx` (reuse, don't edit), `shopifyWebhookRoutes.ts`, `shopify.app.toml`, `AppStateProvider.tsx`, `privacyService.ts`, and **all existing Prisma fields/columns**. No route removal/rename. No plan-gating change. No new scopes.
+`authRoutes.ts`, `verifyShopifySessionToken.ts`, `ensureOfflineToken.ts`, `shopifyConnectionService.ts`, `subscriptionService.ts`, `billingManagementService.ts`, `billing/capabilities.ts`, `billingRoutes.ts`, `requireCapability.ts`, `ModuleGate.tsx`, `shopifyWebhookRoutes.ts`, `shopify.app.toml`, `AppStateProvider.tsx`, `privacyService.ts`, all existing Prisma fields. No route removal/rename, no plan-gating change, no new scopes. **Module-page edits are strictly additive display of `ExplainableInsightCard`; routes, `ModuleGate` usage, existing controls, and gating are preserved.**
 
 ---
 
 ## 4. Reusable services / components
 
-Backend read-only: `decisionCenterService.getUnifiedDecisionCenter`, `dashboardService.getDashboardMetrics`, and per-module read functions in `fraudService`/`competitorService`/`pricingService`/`profitService`. Frontend: `ModuleGate`, `PageState`, `RouteErrorBoundary`/`withRouteBoundary`, `embeddedShopRequest`, `useAppState`/`useSubscriptionPlan`, Polaris.
+Backend read-only: `decisionCenterService.getUnifiedDecisionCenter`, `dashboardService.getDashboardMetrics`, per-module readers. Frontend: `ModuleGate`, `PageState`, `RouteErrorBoundary`, `embeddedShopRequest`, `useAppState`/`useSubscriptionPlan`, Polaris.
 
 ---
 
@@ -76,284 +65,264 @@ type Confidence = "high" | "medium" | "low" | "insufficient_data";
 type Urgency = "critical" | "high" | "medium" | "low";
 type InsightModule = "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit";
 
-// AMENDMENT 4: aggregate-only evidence. No raw PII fields ever.
-interface AggregateEvidence {
-  label: string;                  // e.g. "Return rate", "Order count"
-  value: string;                  // pre-formatted, already-aggregated
-}
+// AMENDMENT (final) item 3 — explicit, non-interchangeable periods.
+type ImpactPeriod =
+  | "per_order"
+  | "current_open_exposure"   // point-in-time snapshot
+  | "last_7_days"
+  | "last_30_days"
+  | "monthly_estimate";
 
-// AMENDMENT 3: financial impact is a BOUNDED RANGE, or explicitly not quantifiable.
+interface AggregateEvidence { label: string; value: string } // no raw PII, ever
+
 type FinancialImpact =
-  | { status: "quantified"; min: number; max: number; currency: string; period: "monthly"; basis: string; isEstimate: true }
+  | { status: "quantified"; min: number; max: number; currency: string;
+      period: ImpactPeriod; basis: string; isEstimate: true }
   | { status: "impact_not_quantifiable"; reason: string };
 
-// AMENDMENT 1: every component score returned so UI can show "Why this priority?".
 interface OpportunityScoreBreakdown {
-  total: number;                  // 0–100
-  components: {
-    financialImpact: number;      // 0–100 (weight 35%)
-    urgency: number;              // 0–100 (weight 25%)
-    confidence: number;           // 0–100 (weight 20%)
-    easeOfAction: number;         // 0–100 (weight 10%)
-    recency: number;              // 0–100 (weight 10%)
-  };
+  total: number;                        // 0–100
+  components: { financialImpact: number; urgency: number; confidence: number; easeOfAction: number; recency: number };
   weights: { financialImpact: 0.35; urgency: 0.25; confidence: 0.20; easeOfAction: 0.10; recency: 0.10 };
-  excludedFromRanking: boolean;   // true when impact/confidence unavailable
+  excludedFromMonetaryRanking: boolean; // true when impact/confidence unavailable
   excludedReason?: string;
 }
 
+interface Methodology { summary: string; assumptions: string[]; caps: string[] } // "how we derived this"
+
 interface ExplainableInsight {
-  id: string;
+  id: string;                           // canonical dedup identity (§7.5)
   module: InsightModule;
-  title: string;                  // "what happened"
-  reasons: string[];              // "why detected" (existing builders)
-  evidence: AggregateEvidence[];  // aggregate-only (§ Amendment 4)
-  financialImpact: FinancialImpact;
+  title: string;
+  reasons: string[];
+  evidence: AggregateEvidence[];        // aggregate-only
+  financialImpact: FinancialImpact;     // carries its own period
   confidence: Confidence;
-  recency: string;                // ISO timestamp of underlying data
+  recency: string;                      // ISO timestamp
   urgency: Urgency;
-  easeOfAction: "one_click_review" | "guided" | "manual";  // §7 derivation
-  recommendedAction: string;      // advisory only, never auto-executed
+  easeOfAction: "one_click_review" | "guided" | "manual";
+  recommendedAction: string;            // advisory only
   score: OpportunityScoreBreakdown;
-  route: string;                  // deep link to the module view
+  methodology: Methodology;             // item 5 requirement
+  route: string;
   dataQuality: "ok" | "insufficient_data";
+  isCriticalNonMonetary?: boolean;      // item 7 — routes to Critical attention lane
 }
 
-// AMENDMENT 2: potential upside and revenue-at-risk are SEPARATE. Never summed.
+// AMENDMENT item 3 — a group only aggregates items of ONE compatible period.
 interface LeakGroup {
   kind: "potential_upside" | "revenue_at_risk";
-  min: number;
-  max: number;
-  currency: string;
-  period: "monthly";
-  items: { key: string; label: string; min: number; max: number; confidence: Confidence }[];
-  confidence: Confidence;         // group-level rollup
+  period: ImpactPeriod;                 // the group's single period
+  min: number; max: number; currency: string;
+  items: { key: string; label: string; min: number; max: number; period: ImpactPeriod; confidence: Confidence }[];
+  confidence: Confidence;
   dataCoverage: DataCoverage;
 }
+// Revenue-at-risk may hold MULTIPLE groups because its members have different
+// periods (e.g. current_open_exposure vs last_30_days) that must NOT be summed.
 interface RevenueLeakModel {
-  potentialUpside: LeakGroup;     // underpricing, margin, safe-pricing profit opportunities
-  revenueAtRisk: LeakGroup;       // competitor-price pressure, return-abuse, high-risk-order exposure
-  // NO combined total field exists by design.
+  potentialUpside: LeakGroup[];         // grouped by period; never cross-summed
+  revenueAtRisk: LeakGroup[];           // grouped by period; never cross-summed
+  // No single combined total anywhere.
 }
 
-interface DataCoverage {
-  module: InsightModule | "all";
-  rowsAvailable: number;
-  lastSyncAt: string | null;
-  sufficient: boolean;
-  note?: string;                  // e.g. "Add product cost to quantify margin"
-}
+interface DataCoverage { module: InsightModule | "all"; rowsAvailable: number; lastSyncAt: string | null; sufficient: boolean; note?: string }
 
-interface ExecutiveSummary {
-  generatedAt: string;
-  headline: string;
-  bullets: string[];
-  topOpportunity: ExplainableInsight | null;
-  dataReady: boolean;             // false => render readiness state, not a summary
-}
+interface ExecutiveSummary { generatedAt: string; headline: string; bullets: string[]; topOpportunity: ExplainableInsight | null; dataReady: boolean }
 
-// AMENDMENT 7: single aggregate response.
 interface DashboardInsightsResponse {
   executiveSummary: ExecutiveSummary;
-  opportunities: ExplainableInsight[];   // ranked desc by score.total; excluded items grouped separately
+  opportunities: ExplainableInsight[];      // monetary-ranked (excluded items omitted)
+  criticalAttention: ExplainableInsight[];  // item 7 — high-confidence critical, incl. non-monetary
   revenueLeak: RevenueLeakModel;
   dataCoverage: DataCoverage[];
-  generatedAt: string;                   // single timestamp for the whole response
+  generatedAt: string;                      // one timestamp for the whole response
 }
 ```
 
 ---
 
-## 6. API changes (additive, read-only) — single aggregate endpoint
+## 6. API — single aggregate endpoint
 
-**AMENDMENT 7.** Phase 1 exposes **one** aggregate endpoint:
-
-- `GET /api/insights/dashboard` → `DashboardInsightsResponse`
-
-**Performance reasoning:** the executive summary, opportunity ranking, and revenue-leak model all derive from the **same** underlying reads (`decisionCenterService`, `dashboardService`, `PriceHistory`, `ProfitOptimizationData`, `CompetitorData`). Computing them in one request:
-- **avoids duplicate DB/service work** — the shared reads happen once, not three times;
-- **guarantees one consistent `generatedAt`** across all sections (three separate calls could interleave with a sync and show mismatched timestamps/numbers);
-- **reduces round-trips** from the embedded iframe (each request re-acquires a session token).
-
-Focused module endpoints are **not** added in Phase 1; they may be introduced later **only** if a genuinely independent, separately-cached surface needs them. No new middleware; same `/api` session-token + `ensureOfflineToken` chain. **No `POST` / status-write endpoint in the first release (§13).** No new scopes.
+`GET /api/insights/dashboard` → `DashboardInsightsResponse`. One request computes the shared reads once and returns one consistent `generatedAt` (avoids duplicate work and interleaving with a sync). No status-write endpoint in the first release. Same `/api` session-token + `ensureOfflineToken` chain; no new middleware; no new scopes. Module pages reuse this same endpoint (filtered client-side by `module`) — no per-module endpoints added.
 
 ---
 
 ## 7. Formulas and assumptions
 
-All inputs already exist in the DB. All scoring is deterministic; no LLM in the request path.
+### 7.1 Opportunity Score + Critical Attention lane (items 1, 7)
 
-### 7.1 Opportunity Score (AMENDMENT 1)
+`total = 0.35·financialImpact + 0.25·urgency + 0.20·confidence + 0.10·easeOfAction + 0.10·recency` (each factor 0–100, deterministic normalization per the amendment). If `financialImpact = impact_not_quantifiable` OR `confidence = insufficient_data`, the item is **excluded from the monetary `opportunities` ranking** (`excludedFromMonetaryRanking = true`).
 
-Weighted sum of five factors, each normalized to **[0,100]**, then combined:
+**Item 7 — critical non-monetary findings are NOT lost. Chosen approach: A (separate lane).**
+A finding is routed into `criticalAttention` (in addition to, or instead of, monetary ranking) when: `urgency = "critical"` AND `confidence ∈ {high, medium}` — **even if** `financialImpact = impact_not_quantifiable`. In the Critical attention lane:
+- items are ordered by `urgency` then `confidence` then `recency` (NOT by a fabricated money score);
+- each shows an explicit **"Impact not quantified"** label when money is unavailable;
+- **no financial-impact score is invented** — the monetary component simply does not contribute, and the item never appears in the monetary `opportunities` list unless it also has a valid quantified impact.
+This guarantees a high-confidence critical fraud/operational risk always surfaces in "Where to focus", regardless of monetary quantifiability. (Approach B — allowing non-monetary items into the monetary list under a strict score cap — is explicitly rejected to avoid any fabricated score.)
 
-`total = 0.35·financialImpact + 0.25·urgency + 0.20·confidence + 0.10·easeOfAction + 0.10·recency`
+### 7.2 Ease of action (deterministic, no LLM)
 
-Deterministic normalization of each factor:
+Fixed lookup over the finite set of existing `recommendedAction` types → `one_click_review` (single flagged item deep-link) / `guided` (concrete stored recommended price to apply) / `manual` (judgement/multi-step). Unknown → `manual`.
 
-| Factor | Weight | Normalized [0,100] definition |
-|---|---|---|
-| **financialImpact** | 35% | `impact.status == "quantified"` → `100 · clamp( impact.max / storeImpactCap , 0, 1)`, where `storeImpactCap` = the 90th-percentile monthly impact seen for that store over the lookback window (deterministic from stored rows; falls back to a fixed sane cap when < N rows). `impact_not_quantifiable` → factor is **undefined**, insight is excluded (see rule below). |
-| **urgency** | 25% | `critical→100, high→75, medium→50, low→25` (from existing `severity`/`riskLevel`). |
-| **confidence** | 20% | `high→100, medium→60, low→30, insufficient_data→` **undefined → excluded**. |
-| **easeOfAction** | 10% | `one_click_review→100, guided→60, manual→30` (derivation in 7.2). |
-| **recency** | 10% | linear decay from 100 (today) to 0 at 30 days old, using the underlying data timestamp; clamped ≥0. |
+### 7.3 Return-abuse exposure — precise definition (item 2)
 
-**Hard rule (AMENDMENT 1):** if `financialImpact.status == "impact_not_quantifiable"` **OR** `confidence == "insufficient_data"`, the insight is **excluded from ranking** (`excludedFromRanking = true`, with reason) and shown in a separate "Needs more data" group. It is **never** given a high score, and missing factors are **never** treated as 0-that-still-ranks — they remove the item from the ranked list entirely.
+**Exact field semantics (code-audited):**
+- `Customer.totalRefunds` = **COUNT of refunded orders** (`shopifyAdminService.ts:919` filters `order.refunded`), **not a monetary amount**.
+- `Customer.refundRate` = `totalRefunds / totalOrders` (ratio 0–1).
+- `Order.refunded`, `Order.refundRequested` = booleans. `Order.totalAmount` = order total (float). **No refund-amount field exists** anywhere in the schema.
+- Customer↔Order: `Order.customerId → Customer`; `Customer.orders`.
+- Eligible/completed order = `Order.status ∈ {"paid","approved"}` (allowlist; the synthetic `"baseline"` status and anything else are excluded).
 
-Every component score and the weights are returned in `OpportunityScoreBreakdown` so the UI can render **"Why this priority?"** with the exact contribution of each factor.
+**The vague formula `refundRate/totalRefunds × Order.totalAmount` is rejected** (dimensionally meaningless — a ratio/count times an amount).
 
-### 7.2 Ease of action — conservative, deterministic, no LLM (AMENDMENT 1)
+**Conservative formula — excess behaviour above store baseline:**
+```
+Let LOOKBACK = 90 days.
+Eligible orders E(customer) = customer's orders with status∈{paid,approved},
+   createdAt within LOOKBACK, deduplicated by Order.id.
+storeBaselineRefundRate = (# refunded eligible orders store-wide) / (# eligible orders store-wide)
+customerRefundRate       = (# refunded orders in E) / |E|
+excessRate = max(0, customerRefundRate − storeBaselineRefundRate)
 
-Derived **only** from the existing recommendation/action type already produced by the services — never generated or phrased by an LLM:
+behaviouralFinding = ALWAYS shown when thresholds met (elevated refund rate vs baseline).
 
-| Existing recommendation type | easeOfAction |
-|---|---|
-| Advisory review of a single flagged order/customer (deep-link opens the item) | `one_click_review` |
-| Pricing/profit recommendation with a concrete stored `recommendedPrice`/`optimalPrice` the merchant applies in Shopify | `guided` |
-| Anything requiring merchant judgement, external steps, or multi-item work (e.g. "review margin-defense playbook", competitor strategy) | `manual` |
+monetaryExposure (upper-bounded proxy, since no refund amount exists):
+   refundedValue = Σ Order.totalAmount over refunded orders in E   (deduped)
+   max = min( excessRate × refundedValue , eligibleRecentOrderValue )
+   min = 0
+   period = "last_30_days"   // reported over the recent window, not "monthly"
+```
+**Required thresholds (else `impact_not_quantifiable`, but STILL show the behavioural finding):**
+- `|E| ≥ 5` (minimum customer completed orders);
+- store eligible-order count `≥ 50` (minimum store completed orders);
+- `LOOKBACK = 90 days` fixed;
+- exclude non-`{paid,approved}` (cancelled/test/synthetic) orders;
+- dedupe by `Order.id` (no order counted twice);
+- monetary cap at `eligibleRecentOrderValue = Σ totalAmount over E`.
+**Assumption documented:** because only a boolean `refunded` and the full `totalAmount` exist (no partial-refund amount), `refundedValue` treats a refunded order as fully returned — an over-estimate — hence the `excessRate` scaling and the hard cap keep it conservative. If thresholds fail, return `impact_not_quantifiable` and render the behavioural finding (rate vs baseline) with `dataQuality: "insufficient_data"` for the money only.
 
-The mapping is a fixed lookup table over the finite set of `recommendedAction` strings the services already emit. If an action type is unrecognized, it defaults to the most conservative bucket (`manual`).
+### 7.4 Competitor revenue impact — simplified, importance not double-counted (item 4)
 
-### 7.3 Revenue Leak model — two separate groups, never summed (AMENDMENT 2)
+**Math review:** `recentProductRevenueProxy = sellingPrice × salesVelocity` already encodes product scale; multiplying again by an importance *share* (proxy/Σproxy) double-discounts small SKUs. There is **no code-level evidence** for the previous importance-multiplier treatment (no competitor-revenue formula exists in the codebase), so it is removed from the monetary estimate.
 
-No `totalExposure`. Two independent groups, each a **bounded range** with its own confidence and data coverage:
+**Final formula:**
+```
+max = recentProductRevenueProxy × min(validPriceGap, gapCap) × confidenceFactor
+min = 0
+period = "monthly_estimate"   // salesVelocity is a ~monthly-scaled proxy
+```
+where `gapCap = 0.15`, `confidenceFactor = {high:0.6, medium:0.3}`, `validPriceGap = (ourPrice − competitorPrice)/ourPrice` (>0 only).
+**Return `impact_not_quantifiable`** when: `salesVelocity` is null/absent (must be a **real stored** value, not the code's `?? 8` default), no fresh `CompetitorData.price`, match `confidenceLabel = low`, or `collectedAt` older than 14 days.
+**Product importance is used only for prioritization, not money:** it may raise/lower `urgency` and acts as an **absolute cap** (a tiny-SKU insight cannot outrank larger ones), but it never multiplies the dollar estimate. Boundary tests in §14.
 
-**A. Potential upside** (opportunities to gain, all *supported* by stored data):
-- supported underpricing opportunity — from `PriceHistory` rows where `recommendedPrice > currentPrice` and `expectedProfitGain > 0`.
-- supported margin opportunity — from `ProfitOptimizationData` where `projectedMarginIncrease > 0` **and** `productCost > 0`.
-- supported safe-pricing profit opportunity — from `PriceHistory.expectedProfitGain` on recommendations whose automation posture is "merchant review recommended" (conservative subset).
+### 7.5 Potential-upside canonical selection & de-duplication (item 1)
 
-**B. Revenue at risk** (potential losses, all *supported*):
-- supported competitor-price pressure — §7.4 bounded competitor range (only where quantifiable).
-- supported return-abuse exposure — from `Customer.refundRate`/`totalRefunds` × related `Order.totalAmount`, high-return cohort only.
-- supported high-risk-order exposure — from `Order` where `fraudRiskLevel = High`, summing `totalAmount` of currently-open/unresolved high-risk orders.
+**Problem:** underpricing, safe-pricing profit, and margin opportunity can reference the *same* product/recommendation (`PriceHistory.expectedProfitGain` reused; `ProfitOptimizationData.projectedMonthlyProfit` for the same handle), risking double counting.
 
-Each group returns `min`, `max`, `currency`, `period` (monthly), per-item breakdown, group `confidence`, and `dataCoverage`. **The UI never displays A+B as a combined "total exposure", "confirmed loss", or "guaranteed profit".** Copy is explicitly framed as ranges of *opportunity* vs *risk*, both estimates.
+**Canonical identity:** `dedupKey = storeId + ":" + productHandle + ":" + analysisWindow` (analysisWindow = the recommendation's rounded time bucket, e.g. day). Every product/recommendation contributes to **exactly one** potential-upside amount per window.
 
-### 7.4 Competitor revenue impact — bounded, or not quantifiable (AMENDMENT 3)
+**Source-priority hierarchy (first match wins; others for the same `dedupKey` are dropped):**
+1. Valid `PriceHistory.expectedProfitGain` (non-null, > 0, fresh) — most specific.
+2. Else valid `ProfitOptimizationData.projectedMonthlyProfit` (non-null, > 0).
+3. Else a supported deterministic derived estimate (e.g. `max(0, recommendedPrice − currentPrice) × realSalesVelocity`) — only when inputs are real (no defaulted velocity).
+4. Else `impact_not_quantifiable`.
 
-**Code audit result:** no defensible competitor-revenue-impact formula exists today (`competitorService` computes match/price-gap/priority signals only; nothing links a price gap to revenue). Also, **there are no order line items in the schema**, so true per-product revenue is not directly available.
+**Rule:** never sum multiple opportunity estimates for the same `dedupKey`. When multiple `PriceHistory` rows exist for one product/window, select the **most recent valid** row only. The three upside "categories" become *labels describing which source won*, not additive buckets.
 
-Therefore Phase 1 defines a **conservative bounded range**, computed **only** when all inputs are present, else `impact_not_quantifiable`:
+### 7.6 Impact periods (item 3)
 
-- **recent product revenue proxy** = `ProfitOptimizationData.sellingPrice × salesVelocity` for the handle (the only per-product revenue signal available). If absent → `impact_not_quantifiable`.
-- **competitor price gap** = `(ourPrice − competitorPrice) / ourPrice`, only when a `CompetitorData.price` exists for the handle.
-- **match confidence** = `competitorService.confidenceLabel`; if `low` → `impact_not_quantifiable`.
-- **recency** = `CompetitorData.collectedAt`; stale (> 14 days) → `impact_not_quantifiable`.
-- **product importance** = the handle's share of the store's revenue-proxy total (bounds influence of tiny SKUs).
-
-Bounded range: `min = 0`; `max = recentProductRevenueProxy × min(priceGap, gapCap) × confidenceFactor × importanceWeight`, with **caps**: `gapCap = 0.15` (never attribute more than a 15% gap effect), `confidenceFactor` = {high:0.6, medium:0.3} (deliberately < 1 — we never claim the full gap converts to revenue), `importanceWeight ∈ [0,1]`. **Assumptions documented:** this is an upper-bounded *estimate of exposure*, not a prediction; `min` is always 0 because we cannot assert a floor. If any input is missing/stale/low-confidence, return `impact_not_quantifiable` rather than an invented number.
+Every `FinancialImpact` and `LeakGroup` carries an explicit `ImpactPeriod`. **Only amounts with the same period are aggregated.** Concretely:
+- high-risk-order exposure → `current_open_exposure` (point-in-time; sum of `totalAmount` of currently-open High-risk orders) — **never** added to pricing/competitor `monthly_estimate`;
+- competitor pressure → `monthly_estimate`; return-abuse → `last_30_days`; pricing/margin upside → `monthly_estimate` or `per_order` as applicable.
+`revenueAtRisk`/`potentialUpside` are therefore **arrays of period-homogeneous groups**; the UI renders each group separately and **shows the period beside every amount**. No cross-period sum ever appears.
 
 ---
 
 ## 8. Confidence rules
 
-Confidence is inherited where a source provides it (`competitorService.confidenceLabel`, `fraudService.buildFraudConfidence`, pricing `demandScore` banded); otherwise derived from **data sufficiency** (row count + recency), never assumed "high". `low` items are shown but excluded from the headline ranking (§7.1). `insufficient_data` is first-class and excludes the item from scoring.
-
----
+Inherited where a source provides it; else derived from data sufficiency (row count + recency); never assumed high. `low` shown but excluded from monetary headline ranking. `insufficient_data` excludes from monetary scoring (but see §7.1 critical lane).
 
 ## 9. Insufficient-data behaviour
 
-Per the audit list (cost/margin without COGS, low-confidence competitor matches, thin history, null impact, still-syncing stores) every unquantifiable value renders an explicit **"Insufficient data"** state via `PageState`, with a one-line reason and, where useful, a link to the action that would improve it. The Executive Summary and Opportunity list **never fabricate**; a not-ready store shows the existing readiness/collecting-data state.
+Every unquantifiable value renders an explicit "Insufficient data"/"Impact not quantified" state via `PageState`, with a one-line reason and (where useful) the action that would improve it. Summaries never fabricate; a not-ready store shows the existing readiness state. **Behavioural findings still render even when their money is not quantifiable (§7.3).**
 
 ---
 
-## 10. Dashboard presentation & UI plan (AMENDMENTS 8 & 9)
+## 10. Dashboard + module presentation (items 5, 8, 9)
 
-### 10.1 Section hierarchy (reorder within the existing `/app/dashboard` route)
+### 10.1 Dashboard section hierarchy (reorder within existing `/app/dashboard`)
+1. AI Executive Summary → 2. Where to focus today → 3. **Critical attention** (item 7) → 4. Revenue Leak Detector → 5. existing metric cards → 6. recent insights/activity → 7. data coverage & sync status. Nothing removed.
 
-Sections are **reordered** (not removed) into:
+### 10.2 Module-level explainability (item 5)
+On the **existing** Fraud, Competitor, and Pricing/Profit pages, each **major existing finding** gains an expandable `ExplainableInsightCard` (or a compact module wrapper) disclosing: what was detected · why · aggregate evidence · estimated impact **or** `impact_not_quantifiable` · recommended action · confidence · data quality · **methodology**. This is additive display only — **no redesign, no route change, no `ModuleGate`/control/gating change.** Exact files edited: `FraudPage.tsx`, `CompetitorPage.tsx`, `PricingProfitPage.tsx` (listed in §2).
 
-1. **AI Executive Summary**
-2. **Where to focus today** (ranked Opportunity list)
-3. **Revenue Leak Detector** (two groups: upside / at-risk)
-4. **Existing metric cards** (unchanged)
-5. **Recent insights / activity** (unchanged)
-6. **Data coverage & sync status**
-
-No existing dashboard capability, route, update/refresh control, or plan gating is removed. Reordering is layout-only inside the one route.
-
-### 10.2 UI phase scope (AMENDMENT 9)
-
-- **Expandable Explainable Insight cards** (Polaris `Collapsible`) — collapsed shows title + score + one-line impact; expanded shows reasons, aggregate evidence, impact range, confidence, recommended action, deep link.
-- **"Why this priority?"** disclosure — renders the five component scores + weights from `OpportunityScoreBreakdown`.
-- **Clickable Revenue Leak categories** — each item expands to its supporting breakdown and deep-links to the module.
-- **Meaningful loading and empty states** (reuse `PageState`); explicit insufficient-data states.
-- **Responsive Polaris layouts** — cards stack on mobile, tables scroll within their own container, no fixed widths.
-- **Keyboard accessibility** — all controls reachable/labeled; expand/collapse via Polaris.
-- **Reduced-motion support** — respect `prefers-reduced-motion`; disable non-essential transitions when set.
-- **Subtle transitions only** — no large/animated motion; enhancement, not spectacle.
-
-This is a **Shopify-native enhancement** using the existing Polaris design system and navigation — **not** a replacement of either.
+### 10.3 UI scope
+Expandable cards; "Why this priority?" (component scores + weights); clickable Revenue Leak categories; meaningful loading/empty/insufficient-data states; responsive Polaris; keyboard accessibility; `prefers-reduced-motion`; subtle transitions only. Shopify-native enhancement using existing Polaris + navigation.
 
 ---
 
-## 11. Accessibility requirements
+## 11. Accessibility
+Polaris (WCAG-oriented); keyboard-reachable/labeled; status by text + Badge, never colour alone; accessibility labels on Spinner/Banner; heading hierarchy; `prefers-reduced-motion` respected.
 
-Polaris components (WCAG-oriented). Keyboard-reachable, labeled controls. Confidence/urgency conveyed by **text + Badge**, never colour alone. `Spinner`/`Banner` carry accessibility labels. Proper heading hierarchy. **`prefers-reduced-motion` respected** (AMENDMENT 9).
-
----
-
-## 12. Mobile behaviour
-
-Responsive Polaris (`Layout`/`Card`/`BlockStack`). Cards stack; tables scroll within `overflow-x`; touch targets meet Polaris minimums. Verified at mobile widths during implementation, not assumed.
+## 12. Mobile
+Responsive Polaris; cards stack; tables scroll in `overflow-x`; touch targets meet Polaris minimums; verified at mobile widths.
 
 ---
 
-## 13. Database scope (AMENDMENT 6)
+## 13. Database scope (item 6)
 
-**No database changes in the first Phase 1 release.** `InsightReviewStatus` and any migration are **removed** from the first release. Phase 1 ships **read-only** intelligence only. Merchant recommendation-status persistence (reviewed/dismissed/actioned) is deferred to a **later optional enhancement** after the read-only dashboard is stable; when/if added it will be a purely additive, cascade-scoped table verified non-destructive via `prisma migrate diff` — but that is out of scope here.
+**No database change in the first release — full stop.** No `InsightReviewStatus`, no new table, no Prisma schema change, no migration. Phase 1 ships read-only intelligence only. Any future workflow-status persistence is a **separate later enhancement**, out of scope here.
 
 ---
 
-## 14. TypeScript baseline & test plan (AMENDMENT 5)
+## 14. TypeScript baseline & tests (item 1/2/4/7 tests)
 
-### 14.1 Reproducible TS baseline
+### 14.1 TS baseline
+`docs/ts-baseline-frontend.txt` holds the 32 pre-existing frontend errors. **Gate:** no new signatures, count stays 32, no Phase-1 file in `tsc` output, backend stays 0, `vite build` green.
 
-A committed baseline of the **32 pre-existing frontend `tsc` errors** is recorded at `docs/ts-baseline-frontend.txt` (error signatures + per-file counts), generated by:
-
-```bash
-cd frontend && npx tsc --noEmit 2>&1 | grep -E "error TS" | sort > ../docs/ts-baseline-frontend.txt
-```
-
-### 14.2 Implementation requirements (gate before commit)
-
-- **No new error signatures** vs baseline.
-- **No increase in total error count** (stays 32).
-- **No new Phase-1 file** appears in `tsc` output.
-- **Backend stays at 0** `tsc` errors.
-- **Production build (`vite build`) stays green.**
-
-### 14.3 Baseline comparison procedure
-
+### 14.2 Baseline comparison procedure
 ```bash
 cd frontend && npx tsc --noEmit 2>&1 | grep -E "error TS" | sort > /tmp/ts-now.txt
-diff ../docs/ts-baseline-frontend.txt /tmp/ts-now.txt   # MUST be empty
-grep -E "modules/Dashboard/components|lib/insightsTypes" /tmp/ts-now.txt  # MUST be empty
-cd ../backend && npx tsc --noEmit   # MUST exit 0
-cd ../frontend && npm run build     # MUST succeed
+diff docs/ts-baseline-frontend.txt /tmp/ts-now.txt        # MUST be empty
+grep -E "modules/Dashboard/components|lib/insightsTypes|CriticalAttention" /tmp/ts-now.txt  # MUST be empty
+cd backend && npx tsc --noEmit                            # MUST exit 0
+cd ../frontend && npm run build                           # MUST succeed
 ```
+Canonical, path-independent gate: count unchanged + no new signatures + no new Phase-1 file.
 
-### 14.4 Functional test plan
+### 14.3 Required unit tests (deterministic pure functions)
 
-- **Unit (pure functions):** Opportunity Score + component normalization, ease-of-action lookup, revenue-leak two-group aggregation, competitor bounded range incl. `impact_not_quantifiable`, evidence allowlist mapping. Node `--test`, added as a new script (additive; existing scripts unchanged).
-- **Manual QA matrix:** ready store, still-syncing store, no-COGS store, low-confidence competitor matches, empty store — each renders correctly (real ranges or explicit insufficient-data), and **no raw PII appears in any response or log**.
-- **Regression smoke:** auth, billing, plan-gating, install/reconnect, webhooks, existing routes behave identically (no protected file changed).
+**Potential-upside dedup (§7.5):**
+- same product in both `PriceHistory` and `ProfitOptimizationData` → counted **once** (PriceHistory wins);
+- multiple `PriceHistory` rows for one product → only the most-recent valid row used;
+- stale recommendation rows → excluded;
+- duplicate recommendation events (same `dedupKey`) → single contribution;
+- different products with legitimate separate opportunities → each counted once.
+
+**Return-abuse (§7.3):**
+- below `|E|≥5` or store `<50` eligible → `impact_not_quantifiable` **but** behavioural finding present;
+- cancelled/test/`baseline`-status orders excluded; duplicates by `Order.id` not double-counted;
+- monetary result capped at `eligibleRecentOrderValue`; `excessRate=0` when at/below baseline.
+
+**Competitor (§7.4) boundary:**
+- `gapCap` enforced (gap 0.5 → treated as 0.15); `confidenceFactor` applied; `min=0`;
+- null/defaulted `salesVelocity` → `impact_not_quantifiable`; stale `collectedAt` (>14d) → `impact_not_quantifiable`; `low` confidence → `impact_not_quantifiable`;
+- importance never changes the dollar amount (only urgency/cap).
+
+**Periods (§7.6):** items of different periods are never summed; each group is period-homogeneous.
+
+**Critical lane (§7.1/item 7):** a `critical`+`high`-confidence fraud finding with `impact_not_quantifiable` appears in `criticalAttention`, is labeled "Impact not quantified", and receives **no** fabricated monetary score.
+
+**Evidence allowlist:** aggregate-only mapper never emits email/address/IP/device/payment fingerprint/raw payloads.
+
+### 14.4 Manual QA matrix
+Ready store · still-syncing · no-COGS · low-confidence competitor · empty store — each renders real ranges or explicit insufficient/not-quantifiable, with **period shown beside every amount** and **no raw PII in any response or log**. Regression smoke on auth/billing/gating/install/webhooks/routes.
 
 ---
 
-## 15. Release and rollback plan
+## 15. Release & rollback
+Additive commits via existing flow; single read-only endpoint; new sections degrade gracefully. Gate: §14.2 comparison + build pass before commit/deploy. Rollback = revert additive commits (baseline snapshotted as `approved-backup-app1`); **no DB migration ships, so nothing to roll back on the data layer.**
 
-- **Release:** additive commits through the existing deploy flow; the single new endpoint is read-only; new dashboard sections degrade to insufficient-data/empty if unavailable. **Gate:** the §14.3 baseline comparison + build must pass before commit and before any deploy.
-- **Rollback:** everything is additive and the approved baseline is snapshotted (`approved-backup-app1` branch/tag/zip). Rollback = revert the additive commits (non-destructive) or redeploy the prior commit. No DB migration ships in the first release, so there is nothing to roll back on the data layer.
-
----
-
-## 16. Shopify compliance & protected-data safeguards (AMENDMENT 4)
-
-- **No new scopes / API-version / app-URL / redirect / webhook changes.**
-- **No prohibited automation:** advisory only — no auto order-blocking, cancellation, refunds, or repricing; no chargeback guarantee; no formal credit-scoring claim; no fabricated data.
-- **Strict evidence allowlist (new):** explainability responses and logs expose **only aggregate, merchant-friendly evidence** — return rate, order count, refund count, address count, order-frequency band, risk-signal count. The following are **never** placed in generic evidence responses or logs: **full email, full address, IP address, device fingerprint, payment fingerprint, raw Shopify customer or order payloads.** Identity visibility is capped at exactly what the corresponding **approved module already shows** — Phase 1 does not expand protected-data visibility.
-- **Tenant isolation preserved:** new endpoint reads store-scoped analytics only, enforced by `verifyShopifySessionToken` shop-matching.
-- **Executive Summary is deterministic/templated** in the request path (no live LLM call), avoiding latency, non-determinism, and data-egress concerns.
+## 16. Compliance & protected-data safeguards
+No new scopes/API-version/URL/webhook change. No prohibited automation (advisory only; deep-links, never execute). **Strict aggregate-only evidence allowlist**; forbidden fields (full email/address/IP/device/payment fingerprint/raw payloads) never in responses or logs; identity capped to what the approved module already shows. Tenant isolation preserved (store-scoped reads). Executive Summary deterministic/templated (no live LLM).
