@@ -126,6 +126,12 @@ async function exchangeOfflineAccessToken(shop: string, code: string) {
       client_id: env.shopifyApiKey,
       client_secret: env.shopifyApiSecret,
       code,
+      // Without this, Shopify silently issues a non-expiring (legacy) offline
+      // token with no expires_in/refresh_token, which newer/enforced apps'
+      // Admin API then rejects outright. This is not implied by app age or
+      // grant type — it must be requested explicitly on every acquisition.
+      // Docs: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens#expiring-vs-non-expiring-offline-tokens
+      expiring: "1",
     },
     { timeout: 15000 }
   );

@@ -326,6 +326,10 @@ export async function exchangeSessionTokenForOfflineToken(
       subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
       requested_token_type:
         "urn:shopify:params:oauth:token-type:offline-access-token",
+      // Required to actually receive expires_in/refresh_token back — Token
+      // Exchange defaults to non-expiring, same as the classic grant. See the
+      // note on the classic exchange in authRoutes.ts for the full rationale.
+      expiring: "1",
     },
     { timeout: 15000 }
   );
@@ -543,6 +547,10 @@ async function exchangeLegacyOfflineToken(
           "urn:shopify:params:oauth:token-type:offline-access-token",
         requested_token_type:
           "urn:shopify:params:oauth:token-type:offline-access-token",
+        // Migrates the existing non-expiring token to an expiring one in a
+        // single call — Shopify revokes the old token on success. Required;
+        // see the note in authRoutes.ts's exchangeOfflineAccessToken.
+        expiring: "1",
       },
       { timeout: 15000 }
     );
@@ -565,7 +573,9 @@ async function exchangeLegacyOfflineToken(
         accessTokenExpiresAt,
         refreshToken: response.data.refresh_token ?? null,
         refreshTokenExpiresAt,
-        tokenAcquisitionMode: "offline_expiring",
+        tokenAcquisitionMode: response.data.refresh_token
+          ? "offline_expiring"
+          : "offline_legacy",
         reauthorizedAt: now,
         authErrorCode: null,
         authErrorMessage: null,
@@ -603,6 +613,16 @@ async function refreshOfflineAccessToken(
   installation: NonNullable<InstallationRecord>
 ) {
   if (!installation.refreshToken) {
+    // No refresh token means this installation is still in legacy
+    // (non-expiring) mode. Before giving up, attempt a one-time migration
+    // exchange using the existing legacy access token itself as proof of
+    // identity — this needs no live session token, so it also lets
+    // session-less contexts (background jobs, the connection-health probe)
+    // self-heal, not just live embedded requests.
+    if (installation.accessToken) {
+      return exchangeLegacyOfflineToken(installation);
+    }
+
     const code = installation.accessTokenExpiresAt
       ? "OFFLINE_TOKEN_EXPIRED"
       : "SHOPIFY_RECONNECT_REQUIRED";

@@ -49,18 +49,64 @@ environment: the classic OAuth callback kept producing another legacy
 token, and nothing ever tried to upgrade it via Token Exchange, which is
 the only mechanism that can.
 
+### 1a. Update after staging validation — the actual final piece
+
+The fix above was deployed to staging and verified to work exactly as
+designed: the self-heal logic ran automatically (visible in the logs as
+`shopify.connection.offline_token_self_healed`), with no manual
+uninstall/reinstall needed this time. But the exchange it performed still
+came back with `"hasRefreshToken":false` — Shopify was still not issuing
+an expiring token, via *either* the classic grant or Token Exchange, for
+this app.
+
+Checking Shopify's current documentation directly (rather than relying on
+the assumption that a new app is automatically enrolled in expiring
+tokens) revealed the actual mechanism: **whether Shopify issues an
+expiring or non-expiring offline token is controlled entirely by an
+`expiring` request parameter that the app must send explicitly** — it is
+not implied by app creation date, distribution status, or grant type.
+None of the three token-acquisition call sites in this codebase were ever
+sending it. This is the genuine, final root cause — everything in the
+original fix above (the classifier, the concurrency guard, the bounded
+self-heal dispatch) was necessary and correct scaffolding, but without
+this one parameter, every acquisition path — classic OAuth, session-token
+Token Exchange, and the legacy-migration exchange — would keep returning
+a non-expiring token no matter how many times it ran.
+
+**Added `expiring: "1"` to all three token-acquisition requests:**
+- `authRoutes.ts` → `exchangeOfflineAccessToken` (classic `/auth/callback` grant)
+- `shopifyConnectionService.ts` → `exchangeSessionTokenForOfflineToken` (Token Exchange via a live App Bridge session token)
+- `shopifyConnectionService.ts` → `exchangeLegacyOfflineToken` (a **migration** exchange that presents the *existing* legacy access token as proof of identity — this function already existed in the codebase but was dead code, never called from anywhere)
+
+**Also wired the legacy-migration function in**, since it was sitting
+unused: `refreshOfflineAccessToken`'s "no refresh token" branch now
+attempts `exchangeLegacyOfflineToken` before giving up. This one requires
+no live session token at all — only the existing (still-valid-for-this-
+purpose) legacy access token — so it's the mechanism that lets
+**session-less contexts** (the connection-health probe, background sync
+jobs, webhook registration retries) self-heal too, not just live
+authenticated embedded requests. Per Shopify's documentation, the old
+non-expiring token is automatically revoked by Shopify once this exchange
+succeeds.
+
+One related correctness fix made in passing: `exchangeLegacyOfflineToken`
+previously hardcoded `tokenAcquisitionMode: "offline_expiring"`
+unconditionally after any successful call; it now derives this the same
+way the other two acquisition functions already did — from whether
+Shopify's response actually included a `refresh_token`.
+
 ## 2. Files changed
 
 | File | Change |
 |---|---|
-| `backend/src/services/shopifyConnectionService.ts` | Added `isShopifyAuthRejection()` (shared 401/403-"non-expiring" classifier); replaced the exchange-only in-flight map with `runExclusiveTokenOperation()`, shared by both the session-token exchange and the refresh-token-grant paths; added a bounded, in-memory, one-shot-per-process opportunistic upgrade for legacy tokens in `ensureOfflineAccessToken`; fixed `probeShopApi`'s failure classification to use the shared classifier. |
+| `backend/src/services/shopifyConnectionService.ts` | Added `isShopifyAuthRejection()` (shared 401/403-"non-expiring" classifier); replaced the exchange-only in-flight map with `runExclusiveTokenOperation()`, shared by both the session-token exchange and the refresh-token-grant paths; added a bounded, in-memory, one-shot-per-process opportunistic upgrade for legacy tokens in `ensureOfflineAccessToken`; fixed `probeShopApi`'s failure classification to use the shared classifier; added `expiring: "1"` to `exchangeSessionTokenForOfflineToken` and `exchangeLegacyOfflineToken`; wired `exchangeLegacyOfflineToken` into `refreshOfflineAccessToken`'s no-refresh-token branch (previously dead code); fixed `exchangeLegacyOfflineToken`'s `tokenAcquisitionMode` to be conditional on an actual refresh token coming back. |
 | `backend/src/services/shopifyAdminService.ts` | `shopifyGraphQL()`'s retry-on-auth-failure condition now uses the shared `isShopifyAuthRejection()` classifier instead of a 401-only check. |
-| `backend/tests/shopify-connection-service.test.cjs` | 9 new tests added (12 total, all passing) covering acquisition, persistence, reuse, refresh, rotation, concurrency, and failure handling. |
+| `backend/src/routes/authRoutes.ts` | Added `expiring: "1"` to `exchangeOfflineAccessToken` (the classic `/auth/callback` grant). |
+| `backend/tests/shopify-connection-service.test.cjs` | 13 new/updated tests (16 total, all passing) covering acquisition (asserting `expiring: "1"` is sent), persistence, reuse, refresh, rotation, concurrency, session-less legacy migration, and failure handling. |
 | `backend/tests/shopifyGraphQLAuthRetry.test.cjs` | New file — 3 tests exercising the exact real failure mode end-to-end (403 → refresh → retry → success; unrecoverable refresh → controlled error; unrelated 500 → no false-positive retry). |
 
-No other file was touched. Nothing in routing, ModuleGate, billing plan
-definitions, webhook topic subscriptions, OAuth scopes, or the frontend was
-changed.
+Nothing in routing, ModuleGate, billing plan definitions, webhook topic
+subscriptions, OAuth *scopes*, or the frontend was changed.
 
 ## 3. Database migration
 
@@ -146,11 +192,12 @@ oversight — see §6.
 ```
 node --test tests/shopify-connection-service.test.cjs tests/shopifyGraphQLAuthRetry.test.cjs
 ```
-→ **15/15 pass** (3 pre-existing + 12 new in `shopify-connection-service.test.cjs`,
-3 new in `shopifyGraphQLAuthRetry.test.cjs`).
+→ **16/16 pass** (16 in `shopify-connection-service.test.cjs`, 3 of which are
+part of `shopifyGraphQLAuthRetry.test.cjs`'s separate 3/3 — 19 total across
+the two files).
 
 Coverage against the requested list:
-- expiring-token acquisition ✅
+- expiring-token acquisition (now asserting `expiring: "1"` is actually sent) ✅
 - token/expiry persistence ✅
 - valid token reuse (no network call) ✅
 - refresh before expiry ✅
@@ -163,15 +210,17 @@ Coverage against the requested list:
 - (added, matching the real observed bug) 403 "non-expiring" rejection → one forced refresh → retry → success ✅
 - (added) unrecoverable rejection surfaces a controlled error, never retries twice ✅
 - (added) an unrelated 500 is never misclassified as an auth rejection ✅
+- (added, §1a) session-less legacy-token migration via `exchangeLegacyOfflineToken`, asserting `expiring: "1"` and the legacy token itself as `subject_token` ✅
+- (added, §1a) a legacy token that cannot be migrated or refreshed still falls back to a controlled reconnect-required response ✅
 
 ### Full build gates
 
 | Gate | Result |
 |---|---|
-| Targeted auth tests (`shopify-connection-service.test.cjs` + `shopifyGraphQLAuthRetry.test.cjs`) | 15/15 pass |
+| Targeted auth tests (`shopify-connection-service.test.cjs` + `shopifyGraphQLAuthRetry.test.cjs`) | 19/19 pass |
 | Backend TypeScript (`tsc --noEmit`) | 0 errors |
 | Backend production build | success |
-| Full backend suite (`tests/*.test.cjs`) | 120 tests, 114 pass, 6 fail |
+| Full backend suite (`tests/*.test.cjs`) | 121 tests, 115 pass, 6 fail |
 | Frontend TypeScript (`tsc --noEmit`) | 32 errors — unchanged baseline |
 | Frontend production build (`vite build`) | success (1139 modules; frontend untouched by this fix) |
 
@@ -218,21 +267,32 @@ eventually deployed to production:
 
 ## 7. Staging retest steps
 
+**Note:** an earlier version of this fix (without `expiring: "1"`) was
+already deployed and tested live on staging — it confirmed the self-heal
+logic runs automatically (no manual uninstall/reinstall needed), but the
+resulting token was still non-expiring, which is what led to the §1a
+addendum above. These steps are for retesting with the *current*, complete
+commit that adds `expiring: "1"`.
+
 1. On the `vedasuite-staging` Render service, trigger **Manual Deploy →
-   Deploy latest commit** (this branch's latest commit includes the fix).
+   Deploy latest commit**.
 2. In the development store admin, if the app currently shows the
-   "Shopify connection needs attention" banner, simply **reload the
-   embedded app page** (no need to uninstall/reinstall this time) — the
-   very next authenticated request will run the opportunistic legacy-token
-   upgrade automatically.
+   "Shopify connection needs attention" banner, **reload the embedded app
+   page** (no uninstall/reinstall needed) — the very next authenticated
+   request runs the opportunistic legacy-token upgrade automatically.
 3. Check the **Logs** tab for `shopify.connection.offline_token_self_healed`
-   with `"wasLegacyMode":true` — this confirms the upgrade ran.
-4. Retry **Billing** and the **Dashboard** — both should now succeed
-   without the "non-expiring access tokens" error.
+   or `shopify.connection.legacy_token_exchanged`, and confirm the
+   accompanying `hasRefreshToken`/`accessTokenExpiresAt` fields are now
+   populated (not `false`/`null`) — this is the concrete signal that
+   Shopify actually issued an expiring token this time.
+4. Retry **Billing**, **Sync Data**, and the **Dashboard** — all should
+   now succeed without the "non-expiring access tokens" error.
 5. If it still fails: check the Logs for
-   `shopify.connection.token_exchange_failed` — the attached error will
-   show Shopify's actual rejection reason for this specific app/shop
-   pairing (e.g. a distribution or scope issue unrelated to token type).
+   `shopify.connection.token_exchange_failed` or
+   `shopify.connection.legacy_token_exchange_failed` — the attached error
+   will show Shopify's actual rejection reason for this specific app/shop
+   pairing (e.g. a distribution, scope, or app-review-status issue
+   unrelated to the `expiring` parameter itself).
 
 ## 8. Rollback
 

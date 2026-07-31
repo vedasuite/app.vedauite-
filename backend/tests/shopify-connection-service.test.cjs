@@ -124,17 +124,98 @@ test("returns REFRESH_TOKEN_EXPIRED when refresh token has already expired", asy
   );
 });
 
-test("health falls back to reconnect-required state when offline token cannot be refreshed", async () => {
+// A legacy (non-expiring) token with no refresh token is no longer an
+// immediate dead end: refreshOfflineAccessToken now attempts a one-time
+// migration exchange (exchangeLegacyOfflineToken, using the existing legacy
+// access token itself — no live session token required) before giving up.
+// These two tests cover both outcomes of that attempt.
+
+test("session-less self-heal: forceRefreshOfflineAccessToken migrates a legacy token (no refresh token) using the legacy access token itself, no session token needed", async () => {
   const prismaPath = path.resolve(__dirname, "../dist/db/prismaClient.js");
+  const axiosPath = require.resolve("axios");
   const servicePath = path.resolve(
     __dirname,
     "../dist/services/shopifyConnectionService.js"
   );
 
   resetModule(prismaPath);
+  resetModule(axiosPath);
   resetModule(servicePath);
 
   const prismaModule = require(prismaPath);
+  const axiosModule = require(axiosPath);
+
+  let currentAccessToken = "legacy-access-token";
+  prismaModule.prisma.store.findUnique = async () => ({
+    id: "store-1",
+    shop: "test-shop.myshopify.com",
+    accessToken: currentAccessToken,
+    refreshToken: null,
+    grantedScopes: "read_products,read_orders",
+    tokenAcquisitionMode: "offline_legacy",
+    installedAt: new Date(Date.now() - 1_000_000),
+    reauthorizedAt: new Date(Date.now() - 1_000_000),
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+    pricingBias: 55,
+    profitGuardrail: 18,
+    webhooksRegisteredAt: new Date(),
+    lastWebhookRegistrationStatus: "SUCCEEDED",
+    lastSyncStatus: "SUCCEEDED",
+    lastSyncAt: new Date(),
+    lastConnectionCheckAt: new Date(),
+    lastConnectionStatus: "OK",
+    authErrorCode: null,
+    authErrorMessage: null,
+    lastConnectionError: null,
+    uninstalledAt: null,
+  });
+  prismaModule.prisma.store.update = async (payload) => {
+    if (payload.data.accessToken) currentAccessToken = payload.data.accessToken;
+    return { id: "store-1", ...payload.data };
+  };
+
+  axiosModule.post = async (_url, body) => {
+    assert.equal(body.subject_token, "legacy-access-token");
+    assert.equal(
+      body.subject_token_type,
+      "urn:shopify:params:oauth:token-type:offline-access-token"
+    );
+    assert.equal(body.expiring, "1");
+    return {
+      data: {
+        access_token: "migrated-expiring-token",
+        refresh_token: "migrated-refresh-token",
+        expires_in: 3600,
+        refresh_token_expires_in: 86400,
+        scope: "read_products,read_orders",
+      },
+    };
+  };
+  if (axiosModule.default) axiosModule.default.post = axiosModule.post;
+
+  const { forceRefreshOfflineAccessToken } = require(servicePath);
+  const updated = await forceRefreshOfflineAccessToken("test-shop.myshopify.com");
+
+  assert.equal(updated.accessToken, "migrated-expiring-token");
+  assert.equal(currentAccessToken, "migrated-expiring-token");
+});
+
+test("health falls back to reconnect-required state when a legacy token cannot be migrated or refreshed", async () => {
+  const prismaPath = path.resolve(__dirname, "../dist/db/prismaClient.js");
+  const axiosPath = require.resolve("axios");
+  const servicePath = path.resolve(
+    __dirname,
+    "../dist/services/shopifyConnectionService.js"
+  );
+
+  resetModule(prismaPath);
+  resetModule(axiosPath);
+  resetModule(servicePath);
+
+  const prismaModule = require(prismaPath);
+  const axiosModule = require(axiosPath);
+
   prismaModule.prisma.store.findUnique = async () => ({
     id: "store-1",
     shop: "test-shop.myshopify.com",
@@ -142,6 +223,8 @@ test("health falls back to reconnect-required state when offline token cannot be
     refreshToken: null,
     grantedScopes: "read_products,read_orders",
     tokenAcquisitionMode: "offline_legacy",
+    installedAt: new Date(Date.now() - 1_000_000),
+    reauthorizedAt: new Date(Date.now() - 1_000_000),
     accessTokenExpiresAt: new Date(Date.now() - 60_000),
     refreshTokenExpiresAt: null,
     pricingBias: 55,
@@ -159,14 +242,27 @@ test("health falls back to reconnect-required state when offline token cannot be
   });
   prismaModule.prisma.store.update = async () => ({ id: "store-1" });
 
+  const definitiveRejection = Object.assign(new Error("invalid_grant"), {
+    isAxiosError: true,
+    response: { status: 400, data: { error: "invalid_grant" } },
+  });
+  axiosModule.post = async () => {
+    throw definitiveRejection;
+  };
+  if (axiosModule.default) axiosModule.default.post = axiosModule.post;
+  if (axiosModule.isAxiosError === undefined) {
+    axiosModule.isAxiosError = (err) => !!err?.isAxiosError;
+  }
+
   const { getConnectionHealth } = require(servicePath);
   const health = await getConnectionHealth("test-shop.myshopify.com", {
     probeApi: true,
   });
 
   assert.equal(health.healthy, false);
-  assert.equal(health.code, "OFFLINE_TOKEN_EXPIRED");
+  assert.equal(health.code, "SHOPIFY_RECONNECT_REQUIRED");
   assert.equal(health.reauthRequired, true);
+  assert.ok(health.reauthorizeUrl && health.reauthorizeUrl.includes("/auth/reconnect"));
 });
 
 // ---------------------------------------------------------------------------
@@ -206,6 +302,7 @@ test("expiring-token acquisition: session-token exchange persists access token, 
       "urn:ietf:params:oauth:grant-type:token-exchange"
     );
     assert.equal(body.subject_token, "session-token-abc");
+    assert.equal(body.expiring, "1", "must explicitly request an expiring token");
     return {
       data: {
         access_token: "fresh-offline-token",
@@ -278,6 +375,7 @@ test("legacy token opportunistic upgrade: a token with no refresh token is excha
       body.grant_type,
       "urn:ietf:params:oauth:grant-type:token-exchange"
     );
+    assert.equal(body.expiring, "1", "must explicitly request an expiring token");
     return {
       data: {
         access_token: "upgraded-expiring-token",
