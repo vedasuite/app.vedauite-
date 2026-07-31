@@ -40,7 +40,8 @@ truncated.
 | Should the result become `impact_not_quantifiable` if truncation occurs? | Yes for the affected module. Implemented as: suppress return-abuse insights entirely for the request (not per-customer patching, since which customers are affected can't be determined from the truncated set), and surface the condition in `dataCoverage`. |
 
 **The fix (`backend/src/services/explainabilityService.ts`).** Added one
-additional bounded, DB-side `count()` query —
+additional database-side aggregate count query that returns a single
+scalar result —
 `order.count({ where: { storeId, createdAt: { gte: lookbackStart } } })`
 (no `take`, O(1) round trip) — to get the *exact* total order count in the
 90-day window, independent of the 5,000-row cap. If that exact total
@@ -213,11 +214,87 @@ a known pre-existing issue). Instead it:
 | `frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx` | +1 import, +1 `<Layout.Section><ModuleInsights modules={["competitor"]} /></Layout.Section>` as the first section. |
 | `frontend/src/modules/PricingProfit/PricingProfitPage.tsx` | +1 import, +1 `<Layout.Section><ModuleInsights modules={["pricing","profit"]} /></Layout.Section>` as the first section. |
 
-Diff stat: `5 files changed, 89 insertions(+), 49 deletions(-)` — the 49
-deletions/insertions are entirely within `explainabilityService.ts` (the
-query-hardening rewrite); the four page files each have a strictly additive
-4–7 line diff. `ModuleGate`, routing, billing, authentication, and
-navigation files are untouched (confirmed via `git status`/`git diff --stat`).
+### Files changed — frontend implementation commit (`git show --stat --oneline 0f71d24`)
+
+```
+0f71d24 feat: add phase 1 interactive intelligence UI
+ backend/src/services/explainabilityService.ts      | 119 ++++++----
+ backend/tests/insightsDashboardContract.test.cjs   | 190 ++++++++++++++++
+ docs/phase-1-frontend-implementation-report.md     | 251 +++++++++++++++++++++
+ frontend/src/hooks/useInsightsDashboard.ts         |  69 ++++++
+ frontend/src/lib/insightsTypes.ts                  | 175 ++++++++++++++
+ .../CompetitorIntelligence/CompetitorPage.tsx      |   4 +
+ frontend/src/modules/Dashboard/DashboardPage.tsx   |   7 +
+ .../Dashboard/components/CriticalAttentionLane.tsx |  28 +++
+ .../Dashboard/components/ExecutiveSummaryCard.tsx  |  24 ++
+ .../components/ExplainableInsightCard.tsx          | 153 +++++++++++++
+ .../components/InsightsDashboardSections.tsx       | 136 +++++++++++
+ .../Dashboard/components/ModuleInsights.tsx        |  58 +++++
+ .../Dashboard/components/RevenueLeakDetector.tsx   | 100 ++++++++
+ .../Dashboard/components/WhereToFocusToday.tsx     |  24 ++
+ .../src/modules/FraudIntelligence/FraudPage.tsx    |   4 +
+ .../modules/PricingProfit/PricingProfitPage.tsx    |   4 +
+ 16 files changed, 1297 insertions(+), 49 deletions(-)
+```
+
+### Files changed — verification-fix commit (`git show --stat --oneline 7f541bc`)
+
+```
+7f541bc fix: phase 1 verification corrections
+ backend/src/services/explainabilityService.ts    |  28 ++-
+ backend/tests/insightsDashboardContract.test.cjs |  30 +++-
+ docs/phase-1-frontend-implementation-report.md   | 211 +++++++++++++++++++++--
+ 3 files changed, 246 insertions(+), 23 deletions(-)
+```
+
+### Cumulative files changed, `55ec8c2..7f541bc` (`git diff --stat` / `git diff --name-status`)
+
+```
+ backend/src/services/explainabilityService.ts      | 145 ++++---
+ backend/tests/insightsDashboardContract.test.cjs   | 216 +++++++++++
+ docs/phase-1-frontend-implementation-report.md     | 424 +++++++++++++++++++++
+ frontend/src/hooks/useInsightsDashboard.ts         |  69 ++++
+ frontend/src/lib/insightsTypes.ts                  | 175 +++++++++
+ .../CompetitorIntelligence/CompetitorPage.tsx      |   4 +
+ frontend/src/modules/Dashboard/DashboardPage.tsx   |   7 +
+ .../Dashboard/components/CriticalAttentionLane.tsx |  28 ++
+ .../Dashboard/components/ExecutiveSummaryCard.tsx  |  24 ++
+ .../components/ExplainableInsightCard.tsx          | 153 ++++++++
+ .../components/InsightsDashboardSections.tsx       | 136 +++++++
+ .../Dashboard/components/ModuleInsights.tsx        |  58 +++
+ .../Dashboard/components/RevenueLeakDetector.tsx   | 100 +++++
+ .../Dashboard/components/WhereToFocusToday.tsx     |  24 ++
+ .../src/modules/FraudIntelligence/FraudPage.tsx    |   4 +
+ .../modules/PricingProfit/PricingProfitPage.tsx    |   4 +
+ 16 files changed, 1521 insertions(+), 50 deletions(-)
+```
+
+```
+M	backend/src/services/explainabilityService.ts
+A	backend/tests/insightsDashboardContract.test.cjs
+A	docs/phase-1-frontend-implementation-report.md
+A	frontend/src/hooks/useInsightsDashboard.ts
+A	frontend/src/lib/insightsTypes.ts
+M	frontend/src/modules/CompetitorIntelligence/CompetitorPage.tsx
+M	frontend/src/modules/Dashboard/DashboardPage.tsx
+A	frontend/src/modules/Dashboard/components/CriticalAttentionLane.tsx
+A	frontend/src/modules/Dashboard/components/ExecutiveSummaryCard.tsx
+A	frontend/src/modules/Dashboard/components/ExplainableInsightCard.tsx
+A	frontend/src/modules/Dashboard/components/InsightsDashboardSections.tsx
+A	frontend/src/modules/Dashboard/components/ModuleInsights.tsx
+A	frontend/src/modules/Dashboard/components/RevenueLeakDetector.tsx
+A	frontend/src/modules/Dashboard/components/WhereToFocusToday.tsx
+M	frontend/src/modules/FraudIntelligence/FraudPage.tsx
+M	frontend/src/modules/PricingProfit/PricingProfitPage.tsx
+```
+
+Cumulatively, `55ec8c2..7f541bc` touches 16 files: 12 additions (`A`) and
+4 modifications (`M`). Both commits touch the same 16-file set — the
+verification-fix commit (`7f541bc`) only further modifies the 3 files it
+lists (`explainabilityService.ts`, `insightsDashboardContract.test.cjs`,
+and the report itself); it adds no new files and removes none. `ModuleGate`,
+routing, billing, authentication, and navigation files do not appear in
+either diff.
 
 ## 3. Dashboard layout (required order, implemented as-is)
 
@@ -384,6 +461,41 @@ not blocking QA):
   issue), as explicitly permitted by the task instructions, unchanged
   before and after this verification pass.
 
+## 12. Rollback instructions
+
+Phase 1 spans two commits on branch `phase-1-intelligence-ui`, both on top
+of the Phase 1 backend commit (`55ec8c2`), neither merged into `main`:
+
+- `0f71d24` — "feat: add phase 1 interactive intelligence UI" (frontend implementation)
+- `7f541bc` — "fix: phase 1 verification corrections" (return-abuse fix + report update)
+
+**If the branch has been shared or pushed** (or any other work has since
+been added on top), revert the commits individually, newest first:
+
+```bash
+git revert 7f541bc
+git revert 0f71d24
+```
+
+**If the branch is still local-only and unshared**, and no other work has
+been added on top, it may instead be reset directly to the Phase 1 backend
+commit, dropping both commits at once:
+
+```bash
+git reset --hard 55ec8c2
+```
+
+**Warning:** `git reset --hard` must not be used once the branch has been
+pushed, shared with another collaborator, or has other commits layered on
+top of it — it rewrites branch history and will discard that work.
+`git revert` is always the safe choice once the branch is shared; use
+`git reset --hard` only while it remains strictly local and untouched by
+anyone else.
+
+No database schema, migration, environment variable, or backend route
+contract changes are part of either commit, so rollback carries no
+data-migration risk either way.
+
 ## 13. Final verification summary
 
 **Result: PASS WITH FIXES**
@@ -392,8 +504,9 @@ One genuine correctness bug was found and fixed: return-abuse exposure
 could silently miscompute for merchants with more than 5,000 orders in
 the trailing 90 days, because per-customer grouping was built from a
 bounded, truncated row set while only the store-wide baseline counts were
-exact. Fixed by detecting the truncation via one additional bounded
-`count()` query and suppressing return-abuse insights for that request
+exact. Fixed by detecting the truncation via one additional database-side
+aggregate count query that returns a single scalar result, and
+suppressing return-abuse insights for that request
 instead of emitting numbers that could be wrong, with the condition
 surfaced in `dataCoverage`. No unbounded query was introduced. Two
 regression tests cover both the truncated and non-truncated cases.
@@ -404,21 +517,3 @@ changes required. All build gates pass, including the newly expanded
 Phase 1 test suite (35/35) and an unchanged frontend TypeScript baseline
 (32/32, none from Phase 1 files) and unchanged pre-existing backend
 integration-test baseline (6 failures, same tests, same root cause).
-
-## 12. Rollback instructions
-
-All Phase 1 frontend work is isolated to the files listed in Section 2 and
-was committed in a single local commit (`0f71d24` — "feat: add phase 1
-interactive intelligence UI") on branch `phase-1-intelligence-ui`, on top
-of the Phase 1 backend commit (`55ec8c2`). The branch has not been merged
-into `main`. To roll back:
-
-```bash
-git revert 0f71d24
-```
-
-or, since this branch is local-only and unmerged, simply delete it
-(`git branch -D phase-1-intelligence-ui`) or reset it to `55ec8c2` to drop
-the commit entirely. No database schema,
-migration, environment variable, or backend route contract changes are
-part of this commit, so rollback carries no data-migration risk.
