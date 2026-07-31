@@ -4,6 +4,7 @@ import { shopifyInt, shopifyFloat } from "../lib/shopifyScalars";
 import { logEvent, withRetry } from "./observabilityService";
 import {
   forceRefreshOfflineAccessToken,
+  isShopifyAuthRejection,
   normalizeShopDomain,
   resolveOfflineInstallation,
   updateConnectionDiagnostics,
@@ -78,12 +79,7 @@ export async function shopifyGraphQL<T>(
 
     if (!response.ok) {
       const text = await response.text();
-      if (
-        response.status === 401 ||
-        /invalid api key|invalid access token|unrecognized login|wrong password/i.test(
-          text
-        )
-      ) {
+      if (isShopifyAuthRejection(response.status, text)) {
         if (!options._retriedAuth) {
           try {
             await forceRefreshOfflineAccessToken(shopDomain);

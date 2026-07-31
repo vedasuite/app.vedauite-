@@ -73,6 +73,28 @@ type RefreshAccessTokenResponse = {
 const SHOP_REGEX = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
 const ACCESS_TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
+/**
+ * Recognizes every response shape Shopify uses to reject a stored Admin API
+ * token as invalid or unusable — including the newer enforcement where a
+ * non-expiring ("legacy") offline token is rejected outright with 403,
+ * distinct from the older 401 "invalid access token" case. Centralized here
+ * so every Admin API call site (GraphQL, REST probe) classifies this the
+ * same way instead of each guessing its own status/text check.
+ *
+ * Docs: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens#expiring-vs-non-expiring-offline-tokens
+ */
+export function isShopifyAuthRejection(status: number, bodyText: string): boolean {
+  if (status === 401) {
+    return true;
+  }
+  if (status === 403 && /non-expiring access tokens? (is|are) no longer accepted/i.test(bodyText)) {
+    return true;
+  }
+  return /invalid api key|invalid access token|unrecognized login|wrong password/i.test(
+    bodyText
+  );
+}
+
 function deriveTokenAcquisitionMode(installation: {
   refreshToken?: string | null;
   accessTokenExpiresAt?: Date | null;
@@ -374,14 +396,58 @@ export async function exchangeSessionTokenForOfflineToken(
 }
 
 /**
- * Guarantee the store has a usable offline access token, minting one via token
- * exchange when it is missing or expired. Safe to call on every authenticated
- * request — it is a no-op when a healthy token is already stored.
+ * Serializes every token-mutating Shopify call (session-token exchange OR
+ * refresh_token grant) per shop, so concurrent requests never send two
+ * competing token requests for the same shop at once. Shopify rotates the
+ * refresh token on each successful refresh, so a second concurrent call
+ * still holding the old refresh token would otherwise fail or, worse, race
+ * the DB write. Concurrent callers share the exact same in-flight promise
+ * (and therefore the same resolved Store row / thrown error) rather than
+ * each issuing their own request — this also naturally dedupes the common
+ * "a page load fires several API calls at once" case.
+ */
+const inflightTokenOperations = new Map<
+  string,
+  Promise<NonNullable<InstallationRecord>>
+>();
+
+function runExclusiveTokenOperation(
+  shop: string,
+  factory: () => Promise<NonNullable<InstallationRecord>>
+): Promise<NonNullable<InstallationRecord>> {
+  const existing = inflightTokenOperations.get(shop);
+  if (existing) {
+    return existing;
+  }
+
+  const operation = factory().finally(() => {
+    inflightTokenOperations.delete(shop);
+  });
+
+  inflightTokenOperations.set(shop, operation);
+  return operation;
+}
+
+// Bounds how often a legacy (non-expiring, no refresh token) installation is
+// opportunistically re-exchanged for an expiring token. This is intentionally
+// NOT persisted and NOT unconditional: it fires at most once per shop per
+// server process lifetime, only when a live session token is already being
+// presented (i.e. only for real, already-authenticated embedded requests).
+// This deliberately avoids turning every request for every existing
+// (including production) installation into an extra Shopify call — see the
+// Phase 1 verification report for the full rationale and the separate,
+// deliberate production-migration path.
+const legacyUpgradeAttempted = new Set<string>();
+
+/**
+ * Guarantee the store has a usable offline access token, minting or
+ * upgrading one via token exchange when it is missing, expiring, or was
+ * issued as a legacy (non-expiring) token that Shopify may reject outright.
+ * Safe to call on every authenticated request — it is a no-op when a fresh,
+ * already-expiring-capable token is already stored.
  *
  * Returns true when a token is available afterwards.
  */
-const inflightTokenExchanges = new Map<string, Promise<boolean>>();
-
 export async function ensureOfflineAccessToken(
   shop: string,
   sessionToken?: string | null
@@ -389,13 +455,6 @@ export async function ensureOfflineAccessToken(
   const normalizedShop = normalizeShopDomain(shop);
   if (!normalizedShop) {
     return false;
-  }
-
-  // A page load fires several API calls at once. Without this, each one would
-  // trigger its own token exchange against Shopify for the same shop.
-  const inflight = inflightTokenExchanges.get(normalizedShop);
-  if (inflight) {
-    return inflight;
   }
 
   const installation = await prisma.store.findUnique({
@@ -413,8 +472,20 @@ export async function ensureOfflineAccessToken(
     installation.accessTokenExpiresAt.getTime() - Date.now() <=
       ACCESS_TOKEN_EXPIRY_BUFFER_MS;
 
+  // A token with no refresh token was issued in legacy (non-expiring) mode.
+  // Shopify may reject it outright for apps required to use expiring tokens.
+  // Attempt exactly one opportunistic upgrade per shop per process lifetime
+  // when we actually have a session token in hand to exchange with — never
+  // proactively for every request, and never without a live session token.
+  const isLegacyMode = !!installation?.accessToken && !installation.refreshToken;
+  const needsUpgradeAttempt =
+    isLegacyMode && !!sessionToken && !legacyUpgradeAttempted.has(normalizedShop);
+
   const tokenUsable =
-    !!installation?.accessToken && !installation.uninstalledAt && !expiringSoon;
+    !!installation?.accessToken &&
+    !installation.uninstalledAt &&
+    !expiringSoon &&
+    !needsUpgradeAttempt;
 
   if (tokenUsable) {
     return true;
@@ -424,28 +495,28 @@ export async function ensureOfflineAccessToken(
     return !!installation?.accessToken;
   }
 
-  const exchange = (async () => {
-    try {
-      await exchangeSessionTokenForOfflineToken(normalizedShop, sessionToken);
-      logEvent("info", "shopify.connection.offline_token_self_healed", {
-        shop: normalizedShop,
-        hadToken: !!installation?.accessToken,
-        wasUninstalled: !!installation?.uninstalledAt,
-      });
-      return true;
-    } catch (error) {
-      logEvent("warn", "shopify.connection.token_exchange_failed", {
-        shop: normalizedShop,
-        error,
-      });
-      return !!installation?.accessToken;
-    } finally {
-      inflightTokenExchanges.delete(normalizedShop);
+  try {
+    const store = await runExclusiveTokenOperation(normalizedShop, () =>
+      exchangeSessionTokenForOfflineToken(normalizedShop, sessionToken)
+    );
+    logEvent("info", "shopify.connection.offline_token_self_healed", {
+      shop: normalizedShop,
+      hadToken: !!installation?.accessToken,
+      wasUninstalled: !!installation?.uninstalledAt,
+      wasLegacyMode: isLegacyMode,
+    });
+    return !!store.accessToken;
+  } catch (error) {
+    logEvent("warn", "shopify.connection.token_exchange_failed", {
+      shop: normalizedShop,
+      error,
+    });
+    return !!installation?.accessToken;
+  } finally {
+    if (isLegacyMode) {
+      legacyUpgradeAttempted.add(normalizedShop);
     }
-  })();
-
-  inflightTokenExchanges.set(normalizedShop, exchange);
-  return exchange;
+  }
 }
 
 async function exchangeLegacyOfflineToken(
@@ -654,7 +725,9 @@ export async function forceRefreshOfflineAccessToken(shop?: string | null) {
     );
   }
 
-  return refreshOfflineAccessToken(installation);
+  return runExclusiveTokenOperation(normalizedShop, () =>
+    refreshOfflineAccessToken(installation)
+  );
 }
 
 export async function resolveOfflineInstallation(
@@ -700,7 +773,9 @@ export async function resolveOfflineInstallation(
   }
 
   if (options.allowRefresh !== false && isAccessTokenExpiring(installation)) {
-    return refreshOfflineAccessToken(installation);
+    return runExclusiveTokenOperation(normalizedShop, () =>
+      refreshOfflineAccessToken(installation)
+    );
   }
 
   // Legacy offline tokens (offline_legacy) still work for API calls — Shopify deprecated
@@ -807,9 +882,10 @@ async function probeShopApi(shop: string, accessToken: string) {
 
     if (!response.ok) {
       const body = await response.text();
+      const authRejected = isShopifyAuthRejection(response.status, body);
       throw new ShopifyConnectionError(
-        response.status === 401 ? "SHOPIFY_AUTH_REQUIRED" : "SHOPIFY_API_UNREACHABLE",
-        response.status === 401
+        authRejected ? "SHOPIFY_AUTH_REQUIRED" : "SHOPIFY_API_UNREACHABLE",
+        authRejected
           ? `Stored Shopify access token is invalid for ${shop}. Reauthorize the app and retry.`
           : `Shopify Admin API probe failed for ${shop}: ${response.status}.`,
         { reauthorizeUrl: buildReauthorizeUrl(shop) }
