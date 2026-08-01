@@ -243,10 +243,27 @@ export async function getOnboardingState(shopDomain: string) {
     moduleSelectionComplete && !!store.onboardingFirstInsightViewedAt;
   const planConfirmationComplete =
     readiness.billing.ready && !!store.onboardingPlanConfirmedAt;
-  const canAccessDashboard =
-    readiness.setup.minimumComplete &&
+  // Onboarding completion is defined as exactly the four visible steps below,
+  // plus a healthy Shopify connection (which the merchant can act on — Step 1's
+  // CTA becomes "Reconnect Shopify").
+  //
+  // This deliberately does NOT use `readiness.setup.minimumComplete`. That flag
+  // additionally requires `selectedModuleState === "ready"`, i.e. the chosen
+  // module having finished processing data. That is a background outcome, not a
+  // merchant action, and it is not represented by any visible step — so a store
+  // could show all four steps complete and 4/4 progress while the dashboard
+  // stayed blocked on an undisclosed condition, with no action available to
+  // resolve it. The dashboard already handles not-yet-processed modules with
+  // explicit "still preparing" states, so gating entry on it was both hidden
+  // and unnecessary. `setup.minimumComplete` is unchanged and still used for
+  // readiness summaries elsewhere.
+  const allVisibleStepsComplete =
+    readiness.initialSync.ready &&
+    moduleSelectionComplete &&
     firstInsightViewedComplete &&
     planConfirmationComplete;
+
+  const canAccessDashboard = readiness.connection.ready && allVisibleStepsComplete;
 
   const stepTemplates: Array<Omit<OnboardingStep, "locked" | "active">> = [
     {

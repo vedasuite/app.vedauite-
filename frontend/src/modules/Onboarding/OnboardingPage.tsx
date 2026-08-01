@@ -270,12 +270,24 @@ export function OnboardingPage() {
     setActionError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
+      // confirmPlan returns the canonical onboarding state re-read *after* the
+      // confirmation is persisted, so this branch reflects real completion
+      // rather than the pre-confirmation snapshot.
       const nextOnboarding = await confirmPlan();
       if (nextOnboarding.canAccessDashboard) {
-        setToast("Onboarding completed. Redirecting to your dashboard.");
+        setToast("Plan confirmed. Setup is complete — your Dashboard is ready.");
         navigateEmbedded("/app/dashboard");
       } else {
-        setToast("Plan confirmed. Finish the remaining setup steps below.");
+        // Only ever claim work remains when a visible step genuinely is
+        // incomplete, and name the count honestly.
+        const remaining = nextOnboarding.steps.filter((step) => !step.complete).length;
+        setToast(
+          remaining === 1
+            ? "Plan confirmed. Complete the remaining setup step below."
+            : remaining > 1
+            ? `Plan confirmed. Complete the remaining ${remaining} setup steps below.`
+            : "Plan confirmed."
+        );
       }
     } catch (nextError) {
       setActionError(
@@ -501,7 +513,10 @@ export function OnboardingPage() {
                 <Badge tone={onboarding.canAccessDashboard ? "success" : "info"}>
                   {onboarding.canAccessDashboard
                     ? "Complete"
-                    : `Step ${onboarding.progress.completedSteps + 1} of ${onboarding.progress.totalSteps}`}
+                    : `Step ${Math.min(
+                        Math.max(onboarding.progress.completedSteps + 1, 1),
+                        onboarding.progress.totalSteps
+                      )} of ${onboarding.progress.totalSteps}`}
                 </Badge>
               </div>
 
