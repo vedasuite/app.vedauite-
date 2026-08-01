@@ -13,7 +13,7 @@ import {
 } from "@shopify/polaris";
 import { ChevronDownIcon, ClockIcon } from "@shopify/polaris-icons";
 import { useCallback, useId, useState } from "react";
-import { Meter } from "../../../components/intelligence/Meter";
+import { ScoreBreakdown } from "../../../components/intelligence/ScoreBreakdown";
 import { severityForUrgency } from "../../../components/intelligence/severity";
 import { usePrefersReducedMotion } from "../../../components/intelligence/AnimatedCounter";
 import { useEmbeddedNavigation } from "../../../hooks/useEmbeddedNavigation";
@@ -24,23 +24,8 @@ import {
   confidenceTone,
   impactRangeText,
 } from "../../../lib/insightsTypes";
-import type {
-  ExplainableInsight,
-  OpportunityScoreBreakdown,
-} from "../../../lib/insightsTypes";
+import type { ExplainableInsight } from "../../../lib/insightsTypes";
 import "../../../components/intelligence/intelligence.css";
-
-const WEIGHT_ROWS: {
-  key: keyof OpportunityScoreBreakdown["components"];
-  label: string;
-  pct: string;
-}[] = [
-  { key: "financialImpact", label: "Impact", pct: "35%" },
-  { key: "urgency", label: "Urgency", pct: "25%" },
-  { key: "confidence", label: "Confidence", pct: "20%" },
-  { key: "easeOfAction", label: "Ease", pct: "10%" },
-  { key: "recency", label: "Recency", pct: "10%" },
-];
 
 /**
  * The universal explainable-insight card.
@@ -73,56 +58,79 @@ export function ExplainableInsightCard({
   const scored = !insight.score.excludedFromMonetaryRanking;
 
   return (
-    <Card padding="400">
+    // Critical findings get a faint surface tint so they separate from the
+    // routine stack pre-attentively. The tint is redundant with the icon,
+    // badge and rail — it is never the only signal.
+    <Card
+      padding="400"
+      background={severity.level === "critical" ? "bg-surface-critical" : undefined}
+    >
       <div className={`veda-card-interactive veda-rail ${severity.rail}`}>
         <BlockStack gap="300">
-          {/* ---------- Collapsed summary ---------- */}
-          <InlineStack align="space-between" blockAlign="start" gap="300" wrap>
-            <div className="veda-clamp" style={{ flex: "1 1 260px" }}>
+          {/* ---------- Collapsed summary ----------
+              Reading order: severity → what → how much → the qualifiers.
+              Money is the visual anchor; the qualifying facts sit beneath it
+              as a quiet metadata row rather than four competing badges. */}
+          <InlineStack align="space-between" blockAlign="start" gap="400" wrap>
+            <div className="veda-clamp" style={{ flex: "1 1 280px" }}>
               <BlockStack gap="200">
-                <InlineStack gap="150" blockAlign="center" wrap>
-                  <Box as="span">
+                <InlineStack gap="150" blockAlign="start" wrap={false}>
+                  <Box as="span" paddingBlockStart="050">
                     <Icon source={severity.icon} tone={severity.iconTone} />
                   </Box>
-                  <Text as="h3" variant="headingSm">
-                    {insight.title}
-                  </Text>
+                  <div className="veda-clamp">
+                    <BlockStack gap="100">
+                      <Text as="h3" variant="headingSm">
+                        {insight.title}
+                      </Text>
+                      <Text
+                        as="p"
+                        variant="headingLg"
+                        fontWeight="semibold"
+                        tone={quantified ? undefined : "subdued"}
+                      >
+                        {impactText}
+                      </Text>
+                    </BlockStack>
+                  </div>
                 </InlineStack>
 
-                <InlineStack gap="150" blockAlign="center" wrap>
-                  <Badge tone="new">{MODULE_LABEL[insight.module]}</Badge>
-                  <Badge tone={severity.badgeTone}>{`Priority: ${severity.label}`}</Badge>
-                  <Badge tone={confidenceTone(insight.confidence)}>
-                    {`Confidence: ${insight.confidence.replace("_", " ")}`}
-                  </Badge>
-                  <Badge>{effort.difficulty}</Badge>
-                </InlineStack>
-
-                <InlineStack gap="300" blockAlign="center" wrap>
-                  <Text
-                    as="span"
-                    variant="bodyLg"
-                    fontWeight="semibold"
-                    tone={quantified ? undefined : "subdued"}
-                  >
-                    {impactText}
-                  </Text>
+                {/* One quiet metadata line replaces the badge stack. Only
+                    priority keeps a badge — it is the one field that should
+                    interrupt scanning. */}
+                <div className="veda-meta">
+                  <Badge tone={severity.badgeTone}>{severity.label}</Badge>
+                  <span className="veda-meta__item">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      {MODULE_LABEL[insight.module]}
+                    </Text>
+                  </span>
+                  <span className="veda-meta__sep" aria-hidden="true" />
+                  <span className="veda-meta__item">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      {`${insight.confidence.replace("_", " ")} confidence`}
+                    </Text>
+                  </span>
+                  <span className="veda-meta__sep" aria-hidden="true" />
+                  <span className="veda-meta__item">
+                    <Icon source={ClockIcon} tone="subdued" />
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      {`${effort.minutes} · ${effort.difficulty}`}
+                    </Text>
+                  </span>
                   {scored ? (
-                    <Text as="span" variant="bodySm" tone="subdued">
-                      {`Score ${insight.score.total}/100`}
-                    </Text>
+                    <>
+                      <span className="veda-meta__sep" aria-hidden="true" />
+                      <span className="veda-meta__item">
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {`Score ${insight.score.total}/100`}
+                        </Text>
+                      </span>
+                    </>
                   ) : null}
-                  <InlineStack gap="100" blockAlign="center" wrap={false}>
-                    <Box as="span">
-                      <Icon source={ClockIcon} tone="subdued" />
-                    </Box>
-                    <Text as="span" variant="bodySm" tone="subdued">
-                      {effort.minutes}
-                    </Text>
-                  </InlineStack>
-                </InlineStack>
+                </div>
 
-                <Text as="p" variant="bodyMd" tone="subdued">
+                <Text as="p" variant="bodyMd">
                   {insight.recommendedAction}
                 </Text>
               </BlockStack>
@@ -165,132 +173,133 @@ export function ExplainableInsightCard({
               <BlockStack gap="400">
                 <Divider />
 
-                {/* Why this priority — weighted breakdown */}
-                <BlockStack gap="200">
-                  <Text as="h4" variant="headingXs">
-                    Why this priority
-                  </Text>
-                  {scored ? (
-                    <>
-                      <Meter
-                        value={insight.score.total}
-                        tone={severity.meter === "neutral" ? "info" : severity.meter}
-                        label="Opportunity score"
-                        valueText={`${insight.score.total} / 100`}
-                      />
-                      <BlockStack gap="100">
-                        {WEIGHT_ROWS.map((row) => (
-                          <InlineStack
-                            key={row.key}
-                            align="space-between"
-                            blockAlign="center"
-                            gap="200"
-                            wrap
-                          >
-                            <Text as="span" variant="bodySm">
-                              {`${row.label} (${row.pct})`}
-                            </Text>
-                            <Text as="span" variant="bodySm" tone="subdued">
-                              {`${insight.score.components[row.key]} / 100`}
-                            </Text>
-                          </InlineStack>
-                        ))}
+                {/* Two columns on wide screens so the reasoning reads as a
+                    panel rather than a long report. Collapses to one column
+                    below ~320px per track. */}
+                <div className="veda-split-grid">
+                  {/* Left: the score, and what triggered it. */}
+                  <BlockStack gap="400">
+                    <BlockStack gap="200">
+                      <Text as="h4" variant="headingXs">
+                        Why this priority
+                      </Text>
+                      {scored ? (
+                        <ScoreBreakdown score={insight.score} />
+                      ) : (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {`Not ranked by monetary score${
+                            insight.score.excludedReason
+                              ? ` — ${insight.score.excludedReason}`
+                              : ""
+                          }. Shown for attention only, with no invented dollar value.`}
+                        </Text>
+                      )}
+                    </BlockStack>
+
+                    {insight.reasons.length > 0 ? (
+                      <BlockStack gap="150">
+                        <Text as="h4" variant="headingXs">
+                          What we detected
+                        </Text>
+                        <BlockStack gap="150">
+                          {insight.reasons.map((reason, index) => (
+                            <InlineStack key={index} gap="150" blockAlign="start" wrap={false}>
+                              <Box as="span" paddingBlockStart="050">
+                                <Icon source={severity.icon} tone={severity.iconTone} />
+                              </Box>
+                              <div className="veda-clamp">
+                                <Text as="span" variant="bodySm">
+                                  {reason}
+                                </Text>
+                              </div>
+                            </InlineStack>
+                          ))}
+                        </BlockStack>
                       </BlockStack>
-                    </>
-                  ) : (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {`Not ranked by monetary score${
-                        insight.score.excludedReason ? ` — ${insight.score.excludedReason}` : ""
-                      }. Shown for attention only, with no invented dollar value.`}
-                    </Text>
-                  )}
-                </BlockStack>
-
-                {/* What we detected */}
-                {insight.reasons.length > 0 ? (
-                  <BlockStack gap="150">
-                    <Text as="h4" variant="headingXs">
-                      What we detected
-                    </Text>
-                    <List type="bullet">
-                      {insight.reasons.map((reason, index) => (
-                        <List.Item key={index}>{reason}</List.Item>
-                      ))}
-                    </List>
+                    ) : null}
                   </BlockStack>
-                ) : null}
 
-                {/* Evidence */}
-                {insight.evidence.length > 0 ? (
-                  <BlockStack gap="150">
-                    <Text as="h4" variant="headingXs">
-                      Evidence
-                    </Text>
-                    <BlockStack gap="100">
-                      {insight.evidence.map((item, index) => (
-                        <InlineStack
-                          key={index}
-                          align="space-between"
-                          blockAlign="center"
-                          gap="200"
-                          wrap
+                  {/* Right: the audit trail — evidence, method, limits. */}
+                  <BlockStack gap="400">
+                    {insight.evidence.length > 0 ? (
+                      <BlockStack gap="150">
+                        <Text as="h4" variant="headingXs">
+                          Evidence
+                        </Text>
+                        <Box
+                          background="bg-surface-secondary"
+                          padding="300"
+                          borderRadius="200"
                         >
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {item.label}
+                          <BlockStack gap="150">
+                            {insight.evidence.map((item, index) => (
+                              <InlineStack
+                                key={index}
+                                align="space-between"
+                                blockAlign="center"
+                                gap="200"
+                                wrap
+                              >
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  {item.label}
+                                </Text>
+                                <Text as="span" variant="bodySm" fontWeight="semibold">
+                                  {item.value}
+                                </Text>
+                              </InlineStack>
+                            ))}
+                          </BlockStack>
+                        </Box>
+                      </BlockStack>
+                    ) : null}
+
+                    <BlockStack gap="150">
+                      <Text as="h4" variant="headingXs">
+                        How this was calculated
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        {insight.methodology.summary}
+                      </Text>
+                      {insight.financialImpact.status === "quantified" ? (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {`Basis: ${insight.financialImpact.basis} (${
+                            PERIOD_LABEL[insight.financialImpact.period]
+                          }).`}
+                        </Text>
+                      ) : (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {`Impact not quantified: ${insight.financialImpact.reason}.`}
+                        </Text>
+                      )}
+
+                      {insight.methodology.assumptions.length > 0 ? (
+                        <BlockStack gap="100">
+                          <Text as="span" variant="bodySm" fontWeight="semibold">
+                            Assumptions
                           </Text>
-                          <Text as="span" variant="bodySm" fontWeight="medium">
-                            {item.value}
+                          <List type="bullet">
+                            {insight.methodology.assumptions.map((assumption, index) => (
+                              <List.Item key={index}>{assumption}</List.Item>
+                            ))}
+                          </List>
+                        </BlockStack>
+                      ) : null}
+
+                      {insight.methodology.caps.length > 0 ? (
+                        <BlockStack gap="100">
+                          <Text as="span" variant="bodySm" fontWeight="semibold">
+                            Limits applied
                           </Text>
-                        </InlineStack>
-                      ))}
+                          <List type="bullet">
+                            {insight.methodology.caps.map((cap, index) => (
+                              <List.Item key={index}>{cap}</List.Item>
+                            ))}
+                          </List>
+                        </BlockStack>
+                      ) : null}
                     </BlockStack>
                   </BlockStack>
-                ) : null}
-
-                {/* Methodology + calculation basis */}
-                <BlockStack gap="150">
-                  <Text as="h4" variant="headingXs">
-                    How this was calculated
-                  </Text>
-                  <Text as="p" variant="bodySm">
-                    {insight.methodology.summary}
-                  </Text>
-                  {insight.financialImpact.status === "quantified" ? (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {`Basis: ${insight.financialImpact.basis} (${
-                        PERIOD_LABEL[insight.financialImpact.period]
-                      }).`}
-                    </Text>
-                  ) : (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {`Impact not quantified: ${insight.financialImpact.reason}.`}
-                    </Text>
-                  )}
-                  {insight.methodology.assumptions.length > 0 ? (
-                    <BlockStack gap="050">
-                      <Text as="span" variant="bodySm" fontWeight="medium">
-                        Assumptions
-                      </Text>
-                      <List type="bullet">
-                        {insight.methodology.assumptions.map((assumption, index) => (
-                          <List.Item key={index}>{assumption}</List.Item>
-                        ))}
-                      </List>
-                    </BlockStack>
-                  ) : null}
-                  {insight.methodology.caps.length > 0 ? (
-                    <BlockStack gap="050">
-                      <Text as="span" variant="bodySm" fontWeight="medium">
-                        Limits applied
-                      </Text>
-                      <List type="bullet">
-                        {insight.methodology.caps.map((cap, index) => (
-                          <List.Item key={index}>{cap}</List.Item>
-                        ))}
-                      </List>
-                    </BlockStack>
-                  ) : null}
-                </BlockStack>
+                </div>
               </BlockStack>
             </Box>
           </Collapsible>

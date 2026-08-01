@@ -10,11 +10,17 @@ import {
   InlineStack,
   Text,
 } from "@shopify/polaris";
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "@shopify/polaris-icons";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChartVerticalIcon,
+  ChevronDownIcon,
+} from "@shopify/polaris-icons";
 import { useId, useState } from "react";
 import { usePrefersReducedMotion } from "../../../components/intelligence/AnimatedCounter";
 import { EducationalEmptyState } from "../../../components/intelligence/EducationalEmptyState";
 import { KpiCard } from "../../../components/intelligence/KpiCard";
+import { SectionHeader } from "../../../components/intelligence/SectionHeader";
 import { formatRange, largestOf, periodLabel } from "../../../lib/executiveMetrics";
 import { PERIOD_LABEL, confidenceTone, formatMoney } from "../../../lib/insightsTypes";
 import type { LeakGroup, RevenueLeakModel } from "../../../lib/insightsTypes";
@@ -186,21 +192,25 @@ export function RevenueLeakDetector({ model }: { model: RevenueLeakModel }) {
   const largestLeak = largestOf(model.revenueAtRisk);
 
   return (
-    <BlockStack gap="400">
-      <BlockStack gap="100">
-        <Text as="h2" variant="headingMd">
-          Revenue leak detector
-        </Text>
-        <Text as="span" variant="bodySm" tone="subdued">
-          Upside and risk are shown side by side but never combined. Each figure
-          is a bounded estimate for a single time period.
-        </Text>
-      </BlockStack>
+    <div className="veda-band">
+      <SectionHeader
+        eyebrow="Money view"
+        title="Revenue leak detector"
+        icon={ChartVerticalIcon}
+        iconTone="info"
+        action={
+          <Text as="span" variant="bodySm" tone="subdued">
+            Upside and risk are never combined
+          </Text>
+        }
+      />
 
-      {/* Headline: the single largest item on each side. */}
+      {/* Headline: the single largest item on each side, raised above the
+          detail columns so the two numbers that matter most are read first. */}
       <div className="veda-kpi-grid">
         <KpiCard
           label="Largest opportunity"
+          emphasis
           icon={ArrowUpIcon}
           iconTone="success"
           value={largestOpportunity ? largestOpportunity.max : null}
@@ -216,6 +226,7 @@ export function RevenueLeakDetector({ model }: { model: RevenueLeakModel }) {
         />
         <KpiCard
           label="Largest leak"
+          emphasis
           icon={ArrowDownIcon}
           iconTone="caution"
           value={largestLeak ? largestLeak.max : null}
@@ -255,6 +266,6 @@ export function RevenueLeakDetector({ model }: { model: RevenueLeakModel }) {
           ]}
         />
       </div>
-    </BlockStack>
+    </div>
   );
 }

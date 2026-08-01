@@ -1,7 +1,9 @@
-import { Badge, BlockStack, Box, Icon, InlineStack, Text } from "@shopify/polaris";
+import { BlockStack, Text } from "@shopify/polaris";
+import { SectionHeader } from "../../../components/intelligence/SectionHeader";
 import { SEVERITY } from "../../../components/intelligence/severity";
 import type { ExplainableInsight } from "../../../lib/insightsTypes";
 import { ExplainableInsightCard } from "./ExplainableInsightCard";
+import "../../../components/intelligence/intelligence.css";
 
 /**
  * High-confidence critical findings, surfaced even when the financial impact
@@ -19,20 +21,15 @@ export function CriticalAttentionLane({ items }: { items: ExplainableInsight[] }
   ).length;
 
   return (
-    <BlockStack gap="300">
-      <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-          <Box as="span">
-            <Icon source={SEVERITY.critical.icon} tone="critical" />
-          </Box>
-          <Text as="h2" variant="headingMd">
-            Critical attention
-          </Text>
-        </InlineStack>
-        <Badge tone="critical">
-          {`${items.length} item${items.length === 1 ? "" : "s"}`}
-        </Badge>
-      </InlineStack>
+    <div className="veda-band veda-band--tight">
+      <SectionHeader
+        eyebrow="Act now"
+        title="Critical attention"
+        icon={SEVERITY.critical.icon}
+        iconTone="critical"
+        count={`${items.length} item${items.length === 1 ? "" : "s"}`}
+        countTone="critical"
+      />
 
       {unquantified > 0 ? (
         <Text as="p" variant="bodySm" tone="subdued">
@@ -49,6 +46,6 @@ export function CriticalAttentionLane({ items }: { items: ExplainableInsight[] }
           <ExplainableInsightCard key={`crit-${item.id}`} insight={item} defaultOpen={false} />
         ))}
       </BlockStack>
-    </BlockStack>
+    </div>
   );
 }

@@ -1,8 +1,10 @@
-import { Badge, BlockStack, Box, Icon, InlineStack, Text } from "@shopify/polaris";
+import { BlockStack } from "@shopify/polaris";
 import { TargetIcon } from "@shopify/polaris-icons";
 import { EducationalEmptyState } from "../../../components/intelligence/EducationalEmptyState";
+import { SectionHeader } from "../../../components/intelligence/SectionHeader";
 import type { ExplainableInsight } from "../../../lib/insightsTypes";
 import { ExplainableInsightCard } from "./ExplainableInsightCard";
+import "../../../components/intelligence/intelligence.css";
 
 /**
  * The ranked action queue. Ordered by the engine's opportunity score, highest
@@ -15,22 +17,19 @@ export function WhereToFocusToday({
   opportunities: ExplainableInsight[];
 }) {
   return (
-    <BlockStack gap="300">
-      <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-          <Box as="span">
-            <Icon source={TargetIcon} tone="info" />
-          </Box>
-          <Text as="h2" variant="headingMd">
-            Where to focus today
-          </Text>
-        </InlineStack>
-        {opportunities.length > 0 ? (
-          <Badge tone="info">
-            {`${opportunities.length} ranked action${opportunities.length === 1 ? "" : "s"}`}
-          </Badge>
-        ) : null}
-      </InlineStack>
+    <div className="veda-band veda-band--tight">
+      <SectionHeader
+        eyebrow="Prioritised"
+        title="Where to focus today"
+        icon={TargetIcon}
+        iconTone="info"
+        count={
+          opportunities.length > 0
+            ? `${opportunities.length} ranked action${opportunities.length === 1 ? "" : "s"}`
+            : undefined
+        }
+        countTone="info"
+      />
 
       {opportunities.length === 0 ? (
         <EducationalEmptyState
@@ -53,6 +52,6 @@ export function WhereToFocusToday({
           ))}
         </BlockStack>
       )}
-    </BlockStack>
+    </div>
   );
 }

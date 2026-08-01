@@ -174,52 +174,60 @@ export function ExecutiveHero({ data }: { data: DashboardInsightsResponse }) {
   const timeRequired = topOpportunity ? effortFor(topOpportunity.easeOfAction) : null;
 
   return (
-    <BlockStack gap="400">
-      {/* Headline narrative + the single next action. */}
+    <div className="veda-band">
+      {/* Headline narrative + the single next action.
+          Raised surface: this is the one card per screen that should read as
+          the control centre. Bullets sit in a two-column grid so the summary
+          occupies a band rather than a paragraph stack. */}
       <Card padding="400">
-        <BlockStack gap="300">
-          <InlineStack align="space-between" blockAlign="start" gap="300" wrap>
-            <InlineStack gap="200" blockAlign="center" wrap={false}>
-              <Box as="span">
-                <Icon source={MagicIcon} tone="info" />
-              </Box>
-              <Text as="h2" variant="headingMd">
-                AI executive summary
+        <div className="veda-surface-raised">
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="start" gap="300" wrap>
+              <InlineStack gap="200" blockAlign="center" wrap={false}>
+                <Box as="span">
+                  <Icon source={MagicIcon} tone="info" />
+                </Box>
+                <div>
+                  <div className="veda-eyebrow">Executive summary</div>
+                  <Text as="h2" variant="headingMd">
+                    {`Your store right now`}
+                  </Text>
+                </div>
+              </InlineStack>
+              <InlineStack gap="150" blockAlign="center" wrap>
+                <Badge tone="new">AI</Badge>
+                {recommended ? (
+                  <Button variant="primary" onClick={() => navigateEmbedded(recommended.route)}>
+                    {`Start with ${recommended.label}`}
+                  </Button>
+                ) : null}
+              </InlineStack>
+            </InlineStack>
+
+            <div className="veda-clamp">
+              <Text as="p" variant="bodyLg">
+                {data.executiveSummary.headline}
               </Text>
-            </InlineStack>
-            <InlineStack gap="150" blockAlign="center" wrap>
-              <Badge tone="new">AI</Badge>
-              {recommended ? (
-                <Button variant="primary" onClick={() => navigateEmbedded(recommended.route)}>
-                  {`Start with ${recommended.label}`}
-                </Button>
-              ) : null}
-            </InlineStack>
-          </InlineStack>
+            </div>
 
-          <div className="veda-clamp">
-            <Text as="p" variant="bodyLg">
-              {data.executiveSummary.headline}
-            </Text>
-          </div>
-
-          {data.executiveSummary.bullets.length > 0 ? (
-            <BlockStack gap="100">
-              {data.executiveSummary.bullets.map((bullet, index) => (
-                <InlineStack key={index} gap="150" blockAlign="start" wrap={false}>
-                  <Box as="span" paddingBlockStart="050">
-                    <Icon source={LightbulbIcon} tone="subdued" />
-                  </Box>
-                  <div className="veda-clamp">
-                    <Text as="span" variant="bodyMd" tone="subdued">
-                      {bullet}
-                    </Text>
-                  </div>
-                </InlineStack>
-              ))}
-            </BlockStack>
-          ) : null}
-        </BlockStack>
+            {data.executiveSummary.bullets.length > 0 ? (
+              <div className="veda-split-grid">
+                {data.executiveSummary.bullets.map((bullet, index) => (
+                  <InlineStack key={index} gap="150" blockAlign="start" wrap={false}>
+                    <Box as="span" paddingBlockStart="050">
+                      <Icon source={LightbulbIcon} tone="subdued" />
+                    </Box>
+                    <div className="veda-clamp">
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        {bullet}
+                      </Text>
+                    </div>
+                  </InlineStack>
+                ))}
+              </div>
+            ) : null}
+          </BlockStack>
+        </div>
       </Card>
 
       {/* The four headline numbers. */}
@@ -306,11 +314,22 @@ export function ExecutiveHero({ data }: { data: DashboardInsightsResponse }) {
         <SpotlightCard kind="risk" insight={topRisk} onOpen={navigateEmbedded} />
       </div>
 
-      <Text as="span" variant="bodySm" tone="subdued">
-        {`All figures are bounded estimates produced from your synced Shopify data, not guarantees. Generated ${new Date(
-          data.executiveSummary.generatedAt
-        ).toLocaleString()}.`}
-      </Text>
-    </BlockStack>
+      {/* Provenance line. Kept — merchants must know these are estimates — but
+          demoted to the smallest type so it reads as a footnote, not prose. */}
+      <InlineStack gap="150" blockAlign="center" wrap>
+        <Text as="span" variant="bodySm" tone="subdued">
+          Bounded estimates from your synced Shopify data — not guarantees.
+        </Text>
+        <span className="veda-meta__sep" aria-hidden="true" />
+        <Text as="span" variant="bodySm" tone="subdued">
+          <time dateTime={data.executiveSummary.generatedAt}>
+            {`Updated ${new Date(data.executiveSummary.generatedAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}`}
+          </time>
+        </Text>
+      </InlineStack>
+    </div>
   );
 }

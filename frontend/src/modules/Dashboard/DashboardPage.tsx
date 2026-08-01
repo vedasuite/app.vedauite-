@@ -1111,17 +1111,23 @@ export function DashboardPage() {
   }
 
   return (
-    <Page
-      title="Your store intelligence overview"
-      subtitle="Key alerts, recommendations, and direct access to each VedaSuite workflow."
-      primaryAction={{
-        content: "Update insights",
-        onAction: () => void syncLiveStoreData(),
-        loading: syncing,
-        disabled: syncing,
-      }}
-    >
-      <Layout>
+    // fullWidth reclaims the ~31% of viewport Polaris's default page cap left
+    // unused on desktop, letting the KPI grids run wider and cutting the
+    // dashboard's vertical scroll. `.veda-page-wide` re-caps it at 1400px so
+    // ultrawide screens don't get uncomfortably long line lengths.
+    <div className="veda-page-wide">
+      <Page
+        fullWidth
+        title="Your store intelligence overview"
+        subtitle="Key alerts, recommendations, and direct access to each VedaSuite workflow."
+        primaryAction={{
+          content: "Update insights",
+          onAction: () => void syncLiveStoreData(),
+          loading: syncing,
+          disabled: syncing,
+        }}
+      >
+        <Layout>
         {error ? (
           <Layout.Section>
             <Banner title="Dashboard action failed" tone="critical">
@@ -1559,9 +1565,10 @@ export function DashboardPage() {
               </BlockStack>
             </Card>
           </InlineGrid>
-        </Layout.Section>
-      </Layout>
-      {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
-    </Page>
+          </Layout.Section>
+        </Layout>
+        {toast ? <Toast content={toast} onDismiss={() => setToast(null)} /> : null}
+      </Page>
+    </div>
   );
 }

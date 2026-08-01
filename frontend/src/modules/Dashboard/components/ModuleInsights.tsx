@@ -1,6 +1,7 @@
-import { BlockStack, Box, Icon, InlineStack, Text } from "@shopify/polaris";
+import { BlockStack, Text } from "@shopify/polaris";
 import { MagicIcon } from "@shopify/polaris-icons";
 import { EducationalEmptyState } from "../../../components/intelligence/EducationalEmptyState";
+import { SectionHeader } from "../../../components/intelligence/SectionHeader";
 import {
   InsightListSkeleton,
   KpiSkeletonGrid,
@@ -66,15 +67,19 @@ export function ModuleInsights({
   );
 
   return (
-    <BlockStack gap="400">
-      <InlineStack gap="200" blockAlign="center" wrap={false}>
-        <Box as="span">
-          <Icon source={MagicIcon} tone="info" />
-        </Box>
-        <Text as="h3" variant="headingSm">
-          {title}
-        </Text>
-      </InlineStack>
+    <div className="veda-band">
+      <SectionHeader
+        eyebrow="Explainable AI"
+        title={title}
+        icon={MagicIcon}
+        iconTone="info"
+        count={
+          items.length > 0
+            ? `${items.length} finding${items.length === 1 ? "" : "s"}`
+            : undefined
+        }
+        countTone="info"
+      />
 
       {items.length === 0 ? (
         <EducationalEmptyState
@@ -107,6 +112,6 @@ export function ModuleInsights({
           </BlockStack>
         </>
       )}
-    </BlockStack>
+    </div>
   );
 }

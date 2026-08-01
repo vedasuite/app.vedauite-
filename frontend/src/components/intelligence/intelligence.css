@@ -23,6 +23,119 @@
   box-shadow: 0 0 0 var(--p-border-width-050, 2px) var(--p-color-border-focus);
 }
 
+/* ---------- Vertical rhythm ----------
+ * Polaris stacks every Layout.Section with the same gap, so a major band and a
+ * minor one read as equally important. These bands restore a deliberate
+ * hierarchy: generous air *between* bands, tighter spacing *within* them. */
+
+.veda-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-space-400);
+}
+
+.veda-band--tight {
+  gap: var(--p-space-300);
+}
+
+/* Pulls a following section closer, marking it as a continuation rather than
+   a new topic (e.g. the KPI strip belongs to the summary above it). */
+.veda-band--attached {
+  margin-block-start: calc(var(--p-space-200) * -1);
+}
+
+/* ---------- Card variants ----------
+ * Deliberately NOT all identical. Weight communicates importance before any
+ * text is read, while staying inside Polaris's shadow/ः radius scale. */
+
+/* Headline surface — the one card per screen that should feel raised. */
+.veda-surface-raised {
+  box-shadow: var(--p-shadow-200);
+  border-radius: var(--p-border-radius-300, 12px);
+}
+
+/* Routine surface — flat with a hairline, so lists of many cards recede. */
+.veda-surface-quiet {
+  box-shadow: none;
+  border: var(--p-border-width-025, 1px) solid var(--p-color-border-secondary, var(--p-color-border));
+  border-radius: var(--p-border-radius-300, 12px);
+}
+
+/* Critical surface — a tinted wash so urgency registers pre-attentively.
+   Always paired with an icon + text label, never colour alone. */
+.veda-surface-critical {
+  background: var(--p-color-bg-surface-critical, transparent);
+}
+
+/* ---------- Section headers ---------- */
+
+.veda-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--p-space-300);
+  flex-wrap: wrap;
+  padding-block-end: var(--p-space-200);
+  border-block-end: var(--p-border-width-025, 1px) solid var(--p-color-border-secondary, var(--p-color-border));
+}
+
+/* Small uppercase kicker above a section title — adds hierarchy without
+   inflating font sizes. */
+.veda-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--p-color-text-secondary, var(--p-color-text-subdued));
+}
+
+/* ---------- Score breakdown bars ---------- */
+
+.veda-score-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) 2fr auto;
+  align-items: center;
+  gap: var(--p-space-300);
+}
+
+.veda-score-track {
+  block-size: 6px;
+  inline-size: 100%;
+  border-radius: var(--p-border-radius-full, 9999px);
+  background: var(--p-color-bg-fill-tertiary);
+  overflow: hidden;
+}
+
+.veda-score-fill {
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--p-color-bg-fill-info);
+  transition: inline-size 500ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ---------- Metadata row (replaces badge soup) ---------- */
+
+.veda-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--p-space-200) var(--p-space-300);
+}
+
+.veda-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-space-100);
+  min-inline-size: 0;
+}
+
+/* Thin separator between metadata items; hidden when the row wraps. */
+.veda-meta__sep {
+  inline-size: 1px;
+  block-size: 12px;
+  background: var(--p-color-border);
+}
+
 /* ---------- Severity rail: a left edge that encodes priority ----------
  * Colour is a reinforcement, never the only signal — each rail always ships
  * alongside a text label + icon so it stays readable without colour vision. */
@@ -154,9 +267,11 @@
 .veda-kpi-grid {
   display: grid;
   gap: var(--p-space-300);
-  /* auto-fit + minmax(0,…) is what keeps this from ever forcing h-scroll on
-     narrow viewports: tracks collapse to one column instead of overflowing. */
-  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  /* auto-fit + minmax(min(...,100%)) is what keeps this from ever forcing
+     h-scroll on narrow viewports: tracks collapse to one column instead of
+     overflowing. The 190px floor lets wide screens fit a fifth column rather
+     than stretching four cards into slabs. */
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
 }
 
 .veda-split-grid {
@@ -170,6 +285,17 @@
 .veda-clamp {
   min-inline-size: 0;
   overflow-wrap: anywhere;
+}
+
+/* ---------- Page width ----------
+ * Polaris caps <Page> at ~998px, which on a 1440px screen left 31% of the
+ * viewport unused and forced the control centre into a tall single column.
+ * `fullWidth` on the dashboard recovers that space; this cap stops it
+ * sprawling on ultrawide displays where very long line lengths hurt reading. */
+
+.veda-page-wide .Polaris-Page {
+  max-width: 1400px;
+  margin-inline: auto;
 }
 
 /* ---------- Motion ---------- */
