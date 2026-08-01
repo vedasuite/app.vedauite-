@@ -83,24 +83,3 @@ export function DashboardSkeleton({
   );
 }
 
-export function SectionSkeleton({
-  title,
-  lines = 3,
-}: {
-  title: string;
-  lines?: number;
-}) {
-  return (
-    <BlockStack gap="300">
-      <Text as="h2" variant="headingMd">
-        {title}
-      </Text>
-      <Text as="p" visuallyHidden aria-live="polite">
-        {`Loading ${title}…`}
-      </Text>
-      <Card padding="400">
-        <SkeletonBodyText lines={lines} />
-      </Card>
-    </BlockStack>
-  );
-}

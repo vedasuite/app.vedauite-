@@ -167,9 +167,5 @@ export function confidenceTone(c: Confidence): ConfidenceTone {
   if (c === "low") return "attention";
   return undefined;
 }
-export function urgencyTone(u: Urgency): "critical" | "warning" | "attention" | "info" {
-  if (u === "critical") return "critical";
-  if (u === "high") return "warning";
-  if (u === "medium") return "attention";
-  return "info";
-}
+// Urgency is mapped to a full severity style (icon + label + tone) by
+// components/intelligence/severity.ts — see severityForUrgency().

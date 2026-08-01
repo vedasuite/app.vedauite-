@@ -70,19 +70,6 @@ export function largestOf(groups: LeakGroup[]): MoneyRange | null {
   return groupToRange(largestGroup(groups));
 }
 
-/** Largest revenue-at-risk group, reported with its own period. */
-export function largestRiskGroup(
-  data: DashboardInsightsResponse
-): MoneyRange | null {
-  return largestOf(data.revenueLeak.revenueAtRisk);
-}
-
-/** Largest single upside group (used for "largest opportunity" in the leak view). */
-export function largestUpsideGroup(
-  data: DashboardInsightsResponse
-): MoneyRange | null {
-  return largestOf(data.revenueLeak.potentialUpside);
-}
 
 const CONFIDENCE_WEIGHT: Record<Confidence, number> = {
   high: 1,
@@ -164,12 +151,6 @@ export function effortFor(ease: EaseOfAction) {
   return EFFORT[ease] ?? EFFORT.manual;
 }
 
-/** Time estimate for acting on the top opportunity. */
-export function estimatedTimeRequired(data: DashboardInsightsResponse): string | null {
-  const top = biggestOpportunity(data);
-  return top ? effortFor(top.easeOfAction).minutes : null;
-}
-
 /**
  * Headline "expected return": the top opportunity's own quantified range.
  * Returns null when the engine could not quantify it, so the UI can say
@@ -197,15 +178,6 @@ export function formatRange(range: MoneyRange): string {
 
 export function periodLabel(period: ImpactPeriod): string {
   return PERIOD_LABEL[period];
-}
-
-/** Count of insights per module, for module-level intelligence panels. */
-export function countByModule(
-  insights: ExplainableInsight[]
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const i of insights) out[i.module] = (out[i.module] ?? 0) + 1;
-  return out;
 }
 
 export type UrgencyMix = {
