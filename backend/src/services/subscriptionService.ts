@@ -17,6 +17,7 @@ import {
   normalizeStarterModule,
   normalizeStarterModuleLabel,
   type BillingPlanName,
+  type CanonicalModuleKey,
   type CurrentSubscription,
   type StarterModule,
   type SubscriptionLifeCycleStatus,
@@ -277,41 +278,58 @@ export function buildCanonicalEntitlements(input: {
   verified: boolean;
   trialActive: boolean;
 }): CanonicalEntitlementState {
+  // A merchant is inside the full-access window when their trial is still
+  // open. During it they keep their SELECTED plan (so the post-trial charge is
+  // unchanged) but receive Pro-equivalent capabilities.
+  const fullAccessTrial = input.trialActive && input.planName !== "NONE";
+
+  // Once the trial closes, access depends purely on whether Shopify reports an
+  // active paid subscription. A legacy standalone TRIAL plan collapses to NONE
+  // here, so an expired trial can never keep granting access.
   const effectivePlanName =
-    input.accessActive || (input.planName === "TRIAL" && input.trialActive)
-      ? input.planName
+    input.accessActive || fullAccessTrial
+      ? input.planName === "TRIAL" && !fullAccessTrial
+        ? "NONE"
+        : input.planName
       : "NONE";
+
   const resolved = resolveEntitlementsForPlan({
     plan: effectivePlanName,
     billingStatus: input.accessActive ? "ACTIVE" : "INACTIVE",
     starterModule: input.starterModule,
+    trialActive: fullAccessTrial,
   });
   const capabilities = resolved.capabilities;
   const modules = resolved.moduleAccess;
   const featureAccess = resolved.featureAccess;
-  const tier = normalizeTier(effectivePlanName);
+  const tier = fullAccessTrial ? "trial" : normalizeTier(effectivePlanName);
 
   return {
     tier,
     planName: effectivePlanName,
-    starterModule: effectivePlanName === "STARTER" ? resolved.starterModule : null,
-    accessActive: input.accessActive || (effectivePlanName === "TRIAL" && input.trialActive),
+    // The Starter module selection is retained through the trial so it is
+    // already in place when the paid plan begins.
+    starterModule:
+      effectivePlanName === "STARTER" ? normalizeStarterModule(input.starterModule) : null,
+    accessActive: input.accessActive || fullAccessTrial,
     verified: input.verified,
     modules,
     featureAccess,
     capabilities,
-    title:
-      effectivePlanName === "NONE"
-        ? "Limited access"
-        : effectivePlanName === "TRIAL"
-        ? "Trial access"
-        : `${effectivePlanName} access`,
-    description:
-      effectivePlanName === "STARTER" && input.starterModule
-        ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`
-        : effectivePlanName === "NONE"
-        ? "Choose a plan to unlock included features."
-        : "Included features are based on the active subscription.",
+    title: fullAccessTrial
+      ? "7-day full-access trial"
+      : effectivePlanName === "NONE"
+      ? "Limited access"
+      : `${effectivePlanName} access`,
+    description: fullAccessTrial
+      ? `Every module is unlocked during your trial.${
+          input.planName !== "NONE" ? ` ${input.planName} starts when it ends.` : ""
+        }`
+      : effectivePlanName === "STARTER" && input.starterModule
+      ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`
+      : effectivePlanName === "NONE"
+      ? "Choose a plan to continue."
+      : "Included features are based on the active subscription.",
   };
 }
 
@@ -866,20 +884,28 @@ export async function reconcileBillingState(shopDomain: string) {
   };
 }
 
+/**
+ * Server-side entitlement source of truth for API routes (including
+ * GET /api/insights/dashboard).
+ *
+ * Derives the module list from the canonical entitlement state rather than
+ * re-resolving from the plan name. Re-resolving is what previously dropped the
+ * trial override — a merchant on an active trial reported planName=TRIAL with
+ * an empty enabledModules list, so every module stayed locked. Reading the
+ * already-computed state keeps this path and the billing UI in lockstep.
+ */
 export async function resolveEntitlements(shopDomain: string) {
   const { billingState, entitlements } = await reconcileBillingState(shopDomain);
-  const resolved = resolveEntitlementsForPlan({
-    plan: entitlements.planName,
-    billingStatus: billingState.normalizedBillingStatus,
-    starterModule: entitlements.starterModule,
-  });
+  const moduleKeys: CanonicalModuleKey[] = ["fraud", "competitor", "pricing", "profit"];
 
   return {
     plan: entitlements.planName,
     billingStatus: billingState.normalizedBillingStatus,
     starterModule: entitlements.starterModule,
-    enabledModules: resolved.enabledModules,
-    lockedModules: resolved.lockedModules,
+    enabledModules: moduleKeys.filter((key) => entitlements.modules[key]),
+    lockedModules: moduleKeys.filter((key) => !entitlements.modules[key]),
+    trialActive: entitlements.tier === "trial",
+    accessActive: entitlements.accessActive,
   };
 }
 

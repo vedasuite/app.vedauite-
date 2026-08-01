@@ -8,12 +8,18 @@ export const SUPPORT_TICKET_STATUSES = [
 ] as const;
 export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
 
+// Stored verbatim in SupportTicket.category (a plain String column, so no
+// migration is needed to extend this list). Unknown values are coerced to
+// "general" by normalizeCategory rather than rejected, so an older client
+// can never fail to file a ticket.
 export const SUPPORT_TICKET_CATEGORIES = [
   "general",
   "billing",
   "technical",
   "bug",
   "feature_request",
+  "complaint",
+  "feedback",
 ] as const;
 export type SupportTicketCategory = (typeof SUPPORT_TICKET_CATEGORIES)[number];
 

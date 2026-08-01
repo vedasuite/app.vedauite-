@@ -180,7 +180,7 @@ export function AppFrame({ children }: Props) {
       }),
       createNavItem("/app/billing", "Billing"),
       createNavItem("/app/settings", "Settings"),
-      createNavItem("/app/support", "Support"),
+      createNavItem("/app/support", "Support & Feedback"),
     ],
     [
       createNavItem,

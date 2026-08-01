@@ -1,7 +1,12 @@
 export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as const;
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
-export type StarterModule = "fraud" | "competitor";
+/**
+ * The single core module a Starter merchant selects. Pricing was added
+ * alongside fraud/competitor so Starter can be sold against any one of the
+ * three core workflows.
+ */
+export type StarterModule = "fraud" | "competitor" | "pricing";
 export type CanonicalModuleKey = "fraud" | "competitor" | "pricing" | "profit";
 
 export const CAPABILITIES = [
@@ -114,7 +119,7 @@ export type ResolvedEntitlements = {
 };
 
 export const STARTER_MODULE_SWITCH_COOLDOWN_HOURS = 24;
-export const DEFAULT_TRIAL_DAYS = 3;
+export const DEFAULT_TRIAL_DAYS = 7;
 
 const PLAN_PRICE_MAP: Record<BillingPlanName, number> = {
   NONE: 0,
@@ -125,7 +130,7 @@ const PLAN_PRICE_MAP: Record<BillingPlanName, number> = {
 };
 
 export function normalizeStarterModule(value?: string | null): StarterModule | null {
-  if (value === "fraud" || value === "competitor") {
+  if (value === "fraud" || value === "competitor" || value === "pricing") {
     return value;
   }
 
@@ -135,6 +140,10 @@ export function normalizeStarterModule(value?: string | null): StarterModule | n
 
   if (value === "competitorIntelligence" || value === "competitor_monitoring") {
     return "competitor";
+  }
+
+  if (value === "pricingProfit" || value === "aiPricing" || value === "pricingEngine") {
+    return "pricing";
   }
 
   return null;
@@ -169,19 +178,39 @@ export function buildCapabilities(
 ): CapabilityMap {
   const capabilities = emptyCapabilities();
   const normalizedStarterModule = normalizeStarterModule(starterModule);
-  const isTrial = planName === "TRIAL";
-  const isGrowth = planName === "GROWTH";
-  const isPro = planName === "PRO";
+
+  // A 7-day full-access trial grants Pro-equivalent capabilities regardless of
+  // which plan the merchant selected to start after it. The selected plan is
+  // still carried in `planName` so billing UI and post-trial entitlement
+  // resolution keep using it — the trial only overrides what is *unlocked*,
+  // never what the merchant has agreed to pay for.
+  //
+  // Legacy standalone "TRIAL" plan rows are treated the same way while their
+  // trial window is open, and collapse to NONE once it closes, so no shop can
+  // sit on an indefinite free TRIAL plan.
+  const trialActive = options?.trialActive ?? false;
+  const selectedPlan = planName;
+  const effectivePlan: BillingPlanName = trialActive
+    ? "PRO"
+    : selectedPlan === "TRIAL"
+    ? "NONE"
+    : selectedPlan;
+
+  const isGrowth = effectivePlan === "GROWTH";
+  const isPro = effectivePlan === "PRO";
   const isStarterTrust =
-    planName === "STARTER" && normalizedStarterModule === "fraud";
+    effectivePlan === "STARTER" && normalizedStarterModule === "fraud";
   const isStarterCompetitor =
-    planName === "STARTER" && normalizedStarterModule === "competitor";
-  const trialLimitedOnly = isTrial && (options?.trialActive ?? true);
+    effectivePlan === "STARTER" && normalizedStarterModule === "competitor";
+  const isStarterPricing =
+    effectivePlan === "STARTER" && normalizedStarterModule === "pricing";
   const fraudModule = isStarterTrust || isGrowth || isPro;
   const competitorModule = isStarterCompetitor || isGrowth || isPro;
-  const pricingModule = isGrowth || isPro;
+  const pricingModule = isStarterPricing || isGrowth || isPro;
   const creditScoreModule = isGrowth || isPro;
   const reportsModule = isGrowth || isPro;
+  // Full Profit Optimization stays Pro-only (and therefore trial-only via the
+  // Pro-equivalent override) — Starter and Growth never receive it.
   const profitModule = isPro;
 
   capabilities["reports.view"] = reportsModule;
@@ -189,9 +218,12 @@ export function buildCapabilities(
   capabilities["settings.manage"] = true;
   capabilities["billing.planManagement"] = true;
   capabilities["billing.upgrade"] = true;
-  capabilities["billing.downgrade"] = planName !== "NONE";
-  capabilities["billing.moduleSelectionStarter"] = planName === "STARTER";
-  capabilities["billing.trialActive"] = trialLimitedOnly;
+  // Billing-surface capabilities key off the SELECTED plan, not the trial
+  // override: a merchant on a trial who picked Starter must still be able to
+  // choose their Starter module.
+  capabilities["billing.downgrade"] = selectedPlan !== "NONE";
+  capabilities["billing.moduleSelectionStarter"] = selectedPlan === "STARTER";
+  capabilities["billing.trialActive"] = trialActive;
 
   capabilities["module.trustAbuse"] = fraudModule;
   capabilities["module.competitorIntel"] = competitorModule;
@@ -257,9 +289,17 @@ export function resolveEntitlements(input: {
   plan: BillingPlanName;
   billingStatus: string | null;
   starterModule: StarterModule | null;
+  /**
+   * True only while a Shopify-backed 7-day trial window is still open. When
+   * set, capabilities resolve to Pro-equivalent while `plan` keeps reporting
+   * the merchant's selected post-trial plan.
+   */
+  trialActive?: boolean;
 }) : ResolvedEntitlements {
   const normalizedStarterModule = normalizeStarterModule(input.starterModule);
-  const capabilities = buildCapabilities(input.plan, normalizedStarterModule);
+  const capabilities = buildCapabilities(input.plan, normalizedStarterModule, {
+    trialActive: input.trialActive ?? false,
+  });
   const moduleAccess = buildModuleAccessFromCapabilities(capabilities);
   const featureAccess = buildFeatureAccessFromCapabilities(capabilities);
   const enabledModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
@@ -317,6 +357,9 @@ export function normalizeStarterModuleLabel(moduleKey: StarterModule | null) {
   }
   if (moduleKey === "competitor") {
     return "Competitor Intelligence";
+  }
+  if (moduleKey === "pricing") {
+    return "AI Pricing Engine";
   }
   return null;
 }

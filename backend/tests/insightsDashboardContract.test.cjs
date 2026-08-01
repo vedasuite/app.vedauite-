@@ -207,6 +207,87 @@ test("return-abuse: truncated order window suppresses return-abuse insights inst
   assert.ok(all.some((i) => i.module === "competitor"), "unrelated competitor insight should be unaffected");
 });
 
+// ---------------------------------------------------------------------------
+// Server-side entitlement enforcement on GET /api/insights/dashboard.
+//
+// entitlementMatrix.test.cjs proves plan -> enabledModules. These tests prove
+// the endpoint honours whatever enabledModules it is given, for every tier, so
+// gating never depends on the frontend hiding something.
+// ---------------------------------------------------------------------------
+
+function modulesPresentIn(json) {
+  const fromInsights = [...json.opportunities, ...json.criticalAttention].map((i) => i.module);
+  const fromCoverage = json.dataCoverage.map((c) => c.module);
+  const fromLeak = [...json.revenueLeak.potentialUpside, ...json.revenueLeak.revenueAtRisk]
+    .flatMap((g) => g.items.map((it) => it.label));
+  return { fromInsights, fromCoverage, fromLeak };
+}
+
+test("enforcement: active full-access trial receives every module's intelligence", async () => {
+  resetState(); seedRichStore();
+  // A trial resolves to Pro-equivalent, i.e. all four modules.
+  state.enabledModules = ["fraud", "competitor", "pricing", "profit"];
+  const r = await get("/api/insights/dashboard");
+
+  assert.equal(r.status, 200);
+  const { fromCoverage } = modulesPresentIn(r.json);
+  assert.ok(fromCoverage.includes("fraud"));
+  assert.ok(fromCoverage.includes("competitor"));
+  assert.ok(fromCoverage.includes("pricing"));
+});
+
+test("enforcement: Starter receives only its selected module, in every section", async () => {
+  resetState(); seedRichStore();
+  state.enabledModules = ["fraud"]; // Starter/fraud
+  const r = await get("/api/insights/dashboard");
+
+  const all = [...r.json.opportunities, ...r.json.criticalAttention];
+  assert.ok(
+    all.every((i) => ["fraud", "trust", "return_abuse"].includes(i.module)),
+    "no non-fraud insight may appear for Starter/fraud"
+  );
+  assert.ok(
+    !r.json.dataCoverage.some((c) => c.module === "competitor" || c.module === "pricing"),
+    "inaccessible modules must not appear in data coverage"
+  );
+  const leakLabels = [
+    ...r.json.revenueLeak.potentialUpside,
+    ...r.json.revenueLeak.revenueAtRisk,
+  ].flatMap((g) => g.items.map((it) => it.label));
+  assert.ok(
+    !leakLabels.some((label) => /competitor/i.test(label)),
+    "Revenue Leak must contain no competitor data for Starter/fraud"
+  );
+  assert.ok(
+    !leakLabels.some((label) => /Upside —/i.test(label)),
+    "Revenue Leak must contain no pricing upside for Starter/fraud"
+  );
+});
+
+test("enforcement: Growth receives fraud, competitor and pricing intelligence", async () => {
+  resetState(); seedRichStore();
+  state.enabledModules = ["fraud", "competitor", "pricing"];
+  const r = await get("/api/insights/dashboard");
+
+  const covered = r.json.dataCoverage.map((c) => c.module);
+  assert.ok(covered.includes("fraud"));
+  assert.ok(covered.includes("competitor"));
+  assert.ok(covered.includes("pricing"));
+});
+
+test("enforcement: expired trial with no valid subscription receives no paid intelligence", async () => {
+  resetState(); seedRichStore();
+  state.enabledModules = []; // blocked: no plan, no trial
+  const r = await get("/api/insights/dashboard");
+
+  assert.equal(r.status, 200, "the endpoint must degrade, not error");
+  assert.deepEqual(r.json.opportunities, [], "no opportunities without entitlement");
+  assert.deepEqual(r.json.criticalAttention, [], "no critical attention without entitlement");
+  assert.deepEqual(r.json.revenueLeak.potentialUpside, []);
+  assert.deepEqual(r.json.revenueLeak.revenueAtRisk, []);
+  assert.deepEqual(r.json.dataCoverage, [], "no module coverage without entitlement");
+});
+
 test("no forbidden PII in the serialized JSON", async () => {
   resetState(); seedRichStore();
   const r = await get("/api/insights/dashboard");

@@ -32,12 +32,17 @@ type Ticket = {
   createdAt: string;
 };
 
+// Must stay in sync with SUPPORT_TICKET_CATEGORIES in
+// backend/src/services/supportService.ts — the backend coerces anything it
+// does not recognise to "general".
 const CATEGORY_OPTIONS = [
   { label: "General question", value: "general" },
   { label: "Billing", value: "billing" },
   { label: "Technical issue", value: "technical" },
   { label: "Bug report", value: "bug" },
   { label: "Feature request", value: "feature_request" },
+  { label: "Complaint", value: "complaint" },
+  { label: "Feedback", value: "feedback" },
 ];
 
 function statusBadge(status: string) {
@@ -126,7 +131,7 @@ export function SupportPage() {
 
   return (
     <Page
-      title="Support"
+      title="Support & Feedback"
       subtitle="Ask a question or report an issue. We reply right here in the app."
     >
       <Layout>

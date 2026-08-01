@@ -231,6 +231,17 @@ function actionLabel(action: BillingPlanCard["action"]) {
   }
 }
 
+/** " · 4 days left" — omitted entirely when the date is unusable. */
+function trialDaysRemaining(trialEndsAt: string | null | undefined): string {
+  if (!trialEndsAt) return "";
+  const endsAt = new Date(trialEndsAt).getTime();
+  if (!Number.isFinite(endsAt)) return "";
+  const msLeft = endsAt - Date.now();
+  if (msLeft <= 0) return "";
+  const daysLeft = Math.ceil(msLeft / 86_400_000);
+  return ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) {
     return "Not set";
@@ -496,6 +507,28 @@ export function PricingPage() {
       subtitle="Choose a plan, compare included features, and manage Shopify billing."
     >
       <Layout>
+        {/* Full-access trial status. Shown only while the window is genuinely
+            open, using the exact end date the backend reports — never an
+            estimated or client-computed deadline. */}
+        {currentSummary.status === "trial_active" && currentSummary.trialEndsAt ? (
+          <Layout.Section>
+            <Banner title="7-day full-access trial" tone="info">
+              <BlockStack gap="200">
+                <p>
+                  {`Every module is unlocked until ${formatDate(
+                    currentSummary.trialEndsAt
+                  )}${trialDaysRemaining(currentSummary.trialEndsAt)}.`}
+                </p>
+                <p>
+                  {currentSummary.planName && currentSummary.planName !== "NONE"
+                    ? `Your ${currentSummary.planName} plan begins when the trial ends. You are not charged before then.`
+                    : "Choose a plan before the trial ends to keep your access."}
+                </p>
+              </BlockStack>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
         {pendingConfirmationUrl ? (
           <Layout.Section>
             <Banner title="Continue to Shopify to approve billing" tone="info">

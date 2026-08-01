@@ -30,7 +30,7 @@ export const env = {
       `${process.env.SHOPIFY_APP_URL || ""}/legal/terms`,
   },
   billing: {
-    trialDays: Number(process.env.BILLING_PLAN_TRIAL_DAYS) || 3,
+    trialDays: Number(process.env.BILLING_PLAN_TRIAL_DAYS) || 7,
     starterPrice: Number(process.env.BILLING_PLAN_STARTER_PRICE) || 19,
     growthPrice: Number(process.env.BILLING_PLAN_GROWTH_PRICE) || 49,
     proPrice: Number(process.env.BILLING_PLAN_PRO_PRICE) || 99,

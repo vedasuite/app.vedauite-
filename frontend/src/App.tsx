@@ -128,7 +128,7 @@ export default function App() {
         />
         <Route path="/app/billing" element={withRouteBoundary("Billing", <PricingPage />)} />
         <Route path="/app/settings" element={withRouteBoundary("Settings", <SettingsPage />)} />
-        <Route path="/app/support" element={withRouteBoundary("Support", <SupportPage />)} />
+        <Route path="/app/support" element={withRouteBoundary("Support & Feedback", <SupportPage />)} />
 
         <Route path="/onboarding" element={<Navigate to="/app/onboarding" replace />} />
         <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />

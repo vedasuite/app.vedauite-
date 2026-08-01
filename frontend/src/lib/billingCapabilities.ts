@@ -1,7 +1,7 @@
 export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as const;
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
-export type StarterModule = "fraud" | "competitor" | null;
+export type StarterModule = "fraud" | "competitor" | "pricing" | null;
 
 export const CAPABILITIES = [
   "module.trustAbuse",
@@ -207,8 +207,12 @@ function normalizeBillingPlanName(value?: string | null): BillingPlanName {
 }
 
 export function normalizeStarterModule(value?: string | null): StarterModule {
-  if (value === "fraud" || value === "competitor") {
+  if (value === "fraud" || value === "competitor" || value === "pricing") {
     return value;
+  }
+
+  if (value === "pricingProfit" || value === "aiPricing" || value === "pricingEngine") {
+    return "pricing";
   }
 
   if (
@@ -231,19 +235,49 @@ function emptyCapabilities(): CapabilityMap {
   return Object.fromEntries(CAPABILITIES.map((capability) => [capability, false])) as CapabilityMap;
 }
 
+/**
+ * True when a payload describes a trial whose window has not closed yet.
+ * Used only by the capability fallbacks below — the server's own
+ * `capabilities` map is preferred whenever it is present.
+ */
+function isTrialWindowOpen(value: {
+  status?: string | null;
+  trialEndsAt?: string | null;
+} | null | undefined): boolean {
+  if (!value) return false;
+  if (value.trialEndsAt) {
+    const endsAt = new Date(value.trialEndsAt).getTime();
+    if (Number.isFinite(endsAt)) return endsAt > Date.now();
+  }
+  return value.status === "trial_active";
+}
+
 export function buildCapabilities(
   planName: BillingPlanName,
-  starterModule: StarterModule
+  starterModule: StarterModule,
+  options?: { trialActive?: boolean }
 ) {
   const capabilities = emptyCapabilities();
-  const isTrial = planName === "TRIAL";
-  const isGrowth = planName === "GROWTH";
-  const isPro = planName === "PRO";
-  const isStarterTrust = planName === "STARTER" && starterModule === "fraud";
-  const isStarterCompetitor = planName === "STARTER" && starterModule === "competitor";
+
+  // Mirrors backend/src/billing/capabilities.ts. The server is authoritative —
+  // this only runs when a payload arrives without a capability map — but it
+  // must agree, or a trialing merchant would briefly see locked modules.
+  const trialActive = options?.trialActive ?? false;
+  const selectedPlan = planName;
+  const effectivePlan: BillingPlanName = trialActive
+    ? "PRO"
+    : selectedPlan === "TRIAL"
+    ? "NONE"
+    : selectedPlan;
+
+  const isGrowth = effectivePlan === "GROWTH";
+  const isPro = effectivePlan === "PRO";
+  const isStarterTrust = effectivePlan === "STARTER" && starterModule === "fraud";
+  const isStarterCompetitor = effectivePlan === "STARTER" && starterModule === "competitor";
+  const isStarterPricing = effectivePlan === "STARTER" && starterModule === "pricing";
   const fraudModule = isStarterTrust || isGrowth || isPro;
   const competitorModule = isStarterCompetitor || isGrowth || isPro;
-  const pricingModule = isGrowth || isPro;
+  const pricingModule = isStarterPricing || isGrowth || isPro;
   const creditScoreModule = isGrowth || isPro;
   const reportsModule = isGrowth || isPro;
   const profitModule = isPro;
@@ -253,9 +287,9 @@ export function buildCapabilities(
   capabilities["settings.manage"] = true;
   capabilities["billing.planManagement"] = true;
   capabilities["billing.upgrade"] = true;
-  capabilities["billing.downgrade"] = planName !== "NONE";
-  capabilities["billing.moduleSelectionStarter"] = planName === "STARTER";
-  capabilities["billing.trialActive"] = isTrial;
+  capabilities["billing.downgrade"] = selectedPlan !== "NONE";
+  capabilities["billing.moduleSelectionStarter"] = selectedPlan === "STARTER";
+  capabilities["billing.trialActive"] = trialActive;
 
   capabilities["module.trustAbuse"] = fraudModule;
   capabilities["module.competitorIntel"] = competitorModule;
@@ -391,7 +425,8 @@ export function normalizeSubscriptionInfo(
   const planName = normalizeBillingPlanName(value.planName);
   const starterModule = normalizeStarterModule(value.starterModule);
   const capabilities =
-    value.capabilities ?? buildCapabilities(planName, starterModule);
+    value.capabilities ??
+    buildCapabilities(planName, starterModule, { trialActive: isTrialWindowOpen(value) });
   const enabledModules =
     value.enabledModules ?? buildModuleAccess(planName, starterModule);
   const featureAccess =
@@ -449,8 +484,13 @@ export function normalizeEntitlementState(
 
   const planName = normalizeBillingPlanName(value.planName);
   const starterModule = normalizeStarterModule(value.starterModule);
+  // EntitlementState carries the resolved tier rather than trial dates, so the
+  // tier is the trial signal here.
   const capabilities =
-    value.capabilities ?? buildCapabilities(planName, starterModule);
+    value.capabilities ??
+    buildCapabilities(planName, starterModule, {
+      trialActive: normalizeEntitlementTier(value.tier) === "trial",
+    });
   const modules = value.modules ?? buildModuleAccess(planName, starterModule);
   const featureAccess =
     value.featureAccess ?? buildFeatureAccess(planName, starterModule);
