@@ -32,6 +32,15 @@ export async function getStoreReadinessState(shopDomain: string) {
       plan: billing.planName,
       isActive: billing.accessActive,
       isTrial: billing.planName === "TRIAL" && billing.accessActive,
+      // Canonical full-access-trial flag, taken straight from the entitlement
+      // resolver that Billing already uses. `isTrial` above only ever matched
+      // the legacy standalone TRIAL plan; under the current model the plan is
+      // the merchant's selected STARTER/GROWTH/PRO while the trial window is
+      // open, so it is not a usable trial signal. Exposed here purely so
+      // Onboarding and the Dashboard can display the same trial state as the
+      // Billing page without inferring it from a date.
+      trialActive: entitlements.trialActive,
+      trialEndsAt: subscription.trialEndsAt,
       starterModule: entitlements.starterModule,
       enabledModules: {
         fraud: entitlements.enabledModules.includes("fraud"),

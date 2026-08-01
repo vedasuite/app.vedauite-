@@ -323,7 +323,11 @@ export function buildCanonicalEntitlements(input: {
       : `${effectivePlanName} access`,
     description: fullAccessTrial
       ? `Every module is unlocked during your trial.${
-          input.planName !== "NONE" ? ` ${input.planName} starts when it ends.` : ""
+          // "TRIAL" is not a chargeable plan, so it must never be described as
+          // the one that begins afterwards.
+          input.planName !== "NONE" && input.planName !== "TRIAL"
+            ? ` ${input.planName} starts when it ends.`
+            : " Your selected subscription starts when it ends."
         }`
       : effectivePlanName === "STARTER" && input.starterModule
       ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`

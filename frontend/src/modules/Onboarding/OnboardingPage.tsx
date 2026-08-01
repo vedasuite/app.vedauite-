@@ -16,6 +16,9 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { useCallback, useMemo, useState } from "react";
+import { TrialStatusCard } from "../../components/billing/TrialStatus";
+import "../../components/intelligence/intelligence.css";
+import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useOnboardingState } from "../../hooks/useOnboardingState";
 import type { OnboardingModuleKey } from "../../providers/OnboardingProvider";
@@ -95,6 +98,8 @@ function stepLabel(step: {
 
 export function OnboardingPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
+  // Canonical billing/trial state, shared with the Billing page.
+  const { appState } = useAppState();
   const { host, shop } = useAppBridge();
   const {
     onboarding,
@@ -390,6 +395,21 @@ export function OnboardingPage() {
       subtitle="Complete the key setup steps so VedaSuite can start turning Shopify data into useful store guidance."
     >
       <Layout>
+        {/* Full-access trial summary. Rendered from the canonical
+            appState.billing.trialActive flag — the same entitlement state the
+            Billing page uses — so it can never disagree with Billing or imply
+            access from a date alone. */}
+        <Layout.Section>
+          <TrialStatusCard
+            data={{
+              trialActive: !!appState?.billing?.trialActive,
+              trialEndsAt: appState?.billing?.trialEndsAt ?? null,
+              planName: appState?.billing?.planName ?? null,
+            }}
+            onViewBilling={() => navigateEmbedded("/app/billing")}
+          />
+        </Layout.Section>
+
         {actionError ? (
           <Layout.Section>
             {(() => {
@@ -467,69 +487,107 @@ export function OnboardingPage() {
         </Layout.Section>
 
         <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h2" variant="headingLg">
-                  Setup progress
-                </Text>
-                <Badge tone="info">
+          <Card padding="400">
+            <BlockStack gap="400">
+              {/* Header: eyebrow + title + progress, matching the section
+                  header pattern used on the Dashboard. */}
+              <div className="veda-section-head">
+                <div className="veda-clamp">
+                  <div className="veda-eyebrow">Setup</div>
+                  <Text as="h2" variant="headingMd">
+                    Setup progress
+                  </Text>
+                </div>
+                <Badge tone={onboarding.canAccessDashboard ? "success" : "info"}>
                   {onboarding.canAccessDashboard
                     ? "Complete"
                     : `Step ${onboarding.progress.completedSteps + 1} of ${onboarding.progress.totalSteps}`}
                 </Badge>
-              </InlineStack>
-              <Text as="p" tone="subdued">
-                {onboarding.canAccessDashboard
-                  ? "All steps done — open the dashboard to get started."
-                  : onboarding.steps.find((step) => step.active)?.label ?? "Continue setup"}
-              </Text>
-              <ProgressBar progress={onboarding.progress.percent} size="small" />
-              <BlockStack gap="250">
-                {onboarding.steps.map((step) => (
-                  <div key={step.key} className="vs-action-card">
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between" blockAlign="start">
-                        <BlockStack gap="100">
-                          <Text as="h3" variant="headingMd">
-                            {step.label}
-                          </Text>
-                          <Text as="p" tone="subdued">
+              </div>
+
+              <BlockStack gap="150">
+                <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {onboarding.canAccessDashboard
+                      ? "All steps done — open the dashboard to get started."
+                      : onboarding.steps.find((step) => step.active)?.label ?? "Continue setup"}
+                  </Text>
+                  <Text as="span" variant="bodySm" fontWeight="semibold">
+                    {`${onboarding.progress.completedSteps} / ${onboarding.progress.totalSteps}`}
+                  </Text>
+                </InlineStack>
+                <ProgressBar progress={onboarding.progress.percent} size="small" />
+              </BlockStack>
+
+              <BlockStack gap="300">
+                {onboarding.steps.map((step) => {
+                  // Completed / active / pending are visually distinct: the
+                  // active step keeps full detail and the primary action,
+                  // finished and upcoming steps compress to a single line so
+                  // the next thing to do stays the focus.
+                  const rail = step.complete
+                    ? "veda-rail--healthy"
+                    : step.active
+                    ? "veda-rail--info"
+                    : "veda-rail--neutral";
+
+                  return (
+                    <div key={step.key} className={`veda-rail ${rail}`}>
+                      <BlockStack gap={step.active ? "200" : "100"}>
+                        <InlineStack align="space-between" blockAlign="start" gap="200" wrap>
+                          <div className="veda-clamp">
+                            <Text
+                              as="h3"
+                              variant={step.active ? "headingSm" : "bodyMd"}
+                              tone={step.complete && !step.active ? "subdued" : undefined}
+                            >
+                              {step.label}
+                            </Text>
+                          </div>
+                          <Badge tone={stepTone(step)}>{stepLabel(step)}</Badge>
+                        </InlineStack>
+
+                        {step.active ? (
+                          <>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {step.description}
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {step.helper}
+                            </Text>
+                            <InlineStack gap="300" wrap>
+                              <Button
+                                variant="primary"
+                                {...primaryButtonProps}
+                                loading={
+                                  busyAction === "SYNC_LIVE_DATA" ||
+                                  busyAction === "VIEW_FIRST_INSIGHT" ||
+                                  busyAction === "CONFIRM_PLAN" ||
+                                  busyAction === `SELECT_${pendingModule}`
+                                }
+                              >
+                                {primaryLabel}
+                              </Button>
+                              {step.key === "DATA_SYNC" &&
+                              !onboarding.dataReadiness.webhooksReady ? (
+                                <Button
+                                  onClick={() => void registerWebhooks()}
+                                  loading={busyAction === "REGISTER_WEBHOOKS"}
+                                >
+                                  Verify Shopify connection
+                                </Button>
+                              ) : null}
+                            </InlineStack>
+                          </>
+                        ) : (
+                          <Text as="p" variant="bodySm" tone="subdued">
                             {step.description}
                           </Text>
-                        </BlockStack>
-                        <Badge tone={stepTone(step)}>{stepLabel(step)}</Badge>
-                      </InlineStack>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {step.helper}
-                      </Text>
-                      {step.active ? (
-                        <InlineStack gap="300">
-                          <Button
-                            variant="primary"
-                            {...primaryButtonProps}
-                            loading={
-                              busyAction === "SYNC_LIVE_DATA" ||
-                              busyAction === "VIEW_FIRST_INSIGHT" ||
-                              busyAction === "CONFIRM_PLAN" ||
-                              busyAction === `SELECT_${pendingModule}`
-                            }
-                          >
-                            {primaryLabel}
-                          </Button>
-                          {step.key === "DATA_SYNC" && !onboarding.dataReadiness.webhooksReady ? (
-                            <Button
-                              onClick={() => void registerWebhooks()}
-                              loading={busyAction === "REGISTER_WEBHOOKS"}
-                            >
-                              Verify Shopify connection
-                            </Button>
-                          ) : null}
-                        </InlineStack>
-                      ) : null}
-                    </BlockStack>
-                  </div>
-                ))}
+                        )}
+                      </BlockStack>
+                    </div>
+                  );
+                })}
               </BlockStack>
             </BlockStack>
           </Card>

@@ -23,6 +23,8 @@ import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { useOnboardingState } from "../../hooks/useOnboardingState";
 import { InsightsDashboardSections } from "./components/InsightsDashboardSections";
+import { TrialStatusBanner } from "../../components/billing/TrialStatus";
+import { useAppState } from "../../hooks/useAppState";
 
 type Metrics = {
   fraudAlertsToday: number;
@@ -678,6 +680,8 @@ function deriveRefreshResult(args: {
 
 export function DashboardPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
+  // Canonical billing/trial state, shared with Onboarding and Billing.
+  const { appState } = useAppState();
   const { host, shop } = useAppBridge();
   const cachedDashboard = useMemo(
     () => readModuleCache<DashboardPayload>("dashboard-overview") ?? null,
@@ -1128,6 +1132,22 @@ export function DashboardPage() {
         }}
       >
         <Layout>
+        {/* Compact full-access trial status, from the same canonical
+            appState.billing.trialActive flag used by Onboarding and Billing.
+            Renders nothing when no trial is active. */}
+        {appState?.billing?.trialActive ? (
+          <Layout.Section>
+            <TrialStatusBanner
+              data={{
+                trialActive: true,
+                trialEndsAt: appState.billing.trialEndsAt ?? null,
+                planName: appState.billing.planName ?? null,
+              }}
+              onViewBilling={() => navigateEmbedded("/app/billing")}
+            />
+          </Layout.Section>
+        ) : null}
+
         {error ? (
           <Layout.Section>
             <Banner title="Dashboard action failed" tone="critical">

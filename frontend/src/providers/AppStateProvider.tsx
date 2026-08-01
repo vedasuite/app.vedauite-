@@ -29,6 +29,13 @@ export type CanonicalAppState = {
     accessActive: boolean;
     endsAt: string | null;
     trialEndsAt: string | null;
+    /**
+     * Canonical full-access-trial flag, resolved server-side by the same
+     * entitlement resolver the Billing page uses. Optional so an older
+     * cached/partial payload does not break the app; treat a missing value
+     * as "no trial" rather than inferring one from trialEndsAt.
+     */
+    trialActive?: boolean;
     title: string;
     description: string;
   };

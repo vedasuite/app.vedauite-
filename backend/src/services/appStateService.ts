@@ -38,6 +38,7 @@ export type MerchantAppState = {
       accessActive: boolean;
       endsAt: string | null;
       trialEndsAt: string | null;
+      trialActive: boolean;
       title: string;
       description: string;
     };
@@ -260,6 +261,10 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       accessActive: billing.accessActive,
       endsAt: billing.showRenewalDate ? billing.renewalAt : null,
       trialEndsAt: billing.showTrialDate ? subscription.trialEndsAt : null,
+      // Canonical active-trial flag from the shared entitlement resolver, so
+      // Onboarding and the Dashboard render the same trial state as Billing
+      // instead of inferring one from trialEndsAt.
+      trialActive: storeReadiness.billing.trialActive,
       title: billing.merchantTitle,
       description: billing.merchantDescription,
     },
