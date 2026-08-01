@@ -1,0 +1,201 @@
+/* VedaSuite intelligence UI — presentation polish layered on top of Polaris.
+ *
+ * Rules followed here:
+ *  - Polaris design tokens only (var(--p-*)), so light/dark and future Polaris
+ *    theme changes carry through automatically. No hardcoded brand hex values.
+ *  - Every transition/animation is disabled under prefers-reduced-motion.
+ *  - Nothing sets a fixed width that could cause horizontal page scroll.
+ */
+
+/* ---------- Elevation + hover affordance on interactive cards ---------- */
+
+.veda-card-interactive {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+  will-change: transform;
+}
+
+.veda-card-interactive:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--p-shadow-200);
+}
+
+.veda-card-interactive:focus-within {
+  box-shadow: 0 0 0 var(--p-border-width-050, 2px) var(--p-color-border-focus);
+}
+
+/* ---------- Severity rail: a left edge that encodes priority ----------
+ * Colour is a reinforcement, never the only signal — each rail always ships
+ * alongside a text label + icon so it stays readable without colour vision. */
+
+.veda-rail {
+  border-inline-start: 3px solid var(--p-color-border);
+  padding-inline-start: var(--p-space-300);
+}
+
+.veda-rail--critical { border-inline-start-color: var(--p-color-border-critical); }
+.veda-rail--warning  { border-inline-start-color: var(--p-color-border-caution); }
+.veda-rail--opportunity { border-inline-start-color: var(--p-color-border-success); }
+.veda-rail--info     { border-inline-start-color: var(--p-color-border-info); }
+.veda-rail--healthy  { border-inline-start-color: var(--p-color-border-success); }
+.veda-rail--neutral  { border-inline-start-color: var(--p-color-border); }
+
+/* ---------- Meter / gauge ---------- */
+
+.veda-meter {
+  position: relative;
+  inline-size: 100%;
+  block-size: 8px;
+  border-radius: var(--p-border-radius-full, 9999px);
+  background: var(--p-color-bg-surface-secondary, var(--p-color-bg-fill-tertiary));
+  overflow: hidden;
+}
+
+.veda-meter__fill {
+  block-size: 100%;
+  border-radius: inherit;
+  transition: inline-size 600ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.veda-meter__fill--critical { background: var(--p-color-bg-fill-critical); }
+.veda-meter__fill--warning  { background: var(--p-color-bg-fill-caution); }
+.veda-meter__fill--success  { background: var(--p-color-bg-fill-success); }
+.veda-meter__fill--info     { background: var(--p-color-bg-fill-info); }
+.veda-meter__fill--neutral  { background: var(--p-color-bg-fill-tertiary); }
+
+/* Segmented variant, for "3 of 5 checks healthy" style readings. */
+.veda-segments {
+  display: flex;
+  gap: 4px;
+  inline-size: 100%;
+}
+
+.veda-segment {
+  flex: 1 1 0;
+  block-size: 6px;
+  border-radius: var(--p-border-radius-full, 9999px);
+  background: var(--p-color-bg-fill-tertiary);
+  transition: background-color 300ms ease;
+}
+
+.veda-segment--on-success  { background: var(--p-color-bg-fill-success); }
+.veda-segment--on-critical { background: var(--p-color-bg-fill-critical); }
+.veda-segment--on-warning  { background: var(--p-color-bg-fill-caution); }
+.veda-segment--on-info     { background: var(--p-color-bg-fill-info); }
+
+/* ---------- KPI numerals ---------- */
+
+.veda-kpi-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  /* Long currency ranges must wrap rather than push the page sideways. */
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Timeline ---------- */
+
+.veda-timeline {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.veda-timeline__item {
+  position: relative;
+  padding-inline-start: var(--p-space-500);
+  padding-block-end: var(--p-space-400);
+}
+
+.veda-timeline__item:last-child {
+  padding-block-end: 0;
+}
+
+/* The connecting spine, drawn between dots only. */
+.veda-timeline__item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 4px;
+  inset-block-start: 14px;
+  inset-block-end: 0;
+  inline-size: 2px;
+  background: var(--p-color-border);
+}
+
+.veda-timeline__dot {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 6px;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  background: var(--p-color-bg-fill-tertiary);
+  box-shadow: 0 0 0 2px var(--p-color-bg-surface);
+}
+
+.veda-timeline__dot--critical { background: var(--p-color-bg-fill-critical); }
+.veda-timeline__dot--warning  { background: var(--p-color-bg-fill-caution); }
+.veda-timeline__dot--success  { background: var(--p-color-bg-fill-success); }
+.veda-timeline__dot--info     { background: var(--p-color-bg-fill-info); }
+
+/* ---------- Collapse chevron ---------- */
+
+.veda-chevron {
+  display: inline-flex;
+  transition: transform 150ms ease;
+}
+
+.veda-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* ---------- Grid helpers (intrinsically responsive, never overflow) ---------- */
+
+.veda-kpi-grid {
+  display: grid;
+  gap: var(--p-space-300);
+  /* auto-fit + minmax(0,…) is what keeps this from ever forcing h-scroll on
+     narrow viewports: tracks collapse to one column instead of overflowing. */
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+}
+
+.veda-split-grid {
+  display: grid;
+  gap: var(--p-space-400);
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  align-items: start;
+}
+
+/* Any long, unbreakable value (currency ranges, handles) stays inside. */
+.veda-clamp {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Motion ---------- */
+
+@keyframes veda-fade-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.veda-enter {
+  animation: veda-fade-rise 260ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .veda-card-interactive,
+  .veda-meter__fill,
+  .veda-segment,
+  .veda-chevron {
+    transition: none !important;
+  }
+
+  .veda-card-interactive:hover {
+    transform: none;
+  }
+
+  .veda-enter {
+    animation: none !important;
+  }
+}

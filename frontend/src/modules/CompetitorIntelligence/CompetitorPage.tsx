@@ -616,7 +616,18 @@ export function CompetitorPage() {
       >
         <Layout>
           <Layout.Section>
-            <ModuleInsights modules={["competitor"]} />
+            <ModuleInsights
+              modules={["competitor"]}
+              title="Competitor intelligence"
+              pressureLabel="Market pressure"
+              pressureCaption="Weighted from the urgency of current competitor price and promotion findings."
+              emptyWhy="Competitor findings only appear once VedaSuite has fresh, confidently matched competitor prices to compare against your own — stale or low-confidence matches are deliberately excluded rather than guessed at."
+              emptySteps={[
+                "Add competitor domains to track on this page",
+                "Run an analysis so competitor prices are collected",
+                "Add product cost and selling price so price gaps can be valued",
+              ]}
+            />
           </Layout.Section>
           {subscriptionLoading ? (
             <Layout.Section>

@@ -1,58 +1,112 @@
-import { BlockStack, Card, InlineStack, Spinner, Text } from "@shopify/polaris";
+import { BlockStack, Box, Icon, InlineStack, Text } from "@shopify/polaris";
+import { MagicIcon } from "@shopify/polaris-icons";
+import { EducationalEmptyState } from "../../../components/intelligence/EducationalEmptyState";
+import {
+  InsightListSkeleton,
+  KpiSkeletonGrid,
+} from "../../../components/intelligence/IntelligenceSkeletons";
 import { useInsightsDashboard } from "../../../hooks/useInsightsDashboard";
 import type { InsightModule } from "../../../lib/insightsTypes";
 import { ExplainableInsightCard } from "./ExplainableInsightCard";
+import { ModuleIntelligencePanel } from "./ModuleIntelligencePanel";
+import "../../../components/intelligence/intelligence.css";
 
-// Additive explainability panel for an existing module page. Reuses the shared
-// insights endpoint + ExplainableInsightCard. Renders nothing intrusive: a
-// compact section with the module's explainable findings. Does not touch the
-// page's existing routes, controls, ModuleGate, or layout.
+/**
+ * Additive explainability panel for an existing module page.
+ *
+ * Reuses the shared insights endpoint plus the same card and gauge components
+ * as the dashboard, so a finding reads identically wherever it appears. Never
+ * interferes with the host page: it stays silent on auth errors (the page has
+ * its own reconnect handling) and renders nothing on failure rather than
+ * showing a competing error banner.
+ */
 export function ModuleInsights({
   modules,
   title = "Explainable insights",
+  pressureLabel,
+  pressureCaption,
+  emptyWhy,
+  emptySteps,
 }: {
   modules: InsightModule[];
   title?: string;
+  pressureLabel?: string;
+  pressureCaption?: string;
+  emptyWhy?: string;
+  emptySteps?: string[];
 }) {
   const { data, loading, error, authRequired } = useInsightsDashboard();
-  const set = new Set(modules);
+  const wanted = new Set(modules);
 
-  if (authRequired) return null; // the page's own auth handling covers this
+  // The host page owns the reconnect experience — don't duplicate it here.
+  if (authRequired) return null;
 
   if (loading && !data) {
     return (
-      <Card>
-        <InlineStack align="center" gap="200" blockAlign="center">
-          <Spinner accessibilityLabel="Loading insights" size="small" />
-          <Text as="span" tone="subdued" variant="bodySm">Loading explainable insights…</Text>
-        </InlineStack>
-      </Card>
+      <BlockStack gap="300">
+        <Text as="h3" variant="headingSm">
+          {title}
+        </Text>
+        <KpiSkeletonGrid count={2} />
+        <InsightListSkeleton count={2} />
+      </BlockStack>
     );
   }
+
   if (!data || error) return null;
 
-  const all = [...data.opportunities, ...data.criticalAttention].filter((i) => set.has(i.module));
-  // de-dup by id (an item may be in both lists)
+  // An insight can appear in both lanes; show it once.
   const seen = new Set<string>();
-  const items = all.filter((i) => (seen.has(i.id) ? false : (seen.add(i.id), true)));
+  const items = [...data.opportunities, ...data.criticalAttention]
+    .filter((insight) => wanted.has(insight.module))
+    .filter((insight) => (seen.has(insight.id) ? false : (seen.add(insight.id), true)));
 
-  if (items.length === 0) {
-    return (
-      <Card>
-        <BlockStack gap="150">
-          <Text as="h3" variant="headingSm">{title}</Text>
-          <Text as="p" tone="subdued" variant="bodySm">
-            No explainable findings for this module yet. They appear as data coverage grows.
-          </Text>
-        </BlockStack>
-      </Card>
-    );
-  }
+  const relevantCoverage = data.dataCoverage.filter(
+    (entry) => entry.module === "all" || wanted.has(entry.module as InsightModule)
+  );
 
   return (
-    <BlockStack gap="200">
-      <Text as="h3" variant="headingSm">{title}</Text>
-      {items.map((i) => (<ExplainableInsightCard key={`mod-${i.id}`} insight={i} />))}
+    <BlockStack gap="400">
+      <InlineStack gap="200" blockAlign="center" wrap={false}>
+        <Box as="span">
+          <Icon source={MagicIcon} tone="info" />
+        </Box>
+        <Text as="h3" variant="headingSm">
+          {title}
+        </Text>
+      </InlineStack>
+
+      {items.length === 0 ? (
+        <EducationalEmptyState
+          title="No explainable findings for this module yet"
+          why={
+            emptyWhy ??
+            "Findings appear here once this module has enough synced history for VedaSuite to estimate impact and assign a confidence level. Nothing is shown until it can be explained."
+          }
+          steps={
+            emptySteps ?? [
+              "Keep Shopify sync running so this module accumulates history",
+              "Complete any setup this module still needs",
+              "Re-run the analysis from this page once more data has arrived",
+            ]
+          }
+        />
+      ) : (
+        <>
+          <ModuleIntelligencePanel
+            title="Module intelligence"
+            insights={items}
+            coverage={relevantCoverage}
+            pressureLabel={pressureLabel}
+            pressureCaption={pressureCaption}
+          />
+          <BlockStack gap="300">
+            {items.map((insight) => (
+              <ExplainableInsightCard key={`mod-${insight.id}`} insight={insight} />
+            ))}
+          </BlockStack>
+        </>
+      )}
     </BlockStack>
   );
 }

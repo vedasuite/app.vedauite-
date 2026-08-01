@@ -398,7 +398,18 @@ export function PricingProfitPage() {
       >
         <Layout>
           <Layout.Section>
-            <ModuleInsights modules={["pricing", "profit"]} />
+            <ModuleInsights
+              modules={["pricing", "profit"]}
+              title="Pricing & profit recommendations"
+              pressureLabel="Opportunity pressure"
+              pressureCaption="Weighted from the urgency of open pricing and margin opportunities."
+              emptyWhy="Pricing recommendations require product cost and selling price to calculate a defensible margin impact. Without cost data VedaSuite cannot tell a profitable price change from a loss-making one, so it stays silent."
+              emptySteps={[
+                "Add product cost so margin impact can be calculated",
+                "Sync product and order history for sales-velocity signals",
+                "Run a pricing analysis once cost data is in place",
+              ]}
+            />
           </Layout.Section>
           <Layout.Section>
             <Banner title="Upgrade required: Growth or Pro" tone="info">

@@ -253,7 +253,18 @@ export function FraudPage() {
       >
       <Layout>
         <Layout.Section>
-          <ModuleInsights modules={["fraud", "trust", "return_abuse"]} />
+          <ModuleInsights
+            modules={["fraud", "trust", "return_abuse"]}
+            title="Fraud & trust intelligence"
+            pressureLabel="Risk pressure"
+            pressureCaption="Weighted from the urgency of open fraud, trust and return-abuse findings."
+            emptyWhy="Fraud and return-abuse findings need a baseline before they mean anything — VedaSuite compares each shopper against your store's own refund and risk history rather than a generic threshold."
+            emptySteps={[
+              "Sync at least 50 completed orders so a store baseline can be established",
+              "Allow 90 days of order history to accumulate for return-abuse detection",
+              "Keep order webhooks registered so new high-risk orders arrive in real time",
+            ]}
+          />
         </Layout.Section>
         <Layout.Section>
           <Banner title="Fraud queue is active" tone="warning">
