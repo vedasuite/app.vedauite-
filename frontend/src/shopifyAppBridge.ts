@@ -31,7 +31,19 @@ export function bustSessionTokenCache() {
 // tab was backgrounded or during a slow request, which the backend then
 // rejects with 401. Read the real expiry and stop serving the token 10 seconds
 // before it lapses, so it is still valid when the request lands.
-const TOKEN_EXPIRY_SAFETY_MS = 10_000;
+// Shopify session tokens are short-lived (~60s). This margin is how early the
+// client stops trusting a cached token and asks App Bridge for a fresh one.
+//
+// At 10s it was too tight: a token still considered valid locally could already
+// be expired at the server once network latency and browser/server clock skew
+// were taken into account. Several components loading at once would then each
+// send the same about-to-expire token, each take a 401, and each self-heal —
+// producing the bursts of "jwt expired" seen in production.
+//
+// Widening the margin only makes the client refresh sooner. It does NOT extend
+// the token's lifetime, is not persisted anywhere, and does not weaken backend
+// verification — the server still rejects anything genuinely expired.
+const TOKEN_EXPIRY_SAFETY_MS = 25_000;
 const MAX_TOKEN_CACHE_MS = 30_000;
 
 function readTokenExpiry(token: string): number | null {

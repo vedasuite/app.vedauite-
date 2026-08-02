@@ -128,10 +128,28 @@ export function verifyShopifySessionToken(
 
     return next();
   } catch (error) {
-    logEvent("warn", "shopify.session_token.invalid", {
+    // Classify the failure so an ordinary expiry (which the client recovers
+    // from automatically with one fresh-token retry) is distinguishable from a
+    // genuinely suspicious token. Expiry is logged at info to stop routine
+    // clock-skew recoveries flooding the warning stream; everything else stays
+    // at warn. The JWT and Authorization header are never logged.
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const reason =
+      errorName === "TokenExpiredError"
+        ? "expired"
+        : errorName === "JsonWebTokenError"
+        ? "invalid_signature_or_malformed"
+        : errorName === "NotBeforeError"
+        ? "not_yet_valid"
+        : "verification_failed";
+
+    logEvent(reason === "expired" ? "info" : "warn", "shopify.session_token.invalid", {
       shop: requestedShop ?? null,
       route: req.originalUrl,
-      error,
+      reason,
+      errorName,
+      // Message only — never the token or Authorization header.
+      message: error instanceof Error ? error.message : String(error),
     });
 
     return sendAuthError(

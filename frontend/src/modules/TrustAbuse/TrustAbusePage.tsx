@@ -21,6 +21,11 @@ import { useAppState } from "../../hooks/useAppState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
+import {
+  fraudBannerFor,
+  fraudRefreshToast,
+  resolveFraudUiState,
+} from "./fraudReadinessState";
 
 type Overview = {
   subscription: { featureAccess: { supportCopilot: boolean; evidencePackExport: boolean } };
@@ -155,7 +160,17 @@ export function TrustAbusePage() {
       const res = await embeddedShopRequest<{ overview: Overview }>("/api/trust-abuse/overview", { timeoutMs: 30000 });
       setOverview(res.overview);
       setPlanLocked(false);
-      if (showToast) setToast("Fraud intelligence refreshed — data is up to date.");
+      if (showToast) {
+        // The toast must describe the state the refresh actually produced.
+        // Previously it always claimed "data is up to date", which directly
+        // contradicted the readiness banner when the module still lacked
+        // enough store activity to analyse.
+        const refreshedState = resolveFraudUiState(
+          res.overview.readiness?.readinessState,
+          res.overview.summary
+        );
+        setToast(fraudRefreshToast(refreshedState, res.overview.summary));
+      }
     } catch (err) {
       const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
       if (code === "FEATURE_LOCKED") {
@@ -176,6 +191,18 @@ export function TrustAbusePage() {
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  // Canonical fraud UI state, derived once from the backend's readiness code.
+  // `syncIssue` folds a failed request into the error state so a stale success
+  // banner is never shown over data that failed to load.
+  const fraudUiState = useMemo(
+    () => resolveFraudUiState(overview.readiness?.readinessState, overview.summary, syncIssue),
+    [overview.readiness?.readinessState, overview.summary, syncIssue]
+  );
+  const fraudBanner = useMemo(
+    () => fraudBannerFor(fraudUiState, overview.readiness?.reason),
+    [fraudUiState, overview.readiness?.reason]
+  );
 
   const actionQueue = useMemo(
     () => overview.fraudReviewQueue.slice(0, 5).map((order) => {
@@ -321,10 +348,14 @@ export function TrustAbusePage() {
             </Banner>
           </Layout.Section>
         ) : null}
-        {syncIssue || overview.readiness?.readinessState !== "READY_WITH_DATA" ? (
+        {/* One banner per real state. "Still preparing" is now reserved for
+            work genuinely in progress; a synced store without enough history
+            says so plainly, and a ready store with nothing risky gets a
+            positive confirmation instead of a warning. */}
+        {fraudBanner ? (
           <Layout.Section>
-            <Banner title={overview.readiness?.readinessState === "FAILED" ? "Fraud intelligence needs attention" : "Fraud intelligence is still preparing data"} tone={overview.readiness?.readinessState === "FAILED" ? "critical" : "warning"}>
-              <p>{overview.readiness?.reason ?? "VedaSuite will show fraud insights after more order and refund activity is available."}</p>
+            <Banner title={fraudBanner.title} tone={fraudBanner.tone}>
+              <p>{fraudBanner.body}</p>
             </Banner>
           </Layout.Section>
         ) : null}
