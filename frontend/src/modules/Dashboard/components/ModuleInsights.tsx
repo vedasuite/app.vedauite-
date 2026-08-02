@@ -66,6 +66,13 @@ export function ModuleInsights({
     (entry) => entry.module === "all" || wanted.has(entry.module as InsightModule)
   );
 
+  // How much data the engine actually analysed for this module. Used only to
+  // tell "nothing has been analysed" apart from "analysed, but nothing met the
+  // evidence bar" — the engine's own coverage figure, not a new calculation.
+  const monitoredRows = relevantCoverage
+    .filter((entry) => entry.module !== "all")
+    .reduce((total, entry) => total + Math.max(0, entry.rowsAvailable), 0);
+
   return (
     <div className="veda-band">
       <SectionHeader
@@ -82,20 +89,41 @@ export function ModuleInsights({
       />
 
       {items.length === 0 ? (
-        <EducationalEmptyState
-          title="No explainable findings for this module yet"
-          why={
-            emptyWhy ??
-            "Findings appear here once this module has enough synced history for VedaSuite to estimate impact and assign a confidence level. Nothing is shown until it can be explained."
-          }
-          steps={
-            emptySteps ?? [
-              "Keep Shopify sync running so this module accumulates history",
-              "Complete any setup this module still needs",
-              "Re-run the analysis from this page once more data has arrived",
-            ]
-          }
-        />
+        monitoredRows > 0 ? (
+          // Activity HAS been analysed, but nothing cleared the evidence bar.
+          // Saying "no explainable findings" alone read as "nothing happened",
+          // directly contradicting the activity counts shown elsewhere on the
+          // page. This states both facts truthfully without inventing a
+          // recommendation or lowering any threshold.
+          <EducationalEmptyState
+            title="Activity detected — no recommendations yet"
+            why={`VedaSuite analysed ${monitoredRows.toLocaleString()} record${
+              monitoredRows === 1 ? "" : "s"
+            } for this module and detected activity, but none of it currently meets the confidence required for an AI recommendation. Recommendations are generated only when there is enough supporting evidence to explain and quantify them.`}
+            steps={
+              emptySteps ?? [
+                "Add product cost and selling price so margin impact can be calculated",
+                "Let more order history accumulate to strengthen match confidence",
+                "Keep monitoring running — findings appear automatically once evidence is sufficient",
+              ]
+            }
+          />
+        ) : (
+          <EducationalEmptyState
+            title="No explainable findings for this module yet"
+            why={
+              emptyWhy ??
+              "Findings appear here once this module has enough synced history for VedaSuite to estimate impact and assign a confidence level. Nothing is shown until it can be explained."
+            }
+            steps={
+              emptySteps ?? [
+                "Keep Shopify sync running so this module accumulates history",
+                "Complete any setup this module still needs",
+                "Re-run the analysis from this page once more data has arrived",
+              ]
+            }
+          />
+        )
       ) : (
         <>
           <ModuleIntelligencePanel
