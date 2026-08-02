@@ -1,6 +1,7 @@
 import axios from "axios";
 import { prisma } from "../db/prismaClient";
 import { env } from "../config/env";
+import { resolveTrialWindowForInstall } from "./trialEligibilityService";
 import { logEvent } from "./observabilityService";
 
 export type ShopifyConnectionCode =
@@ -344,6 +345,18 @@ export async function exchangeSessionTokenForOfflineToken(
       ? new Date(now.getTime() + response.data.refresh_token_expires_in * 1000)
       : null;
 
+  // Prisma's upsert only reaches `create` when no Store row exists yet for
+  // this shop at all. That alone does NOT prove this is a genuine first
+  // installation — the Store row may have been hard-deleted by shop/redact
+  // or the retention sweep after a prior uninstall. resolveTrialWindowForInstall
+  // checks the durable ShopTrialHistory record (which survives that deletion)
+  // before ever treating this as new, and returns null rather than guessing
+  // if eligibility can't be resolved. The `update` branch below intentionally
+  // never touches trial fields, so an existing store's window is preserved.
+  const trialWindow = await resolveTrialWindowForInstall(normalizedShop, now, null);
+  const trialStartedAt = trialWindow?.trialStartedAt ?? null;
+  const trialEndsAt = trialWindow?.trialEndsAt ?? null;
+
   const store = await prisma.store.upsert({
     where: { shop: normalizedShop },
     create: {
@@ -367,6 +380,8 @@ export async function exchangeSessionTokenForOfflineToken(
       authErrorMessage: null,
       lastWebhookRegistrationStatus: "PENDING",
       lastSyncStatus: "PENDING",
+      trialStartedAt,
+      trialEndsAt,
     },
     update: {
       accessToken: response.data.access_token,
@@ -388,6 +403,20 @@ export async function exchangeSessionTokenForOfflineToken(
       authErrorMessage: null,
     },
   });
+
+  // resolveTrialWindowForInstall already logs its own detailed outcome
+  // (granted / backfilled / durable history reused / failed). Only surface
+  // the fail-closed case here, since that's this call site's responsibility
+  // to notice: a brand-new Store row with no trial dates at all.
+  if (!store.trialStartedAt || !store.trialEndsAt) {
+    if (!store.uninstalledAt) {
+      logEvent("warn", "billing.trial_eligibility_unresolved_manual_review", {
+        shop: normalizedShop,
+        route: "token_exchange",
+        reason: "trial eligibility could not be resolved this request — no trial dates set, needs manual review",
+      });
+    }
+  }
 
   logEvent("info", "shopify.connection.session_token_exchanged", {
     shop: normalizedShop,

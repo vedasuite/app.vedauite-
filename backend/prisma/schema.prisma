@@ -63,6 +63,33 @@ model Store {
   updatedAt DateTime @updatedAt
 }
 
+/// Immutable, durable record of a shop's one-time trial grant — independent
+/// of the Store row's lifecycle.
+///
+/// Store rows are hard-deleted (`prisma.store.delete`, see
+/// privacyService.deleteStoreCompletely) on Shopify's shop/redact webhook or
+/// the retention-sweep backstop, cascading away trialStartedAt/trialEndsAt
+/// with everything else. Without a separate record, a shop that uninstalls,
+/// is purged, and reinstalls later would look like a genuine first
+/// installation and receive a second trial.
+///
+/// Deliberately has NO relation/foreign key to Store, so it is never
+/// touched by Store's ON DELETE CASCADE and survives a full data purge. It
+/// holds no customer or order data — only the shop's own domain and trial
+/// timestamps — so retaining it through a redaction is a legitimate
+/// trial-abuse-prevention record, not personal data subject to erasure.
+///
+/// Written exactly once per shop, on genuine first installation. Never
+/// updated or deleted by any code path in this app.
+model ShopTrialHistory {
+  id               String   @id @default(cuid())
+  shop             String   @unique
+  firstInstalledAt DateTime
+  trialStartedAt   DateTime
+  trialEndsAt      DateTime
+  createdAt        DateTime @default(now())
+}
+
 model ProductSnapshot {
   id               String   @id @default(cuid())
   store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
@@ -102,7 +129,11 @@ model SubscriptionPlan {
   id        String   @id @default(cuid())
   name      String   @unique
   price     Float
-  trialDays Int      @default(3)
+  // Matches env.billing.trialDays (BILLING_PLAN_TRIAL_DAYS, default 7) — the
+  // single runtime source of truth for trial length. This default only
+  // matters if a row is ever created without explicitly setting trialDays;
+  // every current code path does set it explicitly.
+  trialDays Int      @default(7)
   features  String // JSON string describing enabled modules
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

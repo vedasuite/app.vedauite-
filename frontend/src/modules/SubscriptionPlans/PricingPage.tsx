@@ -59,6 +59,10 @@ type BillingManagementState = {
     renewalAt: string | null;
     showRenewalDate: boolean;
     showTrialDate: boolean;
+    /** Canonical trial-active flag — independent of planName/paid subscription state. */
+    trialActive: boolean;
+    trialEndsAt: string | null;
+    trialDaysRemaining: number;
     subscriptionId: string | null;
     shopifyChargeId: string | null;
     planSource: string;
@@ -134,7 +138,6 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     includedFeatureBullets: [
       "Choose Fraud & Return Protection",
       "Or choose Competitor Intelligence",
-      "Up to 2 tracked competitors",
     ],
     idealFor: "Small stores that want one focused workflow first.",
   },
@@ -143,7 +146,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     priceLabel: "$49/month",
     summary: "Advanced competitor and pricing intelligence.",
     featureBullets: [
-      "AI pricing recommendations",
+      "AI pricing recommendations (limited — full Profit Optimization is Pro-only)",
       "Automated competitor monitoring",
       "Product match detection",
       "Pricing change alerts",
@@ -152,8 +155,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     includedFeatureBullets: [
       "Trust & Abuse",
       "Competitor Intelligence",
-      "Pricing & Profit",
-      "Reports",
+      "Pricing & Profit (limited)",
     ],
     idealFor: "Stores that want competitor, pricing, and risk insights together.",
     recommended: true,
@@ -172,8 +174,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     includedFeatureBullets: [
       "Trust & Abuse",
       "Competitor Intelligence",
-      "Pricing & Profit",
-      "Reports",
+      "Pricing & Profit (complete)",
       "Advanced Pro features",
     ],
     idealFor: "Stores that need pricing, risk, competitor, and profit insights in one app.",
@@ -229,17 +230,6 @@ function actionLabel(action: BillingPlanCard["action"]) {
     default:
       return "Switch";
   }
-}
-
-/** " · 4 days left" — omitted entirely when the date is unusable. */
-function trialDaysRemaining(trialEndsAt: string | null | undefined): string {
-  if (!trialEndsAt) return "";
-  const endsAt = new Date(trialEndsAt).getTime();
-  if (!Number.isFinite(endsAt)) return "";
-  const msLeft = endsAt - Date.now();
-  if (msLeft <= 0) return "";
-  const daysLeft = Math.ceil(msLeft / 86_400_000);
-  return ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -471,7 +461,11 @@ export function PricingPage() {
         billing.showRenewalDate
           ? billing.renewalAt ?? billing.endsAt
           : null,
-      trialEndsAt: billing.showTrialDate ? subscription.trialEndsAt : null,
+      // Canonical trial fields, read directly from billing state — the same
+      // source Dashboard and Onboarding use — never re-derived from status.
+      trialActive: billing.trialActive,
+      trialEndsAt: billing.showTrialDate ? billing.trialEndsAt : null,
+      trialDaysRemaining: billing.trialDaysRemaining,
       starterModule: billing.starterModule ?? subscription.starterModule,
       status: billing.status ?? subscription.status,
       merchantTitle: billing.merchantTitle,
@@ -507,17 +501,21 @@ export function PricingPage() {
       subtitle="Choose a plan, compare included features, and manage Shopify billing."
     >
       <Layout>
-        {/* Full-access trial status. Shown only while the window is genuinely
-            open, using the exact end date the backend reports — never an
-            estimated or client-computed deadline. */}
-        {currentSummary.status === "trial_active" && currentSummary.trialEndsAt ? (
+        {/* Full-access trial status. Shown only while the canonical
+            trialActive flag is true — a merchant who selected STARTER,
+            GROWTH or PRO still sees this while their trial window is open;
+            selecting a paid plan never suppresses it. Dates and days
+            remaining come straight from the backend, never re-derived. */}
+        {currentSummary.trialActive && currentSummary.trialEndsAt ? (
           <Layout.Section>
             <Banner title="7-day full-access trial" tone="info">
               <BlockStack gap="200">
                 <p>
                   {`Every module is unlocked until ${formatDate(
                     currentSummary.trialEndsAt
-                  )}${trialDaysRemaining(currentSummary.trialEndsAt)}.`}
+                  )} · ${currentSummary.trialDaysRemaining} day${
+                    currentSummary.trialDaysRemaining === 1 ? "" : "s"
+                  } left.`}
                 </p>
                 <p>
                   {currentSummary.planName && currentSummary.planName !== "NONE"

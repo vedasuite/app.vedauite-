@@ -4,7 +4,7 @@ import { logEvent } from "./observabilityService";
 import { getUnifiedReadinessState } from "./readinessEngineService";
 import { getConnectionHealth } from "./shopifyConnectionService";
 import { getStoreReadinessState } from "./storeReadinessService";
-import { getCurrentSubscription, resolveBillingState } from "./subscriptionService";
+import { resolveBillingState } from "./subscriptionService";
 
 type MerchantOnboardingAppState = Awaited<
   ReturnType<typeof getOnboardingState>
@@ -39,6 +39,7 @@ export type MerchantAppState = {
       endsAt: string | null;
       trialEndsAt: string | null;
       trialActive: boolean;
+      trialDaysRemaining: number;
       title: string;
       description: string;
     };
@@ -181,9 +182,8 @@ const FALLBACK_STORE_READINESS: Awaited<ReturnType<typeof getStoreReadinessState
 } as any;
 
 export async function getMerchantAppState(shopDomain: string): Promise<MerchantAppState> {
-  const [health, subscription, billing, onboarding, dashboard, readiness, storeReadiness] = await Promise.all([
+  const [health, billing, onboarding, dashboard, readiness, storeReadiness] = await Promise.all([
     getConnectionHealth(shopDomain, { probeApi: false }),
-    getCurrentSubscription(shopDomain),
     resolveBillingState(shopDomain),
     getOnboardingState(shopDomain),
     getDashboardMetrics(shopDomain),
@@ -260,11 +260,12 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       active: billing.lifecycle === "active",
       accessActive: billing.accessActive,
       endsAt: billing.showRenewalDate ? billing.renewalAt : null,
-      trialEndsAt: billing.showTrialDate ? subscription.trialEndsAt : null,
-      // Canonical active-trial flag from the shared entitlement resolver, so
-      // Onboarding and the Dashboard render the same trial state as Billing
-      // instead of inferring one from trialEndsAt.
-      trialActive: storeReadiness.billing.trialActive,
+      // Read directly from the canonical billing state (resolveBillingState)
+      // — the same source Billing itself uses — instead of a separate
+      // storeReadiness/entitlements hop that could drift.
+      trialEndsAt: billing.showTrialDate ? billing.trialEndsAt : null,
+      trialActive: billing.trialActive,
+      trialDaysRemaining: billing.trialDaysRemaining,
       title: billing.merchantTitle,
       description: billing.merchantDescription,
     },

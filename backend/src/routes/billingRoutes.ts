@@ -146,12 +146,12 @@ billingApiRouter.post("/confirm-return", async (req, res) => {
       intentId: body.intentId ?? null,
     });
     const entitlements = buildCanonicalEntitlements({
-      planName: result.billing.planName,
+      planName: result.billing.selectedPlanName,
       starterModule: result.billing.starterModule,
       accessActive: result.billing.accessActive,
       verified: result.billing.verified,
-      trialActive:
-        result.billing.planName === "TRIAL" && result.billing.accessActive,
+      // Canonical flag, read directly from billing state — never re-derived.
+      trialActive: result.billing.trialActive,
     });
     return res.json({
       result,

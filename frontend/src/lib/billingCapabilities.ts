@@ -153,6 +153,9 @@ export type SubscriptionInfo = {
   endsAt?: string | null;
   trialStartedAt?: string | null;
   trialEndsAt?: string | null;
+  /** Canonical trial-active flag from the backend — never inferred client-side. */
+  trialActive?: boolean;
+  trialDaysRemaining?: number;
   status?: SubscriptionLifecycleStatus;
   billingStatus?: string | null;
   starterModuleSwitchAvailableAt?: string | null;
@@ -407,6 +410,8 @@ export const fallbackSubscription: SubscriptionInfo = {
   endsAt: null,
   trialStartedAt: null,
   trialEndsAt: null,
+  trialActive: false,
+  trialDaysRemaining: 0,
   status: "inactive",
   billingStatus: "INACTIVE",
   starterModuleSwitchAvailableAt: null,
@@ -424,16 +429,27 @@ export function normalizeSubscriptionInfo(
 
   const planName = normalizeBillingPlanName(value.planName);
   const starterModule = normalizeStarterModule(value.starterModule);
+  // The canonical trialActive flag comes from the backend. Falling back to
+  // isTrialWindowOpen (a client-side date guess) only happens when the
+  // backend payload omits it entirely, which should never occur — surface
+  // that as a console warning instead of silently guessing, so any future
+  // API contract drift is visible in the field rather than invisible.
+  const trialActive =
+    typeof value.trialActive === "boolean" ? value.trialActive : isTrialWindowOpen(value);
+  if (typeof value.trialActive !== "boolean" && typeof console !== "undefined") {
+    console.warn(
+      "[billing] subscription payload missing trialActive — falling back to a client-side date guess. This indicates a backend/frontend contract drift."
+    );
+  }
   const capabilities =
-    value.capabilities ??
-    buildCapabilities(planName, starterModule, { trialActive: isTrialWindowOpen(value) });
+    value.capabilities ?? buildCapabilities(planName, starterModule, { trialActive });
   const enabledModules =
     value.enabledModules ?? buildModuleAccess(planName, starterModule);
   const featureAccess =
     value.featureAccess ?? buildFeatureAccess(planName, starterModule);
   const status =
     value.status ??
-    (planName === "TRIAL"
+    (trialActive
       ? "trial_active"
       : planName === "NONE"
       ? "inactive"
@@ -441,20 +457,29 @@ export function normalizeSubscriptionInfo(
   const billingStatus =
     value.billingStatus ?? (planName === "NONE" ? "INACTIVE" : "ACTIVE");
 
+  // trialDays must come from the backend. A missing value is reported as 0
+  // (an explicit "unavailable" state) rather than inventing 3 or 7 days.
+  if (typeof value.trialDays !== "number" && typeof console !== "undefined" && trialActive) {
+    console.warn(
+      "[billing] subscription payload missing trialDays while trialActive is true — reporting 0 instead of guessing a duration."
+    );
+  }
+
   return {
     planName,
     price: typeof value.price === "number" ? value.price : getPlanPrice(planName),
-    trialDays: typeof value.trialDays === "number" ? value.trialDays : planName === "TRIAL" ? 3 : 0,
+    trialDays: typeof value.trialDays === "number" ? value.trialDays : 0,
     starterModule,
     active:
       typeof value.active === "boolean"
         ? value.active
-        : planName !== "NONE" && planName !== "TRIAL"
-        ? true
-        : planName === "TRIAL",
+        : planName !== "NONE" || trialActive,
     endsAt: value.endsAt ?? null,
     trialStartedAt: value.trialStartedAt ?? null,
     trialEndsAt: value.trialEndsAt ?? null,
+    trialActive,
+    trialDaysRemaining:
+      typeof value.trialDaysRemaining === "number" ? value.trialDaysRemaining : 0,
     status,
     billingStatus,
     starterModuleSwitchAvailableAt: value.starterModuleSwitchAvailableAt ?? null,

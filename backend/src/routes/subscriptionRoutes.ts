@@ -22,11 +22,12 @@ subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), asy
   const plan = await getCurrentSubscription(shop);
   const billingState = await resolveBillingState(shop);
   const entitlements = buildCanonicalEntitlements({
-    planName: billingState.planName,
+    planName: billingState.selectedPlanName,
     starterModule: billingState.starterModule,
     accessActive: billingState.accessActive,
     verified: billingState.verified,
-    trialActive: billingState.planName === "TRIAL" && billingState.accessActive,
+    // Canonical flag, read directly from billingState — never re-derived.
+    trialActive: billingState.trialActive,
   });
   const billing = await getBillingManagementState(shop).catch(() => null);
   return res.json({ subscription: plan, billingState, entitlements, billing });

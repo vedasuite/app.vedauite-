@@ -40,7 +40,8 @@ export async function getStoreReadinessState(shopDomain: string) {
       // Onboarding and the Dashboard can display the same trial state as the
       // Billing page without inferring it from a date.
       trialActive: entitlements.trialActive,
-      trialEndsAt: subscription.trialEndsAt,
+      trialEndsAt: entitlements.trialEndsAt,
+      trialDaysRemaining: entitlements.trialDaysRemaining,
       starterModule: entitlements.starterModule,
       enabledModules: {
         fraud: entitlements.enabledModules.includes("fraud"),

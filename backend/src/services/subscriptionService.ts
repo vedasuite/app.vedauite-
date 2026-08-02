@@ -10,7 +10,6 @@ import {
   buildCapabilities,
   buildFeatureAccessFromCapabilities,
   buildModuleAccessFromCapabilities,
-  DEFAULT_TRIAL_DAYS,
   getPlanPrice,
   normalizePlanName,
   resolveEntitlements as resolveEntitlementsForPlan,
@@ -22,6 +21,7 @@ import {
   type StarterModule,
   type SubscriptionLifeCycleStatus,
 } from "../billing/capabilities";
+import { computeTrialState } from "../billing/trialState";
 import { logEvent } from "./observabilityService";
 
 export type {
@@ -45,6 +45,8 @@ export type ResolvedBillingState = {
     | "uninstalled"
     | "unknown_error";
   planName: BillingPlanName;
+  /** Alias of `planName` — the plan the merchant selected/is billed for. */
+  selectedPlanName: BillingPlanName;
   planTier: "none" | "trial" | "starter" | "growth" | "pro";
   normalizedBillingStatus: string | null;
   active: boolean;
@@ -55,7 +57,26 @@ export type ResolvedBillingState = {
   endsAt: string | null;
   renewalAt: string | null;
   showRenewalDate: boolean;
+  /**
+   * Canonical trial-active flag. Computed once from persisted Store trial
+   * dates only (billing/trialState.ts) — never from planName, never from
+   * whether a paid subscription is active. A merchant can have
+   * selectedPlanName=PRO and trialActive=true at the same time.
+   */
+  trialActive: boolean;
+  trialStartedAt: string | null;
+  trialEndsAt: string | null;
+  trialDaysRemaining: number;
+  /** True when trial dates are not both persisted — read-only signal, never backfilled. */
+  trialDatesIncomplete: boolean;
+  /** Mirrors trialActive — kept as a separate field for existing consumers. */
   showTrialDate: boolean;
+  /** "trial" while trialActive, otherwise the tier implied by selectedPlanName. */
+  accessTier: "none" | "trial" | "starter" | "growth" | "pro";
+  /** Alias of normalizedBillingStatus. */
+  subscriptionStatus: string | null;
+  /** Alias of lifecycle — the merchant-facing display status. */
+  billingDisplayStatus: ResolvedBillingState["lifecycle"];
   subscriptionId: string | null;
   shopifyChargeId: string | null;
   planSource: "database" | "shopify_reconciled" | "trial" | "none";
@@ -106,24 +127,6 @@ type StoreWithSubscription = Prisma.StoreGetPayload<
   typeof storeWithSubscriptionArgs
 >;
 
-function getTrialEndsAt(trialStartedAt?: Date | null, trialEndsAt?: Date | null) {
-  if (trialEndsAt) {
-    return trialEndsAt;
-  }
-
-  if (!trialStartedAt) {
-    return null;
-  }
-
-  const next = new Date(trialStartedAt);
-  next.setDate(next.getDate() + env.billing.trialDays);
-  return next;
-}
-
-function isDateInFuture(value?: Date | null) {
-  return !!value && value.getTime() > Date.now();
-}
-
 function normalizeTier(planName: BillingPlanName): ResolvedBillingState["planTier"] {
   switch (planName) {
     case "TRIAL":
@@ -164,8 +167,15 @@ export function deriveCanonicalBillingLifecycle(input: {
   accessActive: boolean;
   billingStatus: string | null;
   isTestCharge: boolean;
+  /**
+   * Canonical trial-active flag (billing/trialState.ts). Optional/defaulted
+   * to false only so existing call sites that predate the trial fix keep
+   * compiling — every live caller in this codebase now passes it explicitly.
+   */
+  trialActive?: boolean;
 }) {
   void input.isTestCharge;
+  const trialActive = input.trialActive ?? false;
 
   if (input.uninstalled) {
     return "uninstalled" as const;
@@ -184,13 +194,13 @@ export function deriveCanonicalBillingLifecycle(input: {
   }
 
   if (
-    (input.planName === "TRIAL" && input.accessActive) ||
+    trialActive ||
     (input.planName !== "NONE" && input.accessActive && isActiveBillingStatus(input.billingStatus))
   ) {
     return "active" as const;
   }
 
-  if (input.planName === "NONE") {
+  if (input.planName === "NONE" && !trialActive) {
     return "no_subscription" as const;
   }
 
@@ -200,6 +210,7 @@ export function deriveCanonicalBillingLifecycle(input: {
 function buildMerchantBillingCopy(input: {
   lifecycle: ResolvedBillingState["lifecycle"];
   planName: BillingPlanName;
+  trialActive: boolean;
   pendingRequestedPlanName: BillingPlanName | null;
   accessActive: boolean;
   endsAt: Date | null;
@@ -216,17 +227,24 @@ function buildMerchantBillingCopy(input: {
           : "Open Shopify billing and approve the requested plan before VedaSuite updates your subscription.",
       };
     case "active":
+      // trialActive is checked first and independently of planName — a
+      // merchant can have selectedPlanName=PRO (or any paid plan) while still
+      // inside their local trial window, and must see trial copy, not "PRO
+      // plan is active".
+      if (input.trialActive) {
+        return {
+          title: "Trial access is active",
+          description: input.trialEndsAt
+            ? `Your trial is active until ${input.trialEndsAt.toLocaleString()}.${
+                input.planName !== "NONE" ? ` ${input.planName} starts when it ends.` : ""
+              }`
+            : "Your trial is active.",
+        };
+      }
       return {
-        title:
-          input.planName === "TRIAL"
-            ? "Trial access is active"
-            : `${input.planName} plan is active`,
+        title: `${input.planName} plan is active`,
         description:
-          input.planName === "TRIAL"
-            ? input.trialEndsAt
-              ? `Your trial is active until ${input.trialEndsAt.toLocaleString()}.`
-              : "Your trial is active."
-            : "Your subscription is active and included features are available.",
+          "Your subscription is active and included features are available.",
       };
     case "test_charge":
       return {
@@ -339,16 +357,22 @@ export function buildCanonicalEntitlements(input: {
 
 function deriveLifecycleStatus(input: {
   planName: BillingPlanName;
+  /** Canonical trial-active flag — never inferred from planName. */
+  trialActive: boolean;
+  /** Whether trial dates were ever persisted, regardless of whether still open. */
+  hadTrial: boolean;
   active: boolean;
   billingStatus: string | null;
-  trialEndsAt: Date | null;
 }): SubscriptionLifeCycleStatus {
-  if (input.planName === "TRIAL") {
-    return isDateInFuture(input.trialEndsAt) ? "trial_active" : "trial_expired";
+  if (input.trialActive) {
+    return "trial_active";
   }
 
   if (input.planName === "NONE") {
-    return input.billingStatus === "CANCELLED" ? "cancelled" : "inactive";
+    if (input.billingStatus === "CANCELLED") {
+      return "cancelled";
+    }
+    return input.hadTrial ? "trial_expired" : "inactive";
   }
 
   if (input.billingStatus === "CANCELLED") {
@@ -415,28 +439,6 @@ function logSubscriptionSaved(input: {
   logEvent("info", "billing.subscription_saved", input);
 }
 
-async function ensureStoreTrialState(store: { id: string; trialStartedAt: Date | null; trialEndsAt: Date | null; }) {
-  if (store.trialStartedAt && store.trialEndsAt) {
-    return {
-      trialStartedAt: store.trialStartedAt,
-      trialEndsAt: store.trialEndsAt,
-    };
-  }
-
-  const trialStartedAt = store.trialStartedAt ?? new Date();
-  const trialEndsAt = getTrialEndsAt(trialStartedAt, store.trialEndsAt);
-
-  await prisma.store.update({
-    where: { id: store.id },
-    data: {
-      trialStartedAt,
-      trialEndsAt,
-    },
-  });
-
-  return { trialStartedAt, trialEndsAt };
-}
-
 function buildSubscriptionPayload(input: {
   planName: BillingPlanName;
   price: number;
@@ -446,6 +448,9 @@ function buildSubscriptionPayload(input: {
   endsAt: Date | null;
   trialStartedAt: Date | null;
   trialEndsAt: Date | null;
+  /** Canonical trial-active flag, passed in — never re-derived here. */
+  trialActive: boolean;
+  trialDaysRemaining: number;
   billingStatus: string | null;
   starterModuleSwitchAvailableAt?: Date | null;
 }): CurrentSubscription {
@@ -454,7 +459,7 @@ function buildSubscriptionPayload(input: {
     starterModule: input.starterModule,
     accessActive: input.active,
     verified: true,
-    trialActive: isDateInFuture(input.trialEndsAt),
+    trialActive: input.trialActive,
   });
   const capabilities = entitlement.capabilities;
 
@@ -467,11 +472,14 @@ function buildSubscriptionPayload(input: {
     endsAt: input.endsAt?.toISOString() ?? null,
     trialStartedAt: input.trialStartedAt?.toISOString() ?? null,
     trialEndsAt: input.trialEndsAt?.toISOString() ?? null,
+    trialActive: input.trialActive,
+    trialDaysRemaining: input.trialDaysRemaining,
     status: deriveLifecycleStatus({
       planName: entitlement.planName,
+      trialActive: input.trialActive,
+      hadTrial: !!input.trialEndsAt,
       active: entitlement.accessActive,
       billingStatus: input.billingStatus,
-      trialEndsAt: input.trialEndsAt,
     }),
     billingStatus: input.billingStatus,
     starterModuleSwitchAvailableAt:
@@ -581,6 +589,23 @@ function isPaidSubscriptionActive(subscription?: { active: boolean; endsAt: Date
   return subscription.endsAt.getTime() > Date.now();
 }
 
+/**
+ * The canonical billing-state resolver. Every backend consumer (Billing,
+ * Dashboard, Onboarding, app-state, entitlement resolution) must call this —
+ * or read from its return value — rather than re-deriving trial or
+ * subscription state independently.
+ *
+ * Read-only: never initializes, extends, or persists trial dates. Trial
+ * dates are written exactly once, only on genuine first installation
+ * (authRoutes.ts / shopifyConnectionService.ts). A temporary Shopify
+ * reconciliation failure here never creates, extends, or reactivates a
+ * trial — it just leaves the persisted subscription state as-is.
+ *
+ * The open local trial and an active paid subscription are independent,
+ * additive facts: a merchant can have selectedPlanName=PRO (an active
+ * Shopify subscription) AND trialActive=true (their local 7-day window
+ * hasn't closed yet) at the same time. Neither one suppresses the other.
+ */
 export async function resolveBillingState(
   shopDomain: string
 ): Promise<ResolvedBillingState> {
@@ -593,7 +618,20 @@ export async function resolveBillingState(
     throw new HttpError(404, "Store not found.");
   }
 
-  const { trialEndsAt } = await ensureStoreTrialState(store);
+  // Canonical trial state — read-only, derived purely from persisted dates.
+  const trial = computeTrialState({
+    trialStartedAt: store.trialStartedAt,
+    trialEndsAt: store.trialEndsAt,
+  });
+
+  if (trial.trialDatesIncomplete && !store.uninstalledAt) {
+    logEvent("warn", "billing.trial_dates_incomplete", {
+      shop: shopDomain,
+      hasTrialStartedAt: !!store.trialStartedAt,
+      hasTrialEndsAt: !!store.trialEndsAt,
+    });
+  }
+
   const dbPlanName = normalizePlanName(store.subscription?.plan?.name) ?? "NONE";
   const dbBillingStatus = store.subscription?.billingStatus ?? null;
   const latestIntent = store.billingPlanIntents[0] ?? null;
@@ -603,256 +641,166 @@ export async function resolveBillingState(
   const pendingRequestedStarterModule = normalizeStarterModule(
     latestIntent?.requestedStarterModule
   );
+
   let subscription = store.subscription;
-  let planSource: ResolvedBillingState["planSource"] = "none";
   let reconciledFromShopify = false;
 
   if (!isPaidSubscriptionActive(subscription) || !subscription?.plan) {
-    const reconciled = await reconcileCurrentSubscriptionFromShopify(store).catch(() => null);
+    const reconciled = await reconcileCurrentSubscriptionFromShopify(store).catch((error) => {
+      // A reconciliation failure must never create, extend, or reactivate a
+      // trial or subscription — just fall back to whatever is persisted.
+      logEvent("warn", "billing.shopify_reconciliation_failed", {
+        shop: shopDomain,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
     if (reconciled) {
       subscription = reconciled;
       reconciledFromShopify = true;
     }
   }
 
-  if (subscription?.plan && isPaidSubscriptionActive(subscription)) {
-    const planName = normalizePlanName(subscription.plan.name) ?? "NONE";
-    const accessActive = subscription.active && isPaidSubscriptionActive(subscription);
-    const lifecycle = deriveCanonicalBillingLifecycle({
-      uninstalled: !!store.uninstalledAt,
-      pendingApproval: isPendingIntentStatus(pendingIntentStatus),
-      planName,
-      accessActive,
-      billingStatus: subscription.billingStatus,
-      isTestCharge: env.billing.testMode,
-    });
-    const merchantCopy = buildMerchantBillingCopy({
-      lifecycle,
-      planName,
-      pendingRequestedPlanName,
-      accessActive,
-      endsAt: subscription.endsAt ?? null,
-      trialEndsAt,
-    });
-    planSource = reconciledFromShopify ? "shopify_reconciled" : "database";
-    return {
-      lifecycle,
-      planName,
-      planTier: normalizeTier(planName),
-      normalizedBillingStatus: subscription.billingStatus,
-      active: lifecycle === "active",
-      accessActive,
-      verified: lifecycle !== "unknown_error",
-      status: deriveLifecycleStatus({
-        planName,
-        active: accessActive,
-        billingStatus: subscription.billingStatus,
-        trialEndsAt,
-      }),
-      starterModule: normalizeStarterModule(subscription.starterModule),
-      endsAt: subscription.endsAt?.toISOString() ?? null,
-      renewalAt:
-        lifecycle === "active" || (lifecycle === "cancelled" && accessActive)
-          ? subscription.endsAt?.toISOString() ?? null
-          : null,
-      showRenewalDate:
-        lifecycle === "active" ||
-        (lifecycle === "cancelled" && accessActive),
-      showTrialDate: false,
-      subscriptionId: subscription.id,
-      shopifyChargeId: subscription.shopifyChargeId ?? null,
-      planSource,
-      dbPlanName,
-      dbBillingStatus,
-      lastBillingSyncAt: subscription.lastBillingSyncAt?.toISOString() ?? null,
-      lastBillingWebhookProcessedAt:
-        (subscription as any).lastBillingWebhookProcessedAt?.toISOString() ?? null,
-      lastBillingResolutionSource:
-        (subscription as any).lastBillingResolutionSource ?? null,
-      pendingIntentStatus,
-      pendingRequestedPlanName,
-      pendingRequestedStarterModule,
-      merchantTitle: merchantCopy.title,
-      merchantDescription: merchantCopy.description,
-      mismatchWarnings:
-        dbPlanName !== "NONE" && dbPlanName !== planName
-          ? [
-              `Persisted DB plan ${dbPlanName} does not match effective plan ${planName}.`,
-            ]
-          : [],
-    };
-  }
+  const hasActivePaidSubscription = !!(
+    subscription?.plan && isPaidSubscriptionActive(subscription)
+  );
+  const selectedPlanName: BillingPlanName = hasActivePaidSubscription
+    ? normalizePlanName(subscription!.plan.name) ?? "NONE"
+    : "NONE";
+  const subscriptionBillingStatus = hasActivePaidSubscription
+    ? subscription!.billingStatus
+    : null;
 
-  if (isDateInFuture(trialEndsAt)) {
-    const lifecycle = deriveCanonicalBillingLifecycle({
-      uninstalled: !!store.uninstalledAt,
-      pendingApproval: isPendingIntentStatus(pendingIntentStatus),
-      planName: "TRIAL",
-      accessActive: true,
-      billingStatus: null,
-      isTestCharge: false,
-    });
-    const merchantCopy = buildMerchantBillingCopy({
-      lifecycle,
-      planName: "TRIAL",
-      pendingRequestedPlanName,
-      accessActive: true,
-      endsAt: trialEndsAt,
-      trialEndsAt,
-    });
-    return {
-      lifecycle,
-      planName: "TRIAL",
-      planTier: "trial",
-      normalizedBillingStatus: null,
-      active: lifecycle === "active",
-      accessActive: true,
-      verified: lifecycle !== "unknown_error",
-      status: deriveLifecycleStatus({
-        planName: "TRIAL",
-        active: true,
-        billingStatus: null,
-        trialEndsAt,
-      }),
-      starterModule: null,
-      endsAt: trialEndsAt?.toISOString() ?? null,
-      renewalAt: null,
-      showRenewalDate: false,
-      showTrialDate: true,
-      subscriptionId: store.subscription?.id ?? null,
-      shopifyChargeId: store.subscription?.shopifyChargeId ?? null,
-      planSource: "trial",
-      dbPlanName,
-      dbBillingStatus,
-      lastBillingSyncAt: store.subscription?.lastBillingSyncAt?.toISOString() ?? null,
-      lastBillingWebhookProcessedAt:
-        (store.subscription as any)?.lastBillingWebhookProcessedAt?.toISOString() ?? null,
-      lastBillingResolutionSource:
-        (store.subscription as any)?.lastBillingResolutionSource ?? null,
-      pendingIntentStatus,
-      pendingRequestedPlanName,
-      pendingRequestedStarterModule,
-      merchantTitle: merchantCopy.title,
-      merchantDescription: merchantCopy.description,
-      mismatchWarnings: [],
-    };
-  }
+  const trialActive = trial.trialActive;
+  const accessActive =
+    trialActive || (hasActivePaidSubscription && subscription!.active);
+
+  const planSource: ResolvedBillingState["planSource"] = hasActivePaidSubscription
+    ? reconciledFromShopify
+      ? "shopify_reconciled"
+      : "database"
+    : trialActive
+    ? "trial"
+    : "none";
 
   const lifecycle = deriveCanonicalBillingLifecycle({
     uninstalled: !!store.uninstalledAt,
     pendingApproval: isPendingIntentStatus(pendingIntentStatus),
-    planName: "NONE",
-    accessActive: false,
-    billingStatus: store.subscription?.billingStatus ?? "INACTIVE",
-    isTestCharge: false,
+    planName: selectedPlanName,
+    trialActive,
+    accessActive,
+    billingStatus: subscriptionBillingStatus,
+    isTestCharge: env.billing.testMode,
   });
+
+  const endsAt = hasActivePaidSubscription ? subscription!.endsAt ?? null : null;
+  const showRenewalDate =
+    lifecycle === "active" || (lifecycle === "cancelled" && accessActive);
+
   const merchantCopy = buildMerchantBillingCopy({
     lifecycle,
-    planName: "NONE",
+    planName: selectedPlanName,
+    trialActive,
     pendingRequestedPlanName,
-    accessActive: false,
-    endsAt: store.subscription?.endsAt ?? null,
-    trialEndsAt,
+    accessActive,
+    endsAt,
+    trialEndsAt: store.trialEndsAt ?? null,
   });
+
+  const status = deriveLifecycleStatus({
+    planName: selectedPlanName,
+    trialActive,
+    hadTrial: !!store.trialEndsAt,
+    active: accessActive,
+    billingStatus: subscriptionBillingStatus,
+  });
+
+  const accessTier: ResolvedBillingState["accessTier"] = trialActive
+    ? "trial"
+    : normalizeTier(selectedPlanName);
+
   return {
     lifecycle,
-    planName: "NONE",
-    planTier: "none",
-    normalizedBillingStatus: store.subscription?.billingStatus ?? "INACTIVE",
-    active: false,
-    accessActive: false,
+    planName: selectedPlanName,
+    selectedPlanName,
+    planTier: normalizeTier(selectedPlanName),
+    normalizedBillingStatus: subscriptionBillingStatus,
+    active: lifecycle === "active",
+    accessActive,
     verified: lifecycle !== "unknown_error",
-    status: deriveLifecycleStatus({
-      planName: "NONE",
-      active: false,
-      billingStatus: store.subscription?.billingStatus ?? "INACTIVE",
-      trialEndsAt,
-    }),
-    starterModule: null,
-    endsAt:
-      store.subscription?.endsAt?.toISOString() ??
-      trialEndsAt?.toISOString() ??
-      null,
-    renewalAt: null,
-    showRenewalDate: false,
-    showTrialDate: false,
-    subscriptionId: store.subscription?.id ?? null,
-    shopifyChargeId: store.subscription?.shopifyChargeId ?? null,
-    planSource: "none",
+    status,
+    starterModule: hasActivePaidSubscription
+      ? normalizeStarterModule(subscription!.starterModule)
+      : null,
+    endsAt: endsAt?.toISOString() ?? null,
+    renewalAt: showRenewalDate ? endsAt?.toISOString() ?? null : null,
+    showRenewalDate,
+    trialActive,
+    trialStartedAt: trial.trialStartedAt,
+    trialEndsAt: trial.trialEndsAt,
+    trialDaysRemaining: trial.trialDaysRemaining,
+    trialDatesIncomplete: trial.trialDatesIncomplete,
+    showTrialDate: trialActive,
+    accessTier,
+    subscriptionStatus: subscriptionBillingStatus,
+    billingDisplayStatus: lifecycle,
+    subscriptionId: hasActivePaidSubscription
+      ? subscription!.id
+      : store.subscription?.id ?? null,
+    shopifyChargeId: hasActivePaidSubscription
+      ? subscription!.shopifyChargeId ?? null
+      : store.subscription?.shopifyChargeId ?? null,
+    planSource,
     dbPlanName,
     dbBillingStatus,
-    lastBillingSyncAt: store.subscription?.lastBillingSyncAt?.toISOString() ?? null,
-    lastBillingWebhookProcessedAt:
-      (store.subscription as any)?.lastBillingWebhookProcessedAt?.toISOString() ?? null,
-    lastBillingResolutionSource:
-      (store.subscription as any)?.lastBillingResolutionSource ?? null,
+    lastBillingSyncAt: hasActivePaidSubscription
+      ? subscription!.lastBillingSyncAt?.toISOString() ?? null
+      : null,
+    lastBillingWebhookProcessedAt: hasActivePaidSubscription
+      ? (subscription as any).lastBillingWebhookProcessedAt?.toISOString() ?? null
+      : null,
+    lastBillingResolutionSource: hasActivePaidSubscription
+      ? (subscription as any).lastBillingResolutionSource ?? null
+      : null,
     pendingIntentStatus,
     pendingRequestedPlanName,
     pendingRequestedStarterModule,
     merchantTitle: merchantCopy.title,
     merchantDescription: merchantCopy.description,
-    mismatchWarnings: [],
+    mismatchWarnings:
+      dbPlanName !== "NONE" && dbPlanName !== selectedPlanName
+        ? [
+            `Persisted DB plan ${dbPlanName} does not match effective plan ${selectedPlanName}.`,
+          ]
+        : [],
   };
 }
 
+/**
+ * Read-only. Builds the merchant-facing subscription payload purely from
+ * `resolveBillingState`'s canonical fields — no independent trial
+ * derivation, no Store writes.
+ */
 export async function getCurrentSubscription(
   shopDomain: string
 ): Promise<CurrentSubscription> {
-  const store = await prisma.store.findUnique({
-    where: { shop: shopDomain },
-    ...storeWithSubscriptionArgs,
-  });
-
-  if (!store) {
-    throw new HttpError(404, "Store not found.");
-  }
-
-  const { trialStartedAt, trialEndsAt } = await ensureStoreTrialState(store);
-
   const resolved = await resolveBillingState(shopDomain);
 
-  if (resolved.planName !== "NONE" && resolved.planName !== "TRIAL" && resolved.accessActive) {
-    return buildSubscriptionPayload({
-      planName: resolved.planName,
-      price: getPlanPrice(resolved.planName),
-      trialDays:
-        store.subscription?.plan?.trialDays ?? env.billing.trialDays,
-      starterModule: resolved.starterModule,
-      active: resolved.accessActive,
-      endsAt: resolved.endsAt ? new Date(resolved.endsAt) : null,
-      trialStartedAt,
-      trialEndsAt,
-      billingStatus: resolved.normalizedBillingStatus,
-      starterModuleSwitchAvailableAt: getStarterModuleSwitchAvailableAt(
-        store.subscription?.moduleSwitchedAt
-      ),
-    });
-  }
-
-  if (resolved.planName === "TRIAL") {
-    return buildSubscriptionPayload({
-      planName: "TRIAL",
-      price: 0,
-      trialDays: env.billing.trialDays,
-      starterModule: null,
-      active: true,
-      endsAt: trialEndsAt,
-      trialStartedAt,
-      trialEndsAt,
-      billingStatus: null,
-    });
-  }
-
   return buildSubscriptionPayload({
-    planName: "NONE",
-    price: 0,
+    planName: resolved.selectedPlanName,
+    price: getPlanPrice(resolved.selectedPlanName),
     trialDays: env.billing.trialDays,
-    starterModule: null,
-    active: false,
-    endsAt: null,
-    trialStartedAt,
-    trialEndsAt,
-    billingStatus: store.subscription?.billingStatus ?? "INACTIVE",
+    starterModule: resolved.starterModule,
+    active: resolved.accessActive,
+    endsAt: resolved.endsAt ? new Date(resolved.endsAt) : null,
+    trialStartedAt: resolved.trialStartedAt ? new Date(resolved.trialStartedAt) : null,
+    trialEndsAt: resolved.trialEndsAt ? new Date(resolved.trialEndsAt) : null,
+    trialActive: resolved.trialActive,
+    trialDaysRemaining: resolved.trialDaysRemaining,
+    billingStatus: resolved.normalizedBillingStatus,
+    // getStarterModuleSwitchAvailableAt is currently a stub that always
+    // returns null regardless of input — no Store fetch needed for it here.
+    starterModuleSwitchAvailableAt: getStarterModuleSwitchAvailableAt(null),
   });
 }
 
@@ -863,15 +811,18 @@ export async function reconcileBillingState(shopDomain: string) {
   ]);
 
   const entitlements = buildCanonicalEntitlements({
-    planName: billingState.planName,
+    planName: billingState.selectedPlanName,
     starterModule: billingState.starterModule,
     accessActive: billingState.accessActive,
     verified: billingState.verified,
-    trialActive: billingState.planName === "TRIAL" && billingState.accessActive,
+    // Canonical flag, read directly — never re-derived from planName.
+    trialActive: billingState.trialActive,
   });
 
   logEvent("info", "billing.entitlements_resolved", {
     shop: shopDomain,
+    selectedPlanName: billingState.selectedPlanName,
+    trialActive: billingState.trialActive,
     planName: entitlements.planName,
     starterModule: entitlements.starterModule,
     enabledModules: Object.entries(entitlements.modules)
@@ -908,7 +859,11 @@ export async function resolveEntitlements(shopDomain: string) {
     starterModule: entitlements.starterModule,
     enabledModules: moduleKeys.filter((key) => entitlements.modules[key]),
     lockedModules: moduleKeys.filter((key) => !entitlements.modules[key]),
-    trialActive: entitlements.tier === "trial",
+    // Canonical flag, read directly from billingState — never re-derived
+    // from entitlements.tier or planName.
+    trialActive: billingState.trialActive,
+    trialEndsAt: billingState.trialEndsAt,
+    trialDaysRemaining: billingState.trialDaysRemaining,
     accessActive: entitlements.accessActive,
   };
 }
@@ -993,7 +948,7 @@ export async function downgradeToTrial(shopDomain: string) {
       subscriptionId: store.subscription.id,
       eventType: "billing.downgraded_to_trial",
       previousPlanName: store.subscription.plan.name,
-      nextPlanName: "TRIAL",
+      nextPlanName: "NONE",
       previousStarterModule: store.subscription.starterModule,
       nextStarterModule: null,
       billingStatus: "CANCELLED",
@@ -1004,28 +959,20 @@ export async function downgradeToTrial(shopDomain: string) {
     });
   }
 
-  const trialStartedAt = new Date();
-  const trialEndsAt = getTrialEndsAt(trialStartedAt, null);
-
-  await prisma.store.update({
-    where: { id: store.id },
-    data: {
-      trialStartedAt,
-      trialEndsAt,
-    },
+  // Plan downgrade/cancellation must never grant a new trial. Trial dates on
+  // the Store row are intentionally left untouched here — whatever is
+  // already persisted (open or expired) remains authoritative, and
+  // resolveBillingState/getCurrentSubscription compute access from it
+  // independently. If the merchant's original trial window genuinely is
+  // still open, they will correctly see it as active; if it already expired,
+  // they correctly fall back to no-plan access.
+  logEvent("info", "billing.trial_reinitialization_blocked", {
+    shop: shopDomain,
+    route: "downgrade_to_trial",
+    reason: "plan downgrade/cancellation must not grant a new trial — trial dates left untouched",
   });
 
-  return buildSubscriptionPayload({
-    planName: "TRIAL",
-    price: 0,
-    trialDays: env.billing.trialDays,
-    starterModule: null,
-    active: true,
-    endsAt: trialEndsAt,
-    trialStartedAt,
-    trialEndsAt,
-    billingStatus: null,
-  });
+  return getCurrentSubscription(shopDomain);
 }
 
 export async function updateStarterModuleSelection(

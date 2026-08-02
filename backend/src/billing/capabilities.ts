@@ -99,6 +99,12 @@ export type CurrentSubscription = {
   endsAt: string | null;
   trialStartedAt: string | null;
   trialEndsAt: string | null;
+  /**
+   * Canonical trial-active flag — sourced from the single trial predicate in
+   * billing/trialState.ts, never re-derived from planName or access state.
+   */
+  trialActive: boolean;
+  trialDaysRemaining: number;
   status: SubscriptionLifeCycleStatus;
   billingStatus: string | null;
   starterModuleSwitchAvailableAt: string | null;
@@ -119,7 +125,6 @@ export type ResolvedEntitlements = {
 };
 
 export const STARTER_MODULE_SWITCH_COOLDOWN_HOURS = 24;
-export const DEFAULT_TRIAL_DAYS = 7;
 
 const PLAN_PRICE_MAP: Record<BillingPlanName, number> = {
   NONE: 0,

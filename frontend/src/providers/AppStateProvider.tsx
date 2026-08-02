@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { embeddedShopRequest } from "../lib/embeddedShopRequest";
-import { readModuleCache, writeModuleCache } from "../lib/moduleCache";
+import { clearAllModuleCaches, readModuleCache, writeModuleCache } from "../lib/moduleCache";
 import { getEmbeddedContext } from "../lib/shopifyEmbeddedContext";
 
 export type CanonicalAppState = {
@@ -36,6 +36,7 @@ export type CanonicalAppState = {
      * as "no trial" rather than inferring one from trialEndsAt.
      */
     trialActive?: boolean;
+    trialDaysRemaining?: number;
     title: string;
     description: string;
   };
@@ -328,6 +329,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       writeModuleCache(CACHE_KEY, nextAppState);
 
       if (nextAppState.install.status !== "installed") {
+        // An auth-state change (reauthorize/uninstall) invalidates every
+        // cached module state, not just app-state — a subsequent reconnect
+        // must never read pre-reconnect billing/entitlement data back.
+        clearAllModuleCaches();
         logBootstrap("installation.fetch.requires_reconnect", {
           shop,
           installStatus: nextAppState.install.status,

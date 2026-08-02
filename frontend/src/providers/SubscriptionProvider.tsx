@@ -2,6 +2,7 @@ import { createContext, ReactNode, useCallback, useEffect, useMemo, useState } f
 import { useLocation } from "react-router-dom";
 import type { BillingState, EntitlementState, SubscriptionInfo } from "../hooks/useSubscriptionPlan";
 import {
+  clearAllModuleCaches,
   clearModuleCache,
   readModuleCache,
   writeModuleCache,
@@ -131,7 +132,11 @@ export function SubscriptionProvider({ children }: Props) {
       const nextSubscription = normalizeSubscriptionInfo(payload.subscription);
       setBillingState(normalizeBillingState(payload.billingState));
       setEntitlements(normalizeEntitlementState(payload.entitlements));
-      return commitSubscription(nextSubscription, { clearCache: true });
+      // A confirmed plan change can affect more than just this provider's own
+      // cache key (e.g. the app-state cache also carries billing.trialActive)
+      // — clear every module cache, not just this one.
+      clearAllModuleCaches();
+      return commitSubscription(nextSubscription);
     },
     [commitSubscription]
   );
@@ -199,7 +204,8 @@ export function SubscriptionProvider({ children }: Props) {
           nextSubscription.starterModule === billingParams.expectedStarterModule;
 
         if (planMatches && starterMatches) {
-          commitSubscription(nextSubscription, { clearCache: true });
+          clearAllModuleCaches();
+          commitSubscription(nextSubscription);
           await refreshAppState({ silent: true }).catch(() => undefined);
           setBillingFlowState("CONFIRMED");
           setBillingMessage(

@@ -27,6 +27,7 @@ function buildHostParam(shop: string): string {
 }
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
+import { resolveTrialWindowForInstall } from "../services/trialEligibilityService";
 import { logEvent } from "../services/observabilityService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
 import {
@@ -160,10 +161,23 @@ async function persistInstallationRecord(params: {
     },
   });
 
-  const trialStartedAt = existingStore?.trialStartedAt ?? params.installedAt;
-  const trialEndsAt =
-    existingStore?.trialEndsAt ??
-    new Date(params.installedAt.getTime() + env.billing.trialDays * 24 * 60 * 60 * 1000);
+  // Durable one-trial-per-shop gate: checks ShopTrialHistory (which survives
+  // a full Store row purge and recreation) before ever treating this as a
+  // first installation. Never falls back to "now + trialDays" on its own —
+  // only this function's resolved window (or nothing) is used below.
+  const trialWindow = await resolveTrialWindowForInstall(
+    params.shop,
+    params.installedAt,
+    existingStore?.trialStartedAt && existingStore?.trialEndsAt
+      ? {
+          trialStartedAt: existingStore.trialStartedAt,
+          trialEndsAt: existingStore.trialEndsAt,
+        }
+      : null
+  );
+
+  const trialStartedAt = trialWindow?.trialStartedAt ?? existingStore?.trialStartedAt ?? null;
+  const trialEndsAt = trialWindow?.trialEndsAt ?? existingStore?.trialEndsAt ?? null;
 
   const store = await prisma.store.upsert({
     where: { shop: params.shop },
@@ -219,6 +233,28 @@ async function persistInstallationRecord(params: {
       trialEndsAt,
     },
   });
+
+  // resolveTrialWindowForInstall already logs the detailed outcome (granted
+  // for a genuine first install / backfilled from an existing Store row /
+  // reused durable history). This just covers the two cases it doesn't:
+  // an existing store whose dates were already set (normal reauth — nothing
+  // changed, logged here for visibility) and the fail-closed case where
+  // eligibility could not be resolved at all.
+  if (existingStore?.trialStartedAt && existingStore?.trialEndsAt) {
+    logEvent("info", "billing.trial_reinitialization_blocked", {
+      shop: params.shop,
+      route: "oauth_callback",
+      reason: "existing trial dates preserved — reauthorization never grants a second trial",
+      trialStartedAt: existingStore.trialStartedAt.toISOString(),
+      trialEndsAt: existingStore.trialEndsAt.toISOString(),
+    });
+  } else if (!trialStartedAt || !trialEndsAt) {
+    logEvent("warn", "billing.trial_eligibility_unresolved_manual_review", {
+      shop: params.shop,
+      route: "oauth_callback",
+      reason: "trial eligibility could not be resolved this request — no trial dates set, needs manual review",
+    });
+  }
 
   // Cancel any pending billing intents that survived from before this install.
   // This handles the race where the uninstall webhook is slow/delayed and a

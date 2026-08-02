@@ -122,7 +122,10 @@ export function createApp() {
   app.use(cookieParser());
 
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok" });
+    res.json({
+      status: "ok",
+      build: process.env.RENDER_GIT_COMMIT || "unknown",
+    });
   });
 
   app.use(
