@@ -105,6 +105,12 @@ export type CurrentSubscription = {
    */
   trialActive: boolean;
   trialDaysRemaining: number;
+  /**
+   * Is the shop still entitled to its ONE free trial? Sourced from
+   * ShopTrialHistory via resolveBillingState — never inferred from trialActive,
+   * planName, dates, or subscription state. Fails closed to false on a DB error.
+   */
+  trialEligible: boolean;
   status: SubscriptionLifeCycleStatus;
   billingStatus: string | null;
   starterModuleSwitchAvailableAt: string | null;

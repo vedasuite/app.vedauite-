@@ -26,8 +26,9 @@ subscriptionRouter.get("/plan", requireCapability("billing.planManagement"), asy
     starterModule: billingState.starterModule,
     accessActive: billingState.accessActive,
     verified: billingState.verified,
-    // Canonical flag, read directly from billingState — never re-derived.
+    // Canonical flags, read directly from billingState — never re-derived.
     trialActive: billingState.trialActive,
+    trialEligible: billingState.trialEligible,
   });
   const billing = await getBillingManagementState(shop).catch(() => null);
   return res.json({ subscription: plan, billingState, entitlements, billing });

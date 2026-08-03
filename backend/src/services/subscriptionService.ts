@@ -22,7 +22,10 @@ import {
   type SubscriptionLifeCycleStatus,
 } from "../billing/capabilities";
 import { computeTrialState } from "../billing/trialState";
-import { resolveTrialWindowOnApproval } from "./trialEligibilityService";
+import {
+  hasExistingTrialHistory,
+  resolveTrialWindowOnApproval,
+} from "./trialEligibilityService";
 import { logEvent } from "./observabilityService";
 
 export type {
@@ -70,6 +73,25 @@ export type ResolvedBillingState = {
   trialDaysRemaining: number;
   /** True when trial dates are not both persisted — read-only signal, never backfilled. */
   trialDatesIncomplete: boolean;
+  /**
+   * Is this shop still entitled to its ONE free trial?
+   *
+   * Authoritative and durable: true only when NO ShopTrialHistory row exists
+   * for the shop. Any row — active or long expired — makes this false, which is
+   * what survives uninstall/reinstall (ShopTrialHistory has no FK to Store, so
+   * it outlives a shop/redact purge). An already-running trial is also false,
+   * because starting one writes the history row.
+   *
+   * This is the ONLY field any surface may use to decide whether to promise a
+   * free trial. It must never be inferred from trialActive, planName, lifecycle,
+   * trial dates, or subscription state — none of those distinguish "never had a
+   * trial" from "already used it", which is exactly the distinction that was
+   * showing returning merchants a trial the backend would not grant.
+   *
+   * Fails CLOSED: a database error yields false, never true, so a transient
+   * failure can only under-promise. See trialEligibilityService.
+   */
+  trialEligible: boolean;
   /** Mirrors trialActive — kept as a separate field for existing consumers. */
   showTrialDate: boolean;
   /** "trial" while trialActive, otherwise the tier implied by selectedPlanName. */
@@ -208,10 +230,34 @@ export function deriveCanonicalBillingLifecycle(input: {
   return "unknown_error" as const;
 }
 
+/**
+ * Copy for a merchant with no active subscription. Split out because it is
+ * reachable from more than one lifecycle (`no_subscription`, and `cancelled`
+ * once access has lapsed) and every one of those paths must respect trial
+ * eligibility — promising a "7-day free trial" to a shop whose one trial is
+ * already spent is the bug this function exists to prevent.
+ */
+function buildChoosePlanCopy(trialEligible: boolean) {
+  if (trialEligible) {
+    return {
+      title: "Choose a plan to start your 7-day free trial",
+      description:
+        "Select STARTER, GROWTH or PRO and approve it in Shopify. You will not be charged until the trial ends.",
+    };
+  }
+
+  return {
+    title: "Choose a plan to activate VedaSuite",
+    description:
+      "Your free trial has already been used. Select a plan to continue using VedaSuite.",
+  };
+}
+
 function buildMerchantBillingCopy(input: {
   lifecycle: ResolvedBillingState["lifecycle"];
   planName: BillingPlanName;
   trialActive: boolean;
+  trialEligible: boolean;
   pendingRequestedPlanName: BillingPlanName | null;
   accessActive: boolean;
   endsAt: Date | null;
@@ -255,14 +301,22 @@ function buildMerchantBillingCopy(input: {
           "Your subscription is active and included features are available.",
       };
     case "cancelled":
+      // Once access has lapsed this is functionally the choose-a-plan state, so
+      // it must not promise a trial to an ineligible shop either.
+      if (!input.accessActive) {
+        const choosePlan = buildChoosePlanCopy(input.trialEligible);
+        return {
+          title: "The subscription has been cancelled",
+          description: input.trialEligible
+            ? "Choose a plan in billing if you want to restore paid features."
+            : choosePlan.description,
+        };
+      }
       return {
-        title: input.accessActive
-          ? `${input.planName} is cancelled and stays active until the end of the current period`
-          : "The subscription has been cancelled",
-        description:
-          input.accessActive && input.endsAt
-            ? `Included features remain available until ${input.endsAt.toLocaleString()}.`
-            : "Choose a plan in billing if you want to restore paid features.",
+        title: `${input.planName} is cancelled and stays active until the end of the current period`,
+        description: input.endsAt
+          ? `Included features remain available until ${input.endsAt.toLocaleString()}.`
+          : "Choose a plan in billing if you want to restore paid features.",
       };
     case "frozen":
       return {
@@ -277,11 +331,7 @@ function buildMerchantBillingCopy(input: {
           "Reconnect the app in Shopify before billing and included features can be verified again.",
       };
     case "no_subscription":
-      return {
-        title: "Choose a plan to start your 7-day free trial",
-        description:
-          "You will not be charged until the trial ends. Select STARTER, GROWTH or PRO in Billing to get started.",
-      };
+      return buildChoosePlanCopy(input.trialEligible);
     default:
       return {
         title: "Billing status could not be verified",
@@ -302,6 +352,14 @@ export function buildCanonicalEntitlements(input: {
   accessActive: boolean;
   verified: boolean;
   trialActive: boolean;
+  /**
+   * Trial eligibility, when the caller knows it. Only `true` unlocks the
+   * "start your 7-day free trial" wording below. Left undefined (eligibility
+   * not established), the copy stays neutral — it must never promise a trial
+   * off the back of `planName === "NONE"` alone, which is precisely how an
+   * already-used-trial shop was being offered another one.
+   */
+  trialEligible?: boolean;
 }): CanonicalEntitlementState {
   // Plan-selected trial model: the trial does not widen entitlements to
   // every module — it only means Shopify has not billed for the SELECTED
@@ -356,7 +414,9 @@ export function buildCanonicalEntitlements(input: {
       : effectivePlanName === "STARTER" && input.starterModule
       ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`
       : effectivePlanName === "NONE"
-      ? "Choose a plan to start your 7-day free trial."
+      ? input.trialEligible === true
+        ? "Choose a plan to start your 7-day free trial."
+        : "Choose a plan to activate VedaSuite."
       : "Included features are based on the active subscription.",
   };
 }
@@ -457,6 +517,8 @@ function buildSubscriptionPayload(input: {
   /** Canonical trial-active flag, passed in — never re-derived here. */
   trialActive: boolean;
   trialDaysRemaining: number;
+  /** Canonical trial eligibility, passed in — never re-derived here. */
+  trialEligible: boolean;
   billingStatus: string | null;
   starterModuleSwitchAvailableAt?: Date | null;
 }): CurrentSubscription {
@@ -466,6 +528,7 @@ function buildSubscriptionPayload(input: {
     accessActive: input.active,
     verified: true,
     trialActive: input.trialActive,
+    trialEligible: input.trialEligible,
   });
   const capabilities = entitlement.capabilities;
 
@@ -480,6 +543,7 @@ function buildSubscriptionPayload(input: {
     trialEndsAt: input.trialEndsAt?.toISOString() ?? null,
     trialActive: input.trialActive,
     trialDaysRemaining: input.trialDaysRemaining,
+    trialEligible: input.trialEligible,
     status: deriveLifecycleStatus({
       planName: entitlement.planName,
       trialActive: input.trialActive,
@@ -656,6 +720,18 @@ export async function resolveBillingState(
     trialEndsAt: store.trialEndsAt,
   });
 
+  // Canonical trial ELIGIBILITY — a separate question from trial state, and the
+  // only thing any surface may use to promise a free trial.
+  //
+  // Read-only (no-write-on-read is preserved: hasExistingTrialHistory performs a
+  // single findUnique and never writes). It fails closed to "already used", so a
+  // DB error yields trialEligible=false and is logged by that service — never a
+  // guess of true, which would promise a trial the billing path would not grant.
+  //
+  // The `&& !trial.trialActive` term is defence in depth: starting a trial always
+  // writes the history row, so an open window already implies ineligible.
+  const trialEligible = !(await hasExistingTrialHistory(shopDomain)) && !trial.trialActive;
+
   const dbPlanName = normalizePlanName(store.subscription?.plan?.name) ?? "NONE";
 
   // Under the plan-selected trial model, having no trial dates yet is the
@@ -738,6 +814,7 @@ export async function resolveBillingState(
     lifecycle,
     planName: selectedPlanName,
     trialActive,
+    trialEligible,
     pendingRequestedPlanName,
     accessActive,
     endsAt,
@@ -778,6 +855,7 @@ export async function resolveBillingState(
     trialEndsAt: trial.trialEndsAt,
     trialDaysRemaining: trial.trialDaysRemaining,
     trialDatesIncomplete: trial.trialDatesIncomplete,
+    trialEligible,
     showTrialDate: trialActive,
     accessTier,
     subscriptionStatus: subscriptionBillingStatus,
@@ -835,6 +913,8 @@ export async function getCurrentSubscription(
     trialEndsAt: resolved.trialEndsAt ? new Date(resolved.trialEndsAt) : null,
     trialActive: resolved.trialActive,
     trialDaysRemaining: resolved.trialDaysRemaining,
+    // Passed straight through from the canonical state — never recomputed.
+    trialEligible: resolved.trialEligible,
     billingStatus: resolved.normalizedBillingStatus,
     // getStarterModuleSwitchAvailableAt is currently a stub that always
     // returns null regardless of input — no Store fetch needed for it here.

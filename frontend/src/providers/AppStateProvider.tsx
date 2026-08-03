@@ -37,6 +37,14 @@ export type CanonicalAppState = {
      */
     trialActive?: boolean;
     trialDaysRemaining?: number;
+    /**
+     * Server-resolved trial eligibility (ShopTrialHistory-backed). The ONLY
+     * input to choose-a-plan trial copy. Optional so an older cached payload
+     * does not break the app; a missing value must be treated as INELIGIBLE so
+     * a stale response can only under-promise, never offer a trial the billing
+     * path would refuse to grant.
+     */
+    trialEligible?: boolean;
     title: string;
     description: string;
   };

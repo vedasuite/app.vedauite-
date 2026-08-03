@@ -61,6 +61,13 @@ function freshServices() {
   const prisma = require(prismaPath).prisma;
   require(observabilityPath).logEvent = () => {};
 
+  // resolveBillingState now reads ShopTrialHistory to resolve trialEligible.
+  // Default to "no history row", which is the fresh-install state this suite is
+  // built around. Without this the read hits a real database, and
+  // hasExistingTrialHistory fails CLOSED to "already used". Scenarios that care
+  // about eligibility set their own mock — see trialEligibilityUx.test.cjs.
+  prisma.shopTrialHistory.findUnique = async () => null;
+
   const shopifyAdminService = require(shopifyAdminServicePath);
   shopifyAdminService.getActiveAppSubscription = async () => null;
   shopifyAdminService.cancelAppSubscription = async () => ({});

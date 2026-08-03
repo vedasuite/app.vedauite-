@@ -191,24 +191,58 @@ export function TrialStatusBanner({
 }
 
 /**
+ * The single source of choose-a-plan wording, shared by the Onboarding card and
+ * the Dashboard banner so the two can never drift.
+ *
+ * `trialEligible` comes from the server (billing.trialEligible, backed by
+ * ShopTrialHistory). It must NEVER be inferred here from trialActive, planName,
+ * lifecycle, or trial dates — none of those separate "never had a trial" from
+ * "already used it", and promising a 7-day trial to a shop whose one trial is
+ * spent is the bug this exists to fix. A missing/undefined value is treated as
+ * ineligible, so a stale or partial payload can only ever under-promise.
+ */
+function choosePlanCopy(trialEligible: boolean | undefined) {
+  if (trialEligible === true) {
+    return {
+      title: "Choose a plan to start your 7-day free trial",
+      body: "Select STARTER, GROWTH or PRO and approve it in Shopify. You will not be charged until the trial ends.",
+      cta: "View plans / Start free trial",
+    };
+  }
+
+  return {
+    title: "Choose a plan to activate VedaSuite",
+    body: "Your free trial has already been used. Select a plan to continue using VedaSuite.",
+    cta: "View plans",
+  };
+}
+
+/**
  * Detailed card — Onboarding. Shown when NO plan has been approved yet
  * (trialActive is false and no plan is selected) — the trial has not
  * started, so this must never claim any module is unlocked.
  */
-export function ChoosePlanCard({ onChoosePlan }: { onChoosePlan: () => void }) {
+export function ChoosePlanCard({
+  onChoosePlan,
+  trialEligible,
+}: {
+  onChoosePlan: () => void;
+  trialEligible: boolean | undefined;
+}) {
+  const copy = choosePlanCopy(trialEligible);
+
   return (
     <Card padding="400">
       <BlockStack gap="300">
         <Text as="h2" variant="headingMd">
-          Choose a plan to start your 7-day free trial
+          {copy.title}
         </Text>
         <Text as="p" variant="bodyMd">
-          Select STARTER, GROWTH or PRO and approve it in Shopify to start your
-          7-day free trial. You will not be charged until the trial ends.
+          {copy.body}
         </Text>
         <InlineStack gap="200" wrap>
           <Button variant="primary" onClick={onChoosePlan}>
-            View plans / Start free trial
+            {copy.cta}
           </Button>
         </InlineStack>
       </BlockStack>
@@ -219,19 +253,30 @@ export function ChoosePlanCard({ onChoosePlan }: { onChoosePlan: () => void }) {
 /**
  * Compact banner — Dashboard equivalent of `ChoosePlanCard`.
  */
-export function ChoosePlanBanner({ onChoosePlan }: { onChoosePlan: () => void }) {
+export function ChoosePlanBanner({
+  onChoosePlan,
+  trialEligible,
+}: {
+  onChoosePlan: () => void;
+  trialEligible: boolean | undefined;
+}) {
+  const copy = choosePlanCopy(trialEligible);
+
   return (
-    <Banner tone="info" title="Choose a plan to start your 7-day free trial">
+    <Banner tone="info" title={copy.title}>
       <BlockStack gap="200">
         <Text as="p" variant="bodySm">
-          You will not be charged until the trial ends.
+          {copy.body}
         </Text>
         <InlineStack gap="200" wrap>
           <Button variant="primary" onClick={onChoosePlan}>
-            View plans / Start free trial
+            {copy.cta}
           </Button>
         </InlineStack>
       </BlockStack>
     </Banner>
   );
 }
+
+/** Exported for tests — the canonical choose-a-plan copy resolver. */
+export { choosePlanCopy };

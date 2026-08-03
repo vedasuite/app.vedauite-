@@ -150,8 +150,9 @@ billingApiRouter.post("/confirm-return", async (req, res) => {
       starterModule: result.billing.starterModule,
       accessActive: result.billing.accessActive,
       verified: result.billing.verified,
-      // Canonical flag, read directly from billing state — never re-derived.
+      // Canonical flags, read directly from billing state — never re-derived.
       trialActive: result.billing.trialActive,
+      trialEligible: result.billing.trialEligible,
     });
     return res.json({
       result,

@@ -425,7 +425,13 @@ export function OnboardingPage() {
               onViewBilling={() => navigateEmbedded("/app/billing")}
             />
           ) : (appState?.billing?.planName ?? "NONE") === "NONE" ? (
-            <ChoosePlanCard onChoosePlan={() => navigateEmbedded("/app/billing")} />
+            <ChoosePlanCard
+              onChoosePlan={() => navigateEmbedded("/app/billing")}
+              // Server-resolved eligibility only — never inferred from
+              // planName/trialActive, which cannot tell "never trialled" from
+              // "trial already used".
+              trialEligible={appState?.billing?.trialEligible}
+            />
           ) : null}
         </Layout.Section>
 

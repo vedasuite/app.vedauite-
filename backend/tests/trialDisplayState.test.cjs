@@ -28,13 +28,22 @@ const { buildCanonicalEntitlements } = require(
  * "paid", not a separate "trial" tier. These tests pin that contract so
  * Onboarding, Dashboard and Billing cannot drift apart.
  */
-function entitlements({ planName, starterModule = null, accessActive, trialActive }) {
+function entitlements({
+  planName,
+  starterModule = null,
+  accessActive,
+  trialActive,
+  trialEligible,
+}) {
   return buildCanonicalEntitlements({
     planName,
     starterModule,
     accessActive,
     verified: true,
     trialActive,
+    // Deliberately passed through as-is, including undefined, so tests can
+    // exercise the "eligibility not established" case.
+    trialEligible,
   });
 }
 
@@ -89,13 +98,41 @@ test("a legacy TRIAL plan name never grants access, open window or not", () => {
   assert.match(state.description, /choose a plan/i, "prompts choosing a real plan instead");
 });
 
-test("no subscription and no trial prompts choosing a plan to start the trial", () => {
-  const state = entitlements({ planName: "NONE", accessActive: false, trialActive: false });
+test("no subscription, trial ELIGIBLE: prompts choosing a plan to start the trial", () => {
+  const state = entitlements({
+    planName: "NONE",
+    accessActive: false,
+    trialActive: false,
+    trialEligible: true,
+  });
 
   assert.notEqual(state.tier, "trial");
   assert.equal(state.tier, "none");
   assert.equal(state.accessActive, false);
   assert.match(state.description, /choose a plan.*trial/i);
+});
+
+test("no subscription with eligibility NOT established: never promises a trial", () => {
+  // planName === "NONE" alone must not produce a trial promise — that inference
+  // is exactly what offered a second trial to a shop that already used one.
+  const state = entitlements({ planName: "NONE", accessActive: false, trialActive: false });
+
+  assert.equal(state.tier, "none");
+  assert.doesNotMatch(state.description, /free trial/i);
+  assert.doesNotMatch(state.description, /7-day/i);
+  assert.match(state.description, /choose a plan to activate/i);
+});
+
+test("no subscription, trial explicitly INELIGIBLE: never promises a trial", () => {
+  const state = entitlements({
+    planName: "NONE",
+    accessActive: false,
+    trialActive: false,
+    trialEligible: false,
+  });
+
+  assert.doesNotMatch(state.description, /free trial/i);
+  assert.doesNotMatch(state.description, /7-day/i);
 });
 
 test("a legacy standalone TRIAL plan with a closed window is not reported as a trial", () => {

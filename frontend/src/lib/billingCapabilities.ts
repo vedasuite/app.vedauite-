@@ -156,6 +156,13 @@ export type SubscriptionInfo = {
   /** Canonical trial-active flag from the backend — never inferred client-side. */
   trialActive?: boolean;
   trialDaysRemaining?: number;
+  /**
+   * Canonical trial ELIGIBILITY from the backend (ShopTrialHistory-backed).
+   * Never inferred client-side. A cached payload written before this field
+   * existed leaves it undefined, which every consumer must treat as INELIGIBLE
+   * so a stale cache can never promise a trial the backend would refuse.
+   */
+  trialEligible?: boolean;
   status?: SubscriptionLifecycleStatus;
   billingStatus?: string | null;
   starterModuleSwitchAvailableAt?: string | null;
@@ -412,6 +419,8 @@ export const fallbackSubscription: SubscriptionInfo = {
   trialEndsAt: null,
   trialActive: false,
   trialDaysRemaining: 0,
+  // Fallback state must never promise a trial it cannot verify.
+  trialEligible: false,
   status: "inactive",
   billingStatus: "INACTIVE",
   starterModuleSwitchAvailableAt: null,

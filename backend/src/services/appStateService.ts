@@ -40,6 +40,12 @@ export type MerchantAppState = {
       trialEndsAt: string | null;
       trialActive: boolean;
       trialDaysRemaining: number;
+      /**
+       * Whether this shop may still be offered its one free trial. The ONLY
+       * field the frontend may use to decide trial copy — never inferred from
+       * trialActive/planName/dates. Fails closed to false.
+       */
+      trialEligible: boolean;
       title: string;
       description: string;
     };
@@ -266,6 +272,9 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       trialEndsAt: billing.showTrialDate ? billing.trialEndsAt : null,
       trialActive: billing.trialActive,
       trialDaysRemaining: billing.trialDaysRemaining,
+      // Same canonical source as Billing and /api/subscription/plan, so all
+      // three surfaces can never disagree about trial eligibility.
+      trialEligible: billing.trialEligible,
       title: billing.merchantTitle,
       description: billing.merchantDescription,
     },

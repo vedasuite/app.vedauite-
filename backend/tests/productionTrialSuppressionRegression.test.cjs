@@ -119,6 +119,24 @@ function freshServices() {
   const prisma = require(prismaPath).prisma;
   require(observabilityPath).logEvent = () => {};
 
+  // resolveBillingState reads ShopTrialHistory to resolve trialEligible. Mirror
+  // production semantics: a history row exists exactly when the shop has been
+  // granted a trial window, so derive it from whatever Store fixture the test
+  // installed. Without this the read reaches a real database and the whole file
+  // stalls on connection timeouts.
+  prisma.shopTrialHistory.findUnique = async ({ where }) => {
+    const store = await prisma.store.findUnique({ where: { shop: where.shop } });
+    if (!store?.trialStartedAt || !store?.trialEndsAt) {
+      return null;
+    }
+    return {
+      shop: store.shop,
+      firstInstalledAt: store.trialStartedAt,
+      trialStartedAt: store.trialStartedAt,
+      trialEndsAt: store.trialEndsAt,
+    };
+  };
+
   const shopifyAdminService = require(shopifyAdminServicePath);
   shopifyAdminService.getActiveAppSubscription = async () => null;
   shopifyAdminService.cancelAppSubscription = async () => ({});

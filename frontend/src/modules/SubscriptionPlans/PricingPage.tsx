@@ -61,6 +61,11 @@ type BillingManagementState = {
     showTrialDate: boolean;
     /** Canonical trial-active flag — independent of planName/paid subscription state. */
     trialActive: boolean;
+    /**
+     * Canonical trial eligibility (ShopTrialHistory-backed). Drives the
+     * choose-a-plan copy; never inferred from planName or trialActive.
+     */
+    trialEligible: boolean;
     trialEndsAt: string | null;
     trialDaysRemaining: number;
     subscriptionId: string | null;

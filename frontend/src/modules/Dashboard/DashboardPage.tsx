@@ -1150,7 +1150,11 @@ export function DashboardPage() {
           </Layout.Section>
         ) : (appState?.billing?.planName ?? "NONE") === "NONE" ? (
           <Layout.Section>
-            <ChoosePlanBanner onChoosePlan={() => navigateEmbedded("/app/billing")} />
+            <ChoosePlanBanner
+              onChoosePlan={() => navigateEmbedded("/app/billing")}
+              // Server-resolved eligibility only — see ChoosePlanCard.
+              trialEligible={appState?.billing?.trialEligible}
+            />
           </Layout.Section>
         ) : null}
 
