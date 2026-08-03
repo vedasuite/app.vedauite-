@@ -1077,6 +1077,107 @@ export async function updateStarterModuleSelection(
   return getCurrentSubscription(shopDomain);
 }
 
+/**
+ * Grants — or recovers — the one durable trial window once a subscription is
+ * confirmed approved. Shared by the webhook path and the live-Shopify recovery
+ * path so both behave identically.
+ *
+ * Failures are RE-THROWN. The merchant has a Shopify-approved subscription, so
+ * permanently losing their promised trial to a transient DB error is not
+ * acceptable; throwing makes the webhook answer non-2xx and hands recovery to
+ * Shopify's own durable redelivery schedule. Retries converge safely:
+ * ShopTrialHistory yields exactly one window per shop forever, so a retry can
+ * neither create a second trial nor extend an existing trialEndsAt.
+ */
+async function persistTrialWindowAfterApproval(
+  store: NonNullable<StoreWithSubscription>,
+  context: { subscriptionId: string; shopifyChargeId: string | null }
+) {
+  try {
+    const trialWindow = await resolveTrialWindowOnApproval(
+      store.shop,
+      new Date(),
+      store.trialStartedAt && store.trialEndsAt
+        ? { trialStartedAt: store.trialStartedAt, trialEndsAt: store.trialEndsAt }
+        : null
+    );
+    if (trialWindow && (!store.trialStartedAt || !store.trialEndsAt)) {
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          trialStartedAt: trialWindow.trialStartedAt,
+          trialEndsAt: trialWindow.trialEndsAt,
+        },
+      });
+    }
+  } catch (error) {
+    logEvent("error", "billing.trial_grant_after_approval_failed", {
+      shop: store.shop,
+      subscriptionId: context.subscriptionId,
+      shopifyChargeId: context.shopifyChargeId,
+      retryable: true,
+      reason:
+        "subscription is reconciled but the trial could not be persisted — failing so Shopify redelivers this webhook",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+/**
+ * An incomplete or unverifiable webhook must never mutate billing state from
+ * its own missing fields. Instead, ask Shopify what is authoritative right now
+ * and reconcile from that.
+ *
+ * The lookup is best-effort: if Shopify is unreachable nothing has been
+ * corrupted, and the read path (resolveBillingState) reconciles lazily on the
+ * merchant's next load. A trial-persistence failure after a CONFIRMED approval
+ * does propagate, matching the approved-webhook path.
+ */
+async function recoverBillingStateFromShopify(
+  store: NonNullable<StoreWithSubscription>,
+  reason: string
+) {
+  let reconciled: Awaited<
+    ReturnType<typeof reconcileCurrentSubscriptionFromShopify>
+  > = null;
+
+  try {
+    reconciled = await reconcileCurrentSubscriptionFromShopify(store);
+  } catch (error) {
+    logEvent("warn", "billing.webhook_live_reconciliation_failed", {
+      shop: store.shop,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+      note: "local billing state left untouched; the read path reconciles lazily",
+    });
+    return store.subscription;
+  }
+
+  if (!reconciled) {
+    logEvent("info", "billing.webhook_live_reconciliation_no_active_subscription", {
+      shop: store.shop,
+      reason,
+      note: "Shopify reports no approved subscription; local state left untouched",
+    });
+    return store.subscription;
+  }
+
+  logEvent("info", "billing.webhook_live_reconciliation_applied", {
+    shop: store.shop,
+    reason,
+    recoveredPlan: reconciled.plan?.name ?? null,
+    shopifyChargeId: reconciled.shopifyChargeId ?? null,
+  });
+
+  await persistTrialWindowAfterApproval(store, {
+    subscriptionId: reconciled.id,
+    shopifyChargeId: reconciled.shopifyChargeId ?? null,
+  });
+
+  return reconciled;
+}
+
 export async function reconcileStoreSubscriptionFromWebhook(input: {
   shopDomain: string;
   shopifyChargeId?: string | null;
@@ -1093,7 +1194,34 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
     return null;
   }
 
-  const normalizedStatus = input.status?.toUpperCase() ?? "INACTIVE";
+  const planName = normalizePlanName(input.planName);
+  const currentPeriodEnd = input.currentPeriodEnd
+    ? new Date(input.currentPeriodEnd)
+    : null;
+  const incomingChargeId = input.shopifyChargeId?.trim() || null;
+  const storedChargeId = store.subscription?.shopifyChargeId ?? null;
+
+  // The status is the one field this decision cannot be made without.
+  // Defaulting a missing status to "INACTIVE" — as this previously did — turns
+  // an incomplete or misparsed delivery into a deactivation of a live
+  // subscription. That is precisely how a just-approved plan was being wiped to
+  // NONE in production, so a missing status is now an explicit refusal to act.
+  const normalizedStatus = input.status?.trim().toUpperCase() || null;
+
+  // --- INCOMPLETE: no usable status -> mutate nothing, ask Shopify ----------
+  if (!normalizedStatus) {
+    logEvent("warn", "billing.webhook_incomplete_ignored", {
+      shop: input.shopDomain,
+      incomingChargeId,
+      incomingPlanName: input.planName ?? null,
+      storedChargeId,
+      existingPlanName: store.subscription?.plan?.name ?? null,
+      reason:
+        "webhook carried no usable status — refusing to infer one; reconciling from the live Shopify subscription instead",
+    });
+    return recoverBillingStateFromShopify(store, "webhook_missing_status");
+  }
+
   // ONLY these two mean "the merchant approved and Shopify considers the
   // subscription live". PENDING is deliberately excluded — it means Shopify
   // created the subscription but the merchant has not decided yet, so it must
@@ -1101,11 +1229,6 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
   // suppress the choose-a-plan state.
   const isApproved = normalizedStatus === "ACTIVE" || normalizedStatus === "ACCEPTED";
   const isPending = normalizedStatus === "PENDING";
-
-  const planName = normalizePlanName(input.planName);
-  const currentPeriodEnd = input.currentPeriodEnd
-    ? new Date(input.currentPeriodEnd)
-    : null;
 
   // --- PENDING: record nothing -------------------------------------------
   // Writing no local state at once satisfies every PENDING requirement: it
@@ -1130,14 +1253,35 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
       return null;
     }
 
+    // Deactivation is only ever safe when this webhook is POSITIVELY about the
+    // subscription currently stored: a valid incoming id, a stored id, and an
+    // exact match between them. Anything less is unverifiable.
+    //
+    // Deactivating on an unverifiable match — as this previously did — lets a
+    // stale, delayed, or incomplete delivery destroy a newer valid subscription
+    // and reset its plan to NONE. That is the production defect this guard
+    // exists to prevent, so an unverifiable inactive event now mutates nothing
+    // and defers to Shopify's authoritative state instead.
+    if (!incomingChargeId || !storedChargeId) {
+      logEvent("warn", "billing.webhook_inactive_ignored_unverifiable", {
+        shop: input.shopDomain,
+        normalizedStatus,
+        incomingChargeId,
+        storedChargeId,
+        existingPlanName: store.subscription.plan?.name ?? null,
+        reason:
+          "could not positively match the webhook to the stored subscription — refusing to deactivate; reconciling from the live Shopify subscription instead",
+      });
+      return recoverBillingStateFromShopify(
+        store,
+        "inactive_webhook_unverifiable_charge"
+      );
+    }
+
     // A delayed inactive event (CANCELLED/DECLINED/EXPIRED) for an OLDER,
     // already-replaced subscription must never deactivate the newer one that
-    // replaced it. Only act when this webhook is positively about the
-    // subscription currently stored.
-    const storedChargeId = store.subscription.shopifyChargeId ?? null;
-    const incomingChargeId = input.shopifyChargeId ?? null;
-
-    if (incomingChargeId && storedChargeId && incomingChargeId !== storedChargeId) {
+    // replaced it.
+    if (incomingChargeId !== storedChargeId) {
       logEvent("info", "billing.webhook_inactive_ignored_stale_charge", {
         shop: input.shopDomain,
         normalizedStatus,
@@ -1147,21 +1291,6 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
           "inactive event is for a different (older/replaced) subscription — the current subscription is left untouched",
       });
       return store.subscription;
-    }
-
-    if (!incomingChargeId || !storedChargeId) {
-      // Cannot positively verify the match. Proceeding is deliberate:
-      // refusing here would make a row with no stored charge id (legacy data,
-      // or a webhook that omits the field) impossible to ever deactivate.
-      // The requirement's actual risk — a delayed cancel clobbering a newer
-      // replacement — always has both ids present and is handled above.
-      logEvent("warn", "billing.webhook_inactive_unverified_charge", {
-        shop: input.shopDomain,
-        normalizedStatus,
-        incomingChargeId,
-        storedChargeId,
-        reason: "could not positively match the webhook to the stored subscription; deactivating anyway",
-      });
     }
 
     const accessRemainsActive =
@@ -1211,8 +1340,23 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
     };
   }
 
+  // An approved status we cannot attribute to a real plan is an incomplete
+  // delivery. Never write NONE over a live subscription on the strength of a
+  // missing plan name — ask Shopify which subscription is actually approved.
   if (!planName || planName === "TRIAL" || planName === "NONE") {
-    return store.subscription;
+    logEvent("warn", "billing.webhook_approved_unresolved_plan", {
+      shop: input.shopDomain,
+      normalizedStatus,
+      incomingChargeId,
+      incomingPlanName: input.planName ?? null,
+      existingPlanName: store.subscription?.plan?.name ?? null,
+      reason:
+        "approved webhook carried no resolvable plan name — reconciling from the live Shopify subscription instead of leaving state unattributed",
+    });
+    return recoverBillingStateFromShopify(
+      store,
+      "approved_webhook_unresolved_plan"
+    );
   }
 
   const plan = await ensurePlanRecord(planName);
@@ -1298,35 +1442,10 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
   // upsert above is idempotent, and ShopTrialHistory yields exactly one
   // window per shop forever, so a retry can neither create a second trial nor
   // extend an existing trialEndsAt.
-  try {
-    const trialWindow = await resolveTrialWindowOnApproval(
-      input.shopDomain,
-      new Date(),
-      store.trialStartedAt && store.trialEndsAt
-        ? { trialStartedAt: store.trialStartedAt, trialEndsAt: store.trialEndsAt }
-        : null
-    );
-    if (trialWindow && (!store.trialStartedAt || !store.trialEndsAt)) {
-      await prisma.store.update({
-        where: { id: store.id },
-        data: {
-          trialStartedAt: trialWindow.trialStartedAt,
-          trialEndsAt: trialWindow.trialEndsAt,
-        },
-      });
-    }
-  } catch (error) {
-    logEvent("error", "billing.trial_grant_after_approval_failed", {
-      shop: input.shopDomain,
-      subscriptionId: updated.id,
-      shopifyChargeId: input.shopifyChargeId ?? null,
-      retryable: true,
-      reason:
-        "subscription is reconciled but the trial could not be persisted — failing so Shopify redelivers this webhook",
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
+  await persistTrialWindowAfterApproval(store, {
+    subscriptionId: updated.id,
+    shopifyChargeId: incomingChargeId,
+  });
 
   return updated;
 }

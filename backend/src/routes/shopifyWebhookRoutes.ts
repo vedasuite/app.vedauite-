@@ -352,13 +352,41 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
     return envelope;
   }
 
-  const payload = envelope.payload as {
-    admin_graphql_api_id?: string;
-    name?: string;
-    status?: string;
-    current_period_end?: string;
-    currentPeriodEnd?: string;
+  // Shopify nests every field of app_subscriptions/update under an
+  // "app_subscription" key:
+  //
+  //   { "app_subscription": { "admin_graphql_api_id": "gid://shopify/AppSubscription/…",
+  //                           "name": "VedaSuite AI - PRO", "status": "ACTIVE", … } }
+  //
+  // Reading these from the TOP level (as this previously did) yielded undefined
+  // for the id, name and status on every real delivery, which downstream turned
+  // into a deactivation of the merchant's just-approved plan. The nested object
+  // is the documented location; the top-level fallback keeps a flat payload
+  // working rather than regressing to undefined if one is ever delivered.
+  const rawPayload = (envelope.payload ?? {}) as Record<string, unknown>;
+  const nested = (rawPayload.app_subscription ?? {}) as Record<string, unknown>;
+
+  const pick = (key: string): string | null => {
+    const value = nested[key] ?? rawPayload[key];
+    return typeof value === "string" && value.trim() ? value : null;
   };
+
+  const subscriptionId = pick("admin_graphql_api_id");
+  const subscriptionName = pick("name");
+  const subscriptionStatus = pick("status");
+  const currentPeriodEnd = pick("current_period_end") ?? pick("currentPeriodEnd");
+
+  // Safe diagnostic: field NAMES and the extracted billing identifiers only —
+  // never the raw payload, which would risk logging sensitive shop data.
+  logEvent("info", "webhook.app_subscription_payload_parsed", {
+    shop: envelope.shopDomain,
+    topLevelKeys: Object.keys(rawPayload),
+    nestedKeys: Object.keys(nested),
+    usedNestedObject: Object.keys(nested).length > 0,
+    detectedSubscriptionId: subscriptionId,
+    detectedStatus: subscriptionStatus,
+    detectedPlanName: subscriptionName,
+  });
 
   // Deliberately processed SYNCHRONOUSLY, unlike the other webhooks in this
   // file which acknowledge first and process in the background.
@@ -379,11 +407,10 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
       () =>
         reconcileStoreSubscriptionFromWebhook({
           shopDomain: envelope.shopDomain,
-          shopifyChargeId: payload.admin_graphql_api_id ?? null,
-          planName: payload.name ?? null,
-          status: payload.status ?? null,
-          currentPeriodEnd:
-            payload.current_period_end ?? payload.currentPeriodEnd ?? null,
+          shopifyChargeId: subscriptionId,
+          planName: subscriptionName,
+          status: subscriptionStatus,
+          currentPeriodEnd,
         }),
       {
         attempts: 3,
@@ -397,17 +424,17 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
       shop: envelope.shopDomain,
       route: req.path,
       processedAt: new Date().toISOString(),
-      subscriptionId: payload.admin_graphql_api_id ?? null,
-      status: payload.status ?? null,
-      planName: payload.name ?? null,
+      subscriptionId,
+      status: subscriptionStatus,
+      planName: subscriptionName,
     });
 
     return res.status(200).send("ok");
   } catch (error) {
     logEvent("error", "webhook.app_subscription_updated_failed", {
       shop: envelope.shopDomain,
-      subscriptionId: payload.admin_graphql_api_id ?? null,
-      status: payload.status ?? null,
+      subscriptionId,
+      status: subscriptionStatus,
       willRetry: true,
       reason:
         "returning 500 so Shopify redelivers — see the comment above; a swallowed failure here can permanently lose an approved merchant's trial",

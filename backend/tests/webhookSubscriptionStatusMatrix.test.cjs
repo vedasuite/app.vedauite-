@@ -379,6 +379,25 @@ async function buildWebhookServer({ reconcileImpl }) {
   return app.listen(0);
 }
 
+/**
+ * The documented app_subscriptions/update payload — every field nested under
+ * "app_subscription". These route tests previously used a FLAT payload, which
+ * silently encoded the parser's wrong assumption about where the fields live.
+ */
+function realShopifyPayload({ status = "ACTIVE", name = "VedaSuite AI - PRO", id = CHARGE_PRO } = {}) {
+  return {
+    app_subscription: {
+      admin_graphql_api_id: id,
+      name,
+      status,
+      admin_graphql_api_shop_id: "gid://shopify/Shop/548380009",
+      created_at: "2026-08-03T19:00:00-05:00",
+      updated_at: "2026-08-03T19:00:00-05:00",
+      currency: "USD",
+    },
+  };
+}
+
 function signedDelivery(payload) {
   const rawBody = JSON.stringify(payload);
   return {
@@ -404,11 +423,7 @@ test("app_subscriptions_update answers 200 only when reconciliation genuinely su
     const response = await httpPost(
       server,
       "/webhooks/shopify/app_subscriptions_update",
-      signedDelivery({
-        admin_graphql_api_id: CHARGE_PRO,
-        name: "VedaSuite AI - PRO",
-        status: "ACTIVE",
-      })
+      signedDelivery(realShopifyPayload({ status: "ACTIVE" }))
     );
     assert.equal(response.statusCode, 200);
     assert.equal(called, 1, "reconciliation ran synchronously before the response was sent");
@@ -428,11 +443,7 @@ test("app_subscriptions_update answers 500 when reconciliation fails, so Shopify
     const response = await httpPost(
       server,
       "/webhooks/shopify/app_subscriptions_update",
-      signedDelivery({
-        admin_graphql_api_id: CHARGE_PRO,
-        name: "VedaSuite AI - PRO",
-        status: "ACTIVE",
-      })
+      signedDelivery(realShopifyPayload({ status: "ACTIVE" }))
     );
     assert.equal(
       response.statusCode,
