@@ -20,10 +20,13 @@ const { buildCanonicalEntitlements } = require(
 );
 
 /**
- * The trial UI on Onboarding and the Dashboard renders from the canonical
- * entitlement state — `tier === "trial"` — and shows `planName` as the plan
- * that begins afterwards. These tests pin that contract so the three surfaces
- * cannot drift, and so nothing starts inferring a trial from a date.
+ * Plan-selected trial model (2026-08-03): the trial only starts once a plan
+ * is approved in Shopify, and `tier` reports that SELECTED plan's tier
+ * throughout — trial or paid, it's the same tier, because the trial does
+ * not widen entitlements to every module. `trialActive`-driven copy
+ * ("Starter trial active") is what distinguishes "not yet billed" from
+ * "paid", not a separate "trial" tier. These tests pin that contract so
+ * Onboarding, Dashboard and Billing cannot drift apart.
  */
 function entitlements({ planName, starterModule = null, accessActive, trialActive }) {
   return buildCanonicalEntitlements({
@@ -35,7 +38,8 @@ function entitlements({ planName, starterModule = null, accessActive, trialActiv
   });
 }
 
-test("active trial reports tier=trial and retains the selected paid plan for display", () => {
+test("active trial reports the SELECTED plan's own tier and retains the plan for display", () => {
+  const expectedTier = { STARTER: "starter", GROWTH: "growth", PRO: "pro" };
   for (const selectedPlan of ["STARTER", "GROWTH", "PRO"]) {
     const state = entitlements({
       planName: selectedPlan,
@@ -44,46 +48,54 @@ test("active trial reports tier=trial and retains the selected paid plan for dis
       trialActive: true,
     });
 
-    assert.equal(state.tier, "trial", `${selectedPlan} trial must report tier=trial`);
+    assert.equal(
+      state.tier,
+      expectedTier[selectedPlan],
+      `${selectedPlan} trial must report its own tier, not a generic "trial" tier`
+    );
     assert.equal(
       state.planName,
       selectedPlan,
-      "the selected post-trial plan must be preserved for display"
+      "the selected plan must be preserved for display"
     );
     assert.equal(state.accessActive, true, "an active trial grants access");
     assert.match(state.title, /trial/i);
+    assert.match(state.title, new RegExp(selectedPlan, "i"), "title must name the selected plan, not a generic trial");
   }
 });
 
-test("active trial title and description avoid the confusing 'TRIAL plan' wording", () => {
+test("active trial title and description name the selected plan, never generic 'full-access'", () => {
   const state = entitlements({ planName: "GROWTH", accessActive: false, trialActive: true });
-  assert.equal(state.title, "7-day full-access trial");
+  assert.equal(state.title, "Growth trial active");
   assert.doesNotMatch(
     state.description,
     /your TRIAL plan/i,
-    "must never describe TRIAL as the future paid plan"
+    "must never describe TRIAL as the plan"
   );
-  assert.match(state.description, /GROWTH/);
+  assert.match(state.description, /Growth/);
+  assert.match(state.description, /not.*charged/i, "must state Shopify has not billed yet");
 });
 
-test("a legacy TRIAL plan inside an open window never names TRIAL as the future paid plan", () => {
+test("a legacy TRIAL plan name never grants access, open window or not", () => {
+  // "TRIAL" as a stored plan name predates the plan-selected model — it
+  // always collapses to NONE, since there's no way to know which real plan
+  // (STARTER/GROWTH/PRO) it should represent.
   const state = entitlements({ planName: "TRIAL", accessActive: false, trialActive: true });
 
-  assert.equal(state.tier, "trial");
-  assert.doesNotMatch(
-    state.description,
-    /\bTRIAL starts\b/i,
-    "TRIAL is not a chargeable plan and must not be named as the next one"
-  );
-  assert.match(state.description, /selected subscription/i, "safe neutral fallback copy");
+  assert.notEqual(state.tier, "trial");
+  assert.equal(state.tier, "none");
+  assert.equal(state.planName, "NONE");
+  assert.equal(state.accessActive, false);
+  assert.match(state.description, /choose a plan/i, "prompts choosing a real plan instead");
 });
 
-test("expired trial without a subscription is not reported as a trial", () => {
+test("no subscription and no trial prompts choosing a plan to start the trial", () => {
   const state = entitlements({ planName: "NONE", accessActive: false, trialActive: false });
 
-  assert.notEqual(state.tier, "trial", "an expired trial must not report tier=trial");
+  assert.notEqual(state.tier, "trial");
+  assert.equal(state.tier, "none");
   assert.equal(state.accessActive, false);
-  assert.match(state.description, /choose a plan/i);
+  assert.match(state.description, /choose a plan.*trial/i);
 });
 
 test("a legacy standalone TRIAL plan with a closed window is not reported as a trial", () => {
@@ -94,31 +106,33 @@ test("a legacy standalone TRIAL plan with a closed window is not reported as a t
   assert.equal(state.accessActive, false);
 });
 
-test("active paid subscription is not reported as a trial", () => {
+test("active paid subscription (trial closed) reports its own tier, unaffected by trial wording", () => {
   const state = entitlements({ planName: "GROWTH", accessActive: true, trialActive: false });
 
-  assert.notEqual(state.tier, "trial", "a paid plan must not show trial messaging");
   assert.equal(state.tier, "growth");
   assert.equal(state.accessActive, true);
+  assert.doesNotMatch(state.title, /trial/i, "no trial copy once billed and the trial is closed");
 });
 
-test("no plan and no trial reports no access and no trial", () => {
+test("no plan and no trial reports no access", () => {
   const state = entitlements({ planName: "NONE", accessActive: false, trialActive: false });
 
   assert.equal(state.tier, "none");
-  assert.notEqual(state.tier, "trial");
 });
 
 test("a trial cannot be inferred without a selected plan", () => {
   // trialActive alone must not manufacture access when no plan was chosen —
-  // this is what stops a stale trialEndsAt from unlocking modules.
+  // this is what stops a stale trialEndsAt from unlocking modules. Under the
+  // plan-selected model this combination shouldn't arise in practice (trial
+  // dates aren't set until a plan is approved), but the resolver itself must
+  // still refuse to grant access from trialActive alone.
   const state = entitlements({ planName: "NONE", accessActive: false, trialActive: true });
 
-  assert.notEqual(state.tier, "trial");
+  assert.equal(state.tier, "none");
   assert.equal(state.accessActive, false);
 });
 
-test("Starter selection survives the trial so it is already set when billing starts", () => {
+test("Starter module selection survives the trial and is reflected in the title", () => {
   const state = entitlements({
     planName: "STARTER",
     starterModule: "competitor",
@@ -126,7 +140,8 @@ test("Starter selection survives the trial so it is already set when billing sta
     trialActive: true,
   });
 
-  assert.equal(state.tier, "trial");
+  assert.equal(state.tier, "starter");
   assert.equal(state.planName, "STARTER");
   assert.equal(state.starterModule, "competitor");
+  assert.equal(state.title, "Starter trial active");
 });

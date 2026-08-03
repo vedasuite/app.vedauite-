@@ -360,45 +360,61 @@ async function handleAppSubscriptionUpdate(req: any, res: any) {
     currentPeriodEnd?: string;
   };
 
-  // Acknowledge before reconciling. A transient DB failure while reconciling a
-  // plan change would otherwise return 5xx and count against the app's webhook
-  // failure rate; the retry below handles it instead.
-  res.status(200).send("ok");
+  // Deliberately processed SYNCHRONOUSLY, unlike the other webhooks in this
+  // file which acknowledge first and process in the background.
+  //
+  // This is the delivery that grants a merchant's trial after Shopify
+  // approves their plan. Acknowledging with 200 before processing means
+  // Shopify never redelivers, so a transient DB failure while persisting the
+  // trial would permanently leave the merchant with an approved subscription
+  // and no trial, with nothing left to retry it. Returning non-2xx instead
+  // hands recovery to Shopify's own durable webhook retry schedule.
+  //
+  // Retrying is safe: the StoreSubscription upsert is idempotent and the
+  // trial is granted at most once per shop ever (ShopTrialHistory), so a
+  // redelivery can neither double-charge, double-grant, nor extend an
+  // existing trialEndsAt.
+  try {
+    await withRetry(
+      () =>
+        reconcileStoreSubscriptionFromWebhook({
+          shopDomain: envelope.shopDomain,
+          shopifyChargeId: payload.admin_graphql_api_id ?? null,
+          planName: payload.name ?? null,
+          status: payload.status ?? null,
+          currentPeriodEnd:
+            payload.current_period_end ?? payload.currentPeriodEnd ?? null,
+        }),
+      {
+        attempts: 3,
+        delayMs: 500,
+        operationName: "webhook.app_subscription_updated",
+        context: { shop: envelope.shopDomain },
+      }
+    );
 
-  void withRetry(
-    () =>
-      reconcileStoreSubscriptionFromWebhook({
-        shopDomain: envelope.shopDomain,
-        shopifyChargeId: payload.admin_graphql_api_id ?? null,
-        planName: payload.name ?? null,
-        status: payload.status ?? null,
-        currentPeriodEnd:
-          payload.current_period_end ?? payload.currentPeriodEnd ?? null,
-      }),
-    {
-      attempts: 3,
-      delayMs: 500,
-      operationName: "webhook.app_subscription_updated",
-      context: { shop: envelope.shopDomain },
-    }
-  )
-    .then(() => {
-      logEvent("info", "webhook.app_subscription_updated", {
-        shop: envelope.shopDomain,
-        route: req.path,
-        processedAt: new Date().toISOString(),
-        subscriptionId: payload.admin_graphql_api_id ?? null,
-        status: payload.status ?? null,
-        planName: payload.name ?? null,
-      });
-    })
-    .catch((error) => {
-      logEvent("error", "webhook.app_subscription_updated_failed", {
-        shop: envelope.shopDomain,
-        subscriptionId: payload.admin_graphql_api_id ?? null,
-        error,
-      });
+    logEvent("info", "webhook.app_subscription_updated", {
+      shop: envelope.shopDomain,
+      route: req.path,
+      processedAt: new Date().toISOString(),
+      subscriptionId: payload.admin_graphql_api_id ?? null,
+      status: payload.status ?? null,
+      planName: payload.name ?? null,
     });
+
+    return res.status(200).send("ok");
+  } catch (error) {
+    logEvent("error", "webhook.app_subscription_updated_failed", {
+      shop: envelope.shopDomain,
+      subscriptionId: payload.admin_graphql_api_id ?? null,
+      status: payload.status ?? null,
+      willRetry: true,
+      reason:
+        "returning 500 so Shopify redelivers — see the comment above; a swallowed failure here can permanently lose an approved merchant's trial",
+      error,
+    });
+    return res.status(500).send("subscription reconciliation failed");
+  }
 }
 
 shopifyWebhookRouter.post("/orders_create", handleSyncWebhook);

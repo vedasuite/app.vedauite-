@@ -16,7 +16,7 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { useCallback, useMemo, useState } from "react";
-import { TrialStatusCard } from "../../components/billing/TrialStatus";
+import { ChoosePlanCard, TrialStatusCard } from "../../components/billing/TrialStatus";
 import "../../components/intelligence/intelligence.css";
 import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
@@ -407,19 +407,26 @@ export function OnboardingPage() {
       subtitle="Complete the key setup steps so VedaSuite can start turning Shopify data into useful store guidance."
     >
       <Layout>
-        {/* Full-access trial summary. Rendered from the canonical
+        {/* Plan-selected trial summary. Rendered from the canonical
             appState.billing.trialActive flag — the same entitlement state the
             Billing page uses — so it can never disagree with Billing or imply
-            access from a date alone. */}
+            access from a date alone. Before any plan is approved in Shopify,
+            trialActive is false and ChoosePlanCard renders instead — the
+            trial has not started yet, so nothing here may claim any module
+            is unlocked. */}
         <Layout.Section>
-          <TrialStatusCard
-            data={{
-              trialActive: !!appState?.billing?.trialActive,
-              trialEndsAt: appState?.billing?.trialEndsAt ?? null,
-              planName: appState?.billing?.planName ?? null,
-            }}
-            onViewBilling={() => navigateEmbedded("/app/billing")}
-          />
+          {appState?.billing?.trialActive ? (
+            <TrialStatusCard
+              data={{
+                trialActive: true,
+                trialEndsAt: appState.billing.trialEndsAt ?? null,
+                planName: appState.billing.planName ?? null,
+              }}
+              onViewBilling={() => navigateEmbedded("/app/billing")}
+            />
+          ) : (appState?.billing?.planName ?? "NONE") === "NONE" ? (
+            <ChoosePlanCard onChoosePlan={() => navigateEmbedded("/app/billing")} />
+          ) : null}
         </Layout.Section>
 
         {actionError ? (

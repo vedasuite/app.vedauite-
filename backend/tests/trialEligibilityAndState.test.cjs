@@ -108,7 +108,7 @@ test("computeTrialState days-remaining is consistent with the exact persisted en
 });
 
 // ---------------------------------------------------------------------------
-// resolveTrialWindowForInstall — the durable one-trial-per-shop gate.
+// resolveTrialWindowOnApproval — the durable one-trial-per-shop gate.
 // ---------------------------------------------------------------------------
 
 function freshTrialEligibilityService() {
@@ -137,7 +137,7 @@ test("first-ever installation grants exactly one trial, recorded durably", async
   };
 
   const installMoment = new Date("2026-08-01T00:00:00.000Z");
-  const result = await service.resolveTrialWindowForInstall(
+  const result = await service.resolveTrialWindowOnApproval(
     "new-shop.myshopify.com",
     installMoment,
     null
@@ -170,7 +170,7 @@ test("existing durable history is reused — uninstall/reinstall never extends o
     new Date("2026-06-01T00:00:00.000Z"),
     new Date("2027-01-01T00:00:00.000Z"),
   ]) {
-    const result = await service.resolveTrialWindowForInstall(
+    const result = await service.resolveTrialWindowOnApproval(
       "returning-shop.myshopify.com",
       reinstallMoment,
       null
@@ -196,7 +196,7 @@ test("Store row missing/purged but durable history still present: reinstall does
     throw new Error("must not grant a new trial merely because the Store row is missing");
   };
 
-  const result = await service.resolveTrialWindowForInstall(
+  const result = await service.resolveTrialWindowOnApproval(
     "purged-then-reinstalled.myshopify.com",
     new Date("2027-03-01T00:00:00.000Z"),
     null // no Store row exists — this is exactly the "row deleted" scenario
@@ -220,7 +220,7 @@ test("Store row has trial dates but no durable history yet: backfills history in
     trialEndsAt: new Date("2026-01-08T00:00:00.000Z"),
   };
 
-  const result = await service.resolveTrialWindowForInstall(
+  const result = await service.resolveTrialWindowOnApproval(
     "legacy-shop.myshopify.com",
     new Date("2026-08-01T00:00:00.000Z"), // reauth moment, much later than the original trial
     existingStoreWindow
@@ -250,12 +250,12 @@ test("concurrent first-install race converges on one winner, never two different
   };
 
   const [a, b] = await Promise.all([
-    service.resolveTrialWindowForInstall(
+    service.resolveTrialWindowOnApproval(
       "race-shop.myshopify.com",
       new Date("2026-08-01T00:00:00.000Z"),
       null
     ),
-    service.resolveTrialWindowForInstall(
+    service.resolveTrialWindowOnApproval(
       "race-shop.myshopify.com",
       new Date("2026-08-01T00:00:00.010Z"),
       null
@@ -265,17 +265,24 @@ test("concurrent first-install race converges on one winner, never two different
   assert.equal(a.trialEndsAt.toISOString(), b.trialEndsAt.toISOString());
 });
 
-test("a database failure fails closed: returns null rather than guessing a trial window", async () => {
+test("a database failure propagates rather than guessing a trial window OR silently returning no trial", async () => {
+  // The merchant's subscription is already approved by the time this runs, so
+  // returning null (a silent "no trial") would permanently lose their
+  // promised trial. Propagating makes the caller fail visibly so Shopify
+  // redelivers the webhook and the grant converges on retry.
   const { prisma, service } = freshTrialEligibilityService();
   prisma.shopTrialHistory.findUnique = async () => {
     throw new Error("Can't reach database server");
   };
 
-  const result = await service.resolveTrialWindowForInstall(
-    "unreachable-db-shop.myshopify.com",
-    new Date("2026-08-01T00:00:00.000Z"),
-    null
+  await assert.rejects(
+    () =>
+      service.resolveTrialWindowOnApproval(
+        "unreachable-db-shop.myshopify.com",
+        new Date("2026-08-01T00:00:00.000Z"),
+        null
+      ),
+    /Can't reach database server/,
+    "must propagate, never fabricate now+N days and never silently report no trial"
   );
-
-  assert.equal(result, null, "must fail closed, never fabricate now+N days");
 });

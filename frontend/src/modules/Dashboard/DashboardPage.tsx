@@ -23,7 +23,7 @@ import { useAppBridge } from "../../shopifyAppBridge";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
 import { useOnboardingState } from "../../hooks/useOnboardingState";
 import { InsightsDashboardSections } from "./components/InsightsDashboardSections";
-import { TrialStatusBanner } from "../../components/billing/TrialStatus";
+import { ChoosePlanBanner, TrialStatusBanner } from "../../components/billing/TrialStatus";
 import { useAppState } from "../../hooks/useAppState";
 
 type Metrics = {
@@ -1132,9 +1132,11 @@ export function DashboardPage() {
         }}
       >
         <Layout>
-        {/* Compact full-access trial status, from the same canonical
+        {/* Compact plan-selected trial status, from the same canonical
             appState.billing.trialActive flag used by Onboarding and Billing.
-            Renders nothing when no trial is active. */}
+            Before any plan is approved, trialActive is false and the
+            choose-a-plan prompt renders instead — never a claim that
+            anything is unlocked before a plan starts. */}
         {appState?.billing?.trialActive ? (
           <Layout.Section>
             <TrialStatusBanner
@@ -1145,6 +1147,10 @@ export function DashboardPage() {
               }}
               onViewBilling={() => navigateEmbedded("/app/billing")}
             />
+          </Layout.Section>
+        ) : (appState?.billing?.planName ?? "NONE") === "NONE" ? (
+          <Layout.Section>
+            <ChoosePlanBanner onChoosePlan={() => navigateEmbedded("/app/billing")} />
           </Layout.Section>
         ) : null}
 

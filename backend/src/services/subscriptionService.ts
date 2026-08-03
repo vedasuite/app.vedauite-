@@ -22,6 +22,7 @@ import {
   type SubscriptionLifeCycleStatus,
 } from "../billing/capabilities";
 import { computeTrialState } from "../billing/trialState";
+import { resolveTrialWindowOnApproval } from "./trialEligibilityService";
 import { logEvent } from "./observabilityService";
 
 export type {
@@ -230,15 +231,16 @@ function buildMerchantBillingCopy(input: {
       // trialActive is checked first and independently of planName — a
       // merchant can have selectedPlanName=PRO (or any paid plan) while still
       // inside their local trial window, and must see trial copy, not "PRO
-      // plan is active".
-      if (input.trialActive) {
+      // plan is active". Plan-selected trial model: the copy names the
+      // SELECTED plan, since only that plan's features are unlocked — never
+      // a generic "full-access trial".
+      if (input.trialActive && input.planName !== "NONE") {
+        const planLabel = planDisplayLabel(input.planName);
         return {
-          title: "Trial access is active",
+          title: `${planLabel} trial active`,
           description: input.trialEndsAt
-            ? `Your trial is active until ${input.trialEndsAt.toLocaleString()}.${
-                input.planName !== "NONE" ? ` ${input.planName} starts when it ends.` : ""
-              }`
-            : "Your trial is active.",
+            ? `Your ${planLabel} features are unlocked until ${input.trialEndsAt.toLocaleString()}. You will not be charged before then.`
+            : `Your ${planLabel} features are unlocked during the trial. You will not be charged before it ends.`,
         };
       }
       return {
@@ -276,9 +278,9 @@ function buildMerchantBillingCopy(input: {
       };
     case "no_subscription":
       return {
-        title: "No paid plan is active",
+        title: "Choose a plan to start your 7-day free trial",
         description:
-          "Choose a plan in billing to unlock included features.",
+          "You will not be charged until the trial ends. Select STARTER, GROWTH or PRO in Billing to get started.",
       };
     default:
       return {
@@ -289,6 +291,11 @@ function buildMerchantBillingCopy(input: {
   }
 }
 
+/** "STARTER" -> "Starter" — for merchant-facing copy only. */
+function planDisplayLabel(planName: BillingPlanName): string {
+  return planName.charAt(0) + planName.slice(1).toLowerCase();
+}
+
 export function buildCanonicalEntitlements(input: {
   planName: BillingPlanName;
   starterModule: StarterModule | null;
@@ -296,17 +303,21 @@ export function buildCanonicalEntitlements(input: {
   verified: boolean;
   trialActive: boolean;
 }): CanonicalEntitlementState {
-  // A merchant is inside the full-access window when their trial is still
-  // open. During it they keep their SELECTED plan (so the post-trial charge is
-  // unchanged) but receive Pro-equivalent capabilities.
-  const fullAccessTrial = input.trialActive && input.planName !== "NONE";
+  // Plan-selected trial model: the trial does not widen entitlements to
+  // every module — it only means Shopify has not billed for the SELECTED
+  // plan yet. A merchant who approved STARTER during their trial gets
+  // exactly STARTER's entitlements, same as if they were already paying.
+  // "TRIAL" is never a real chargeable plan (legacy pre-dating this model),
+  // so it can never itself grant trial access.
+  const grantedByTrial =
+    input.trialActive && input.planName !== "NONE" && input.planName !== "TRIAL";
+  const accessActive = input.accessActive || grantedByTrial;
 
-  // Once the trial closes, access depends purely on whether Shopify reports an
-  // active paid subscription. A legacy standalone TRIAL plan collapses to NONE
-  // here, so an expired trial can never keep granting access.
+  // A legacy standalone TRIAL plan always collapses to NONE — there is no
+  // way to know which real plan (STARTER/GROWTH/PRO) it should represent.
   const effectivePlanName =
-    input.accessActive || fullAccessTrial
-      ? input.planName === "TRIAL" && !fullAccessTrial
+    accessActive
+      ? input.planName === "TRIAL"
         ? "NONE"
         : input.planName
       : "NONE";
@@ -315,42 +326,37 @@ export function buildCanonicalEntitlements(input: {
     plan: effectivePlanName,
     billingStatus: input.accessActive ? "ACTIVE" : "INACTIVE",
     starterModule: input.starterModule,
-    trialActive: fullAccessTrial,
+    trialActive: grantedByTrial,
   });
   const capabilities = resolved.capabilities;
   const modules = resolved.moduleAccess;
   const featureAccess = resolved.featureAccess;
-  const tier = fullAccessTrial ? "trial" : normalizeTier(effectivePlanName);
+  const tier = normalizeTier(effectivePlanName);
+  const planLabel = planDisplayLabel(effectivePlanName);
 
   return {
     tier,
     planName: effectivePlanName,
     // The Starter module selection is retained through the trial so it is
-    // already in place when the paid plan begins.
+    // already in place when Shopify starts billing.
     starterModule:
       effectivePlanName === "STARTER" ? normalizeStarterModule(input.starterModule) : null,
-    accessActive: input.accessActive || fullAccessTrial,
+    accessActive,
     verified: input.verified,
     modules,
     featureAccess,
     capabilities,
-    title: fullAccessTrial
-      ? "7-day full-access trial"
+    title: grantedByTrial
+      ? `${planLabel} trial active`
       : effectivePlanName === "NONE"
       ? "Limited access"
       : `${effectivePlanName} access`,
-    description: fullAccessTrial
-      ? `Every module is unlocked during your trial.${
-          // "TRIAL" is not a chargeable plan, so it must never be described as
-          // the one that begins afterwards.
-          input.planName !== "NONE" && input.planName !== "TRIAL"
-            ? ` ${input.planName} starts when it ends.`
-            : " Your selected subscription starts when it ends."
-        }`
+    description: grantedByTrial
+      ? `Your ${planLabel} features are unlocked during the trial. You will not be charged until the trial ends.`
       : effectivePlanName === "STARTER" && input.starterModule
       ? `${normalizeStarterModuleLabel(input.starterModule)} is the active Starter workflow.`
       : effectivePlanName === "NONE"
-      ? "Choose a plan to continue."
+      ? "Choose a plan to start your 7-day free trial."
       : "Included features are based on the active subscription.",
   };
 }
@@ -502,6 +508,21 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
     return null;
   }
 
+  // getActiveAppSubscription deliberately also returns PENDING subscriptions —
+  // other callers (the stale-intent check in billingManagementService) need to
+  // know when one is awaiting approval. This path must not: it writes
+  // active: true, and a subscription the merchant has not approved yet must
+  // never be reconciled into a locally active one.
+  const shopifyStatus = activeSubscription.status?.toUpperCase?.() ?? "";
+  if (shopifyStatus !== "ACTIVE" && shopifyStatus !== "ACCEPTED") {
+    logEvent("info", "billing.shopify_reconcile_skipped_unapproved", {
+      shop: store.shop,
+      shopifyStatus,
+      shopifyChargeId: activeSubscription.id,
+    });
+    return null;
+  }
+
   const planName = normalizePlanName(activeSubscription.name);
   if (!planName || planName === "TRIAL" || planName === "NONE") {
     return null;
@@ -577,8 +598,19 @@ async function reconcileCurrentSubscriptionFromShopify(store: NonNullable<StoreW
   return nextSubscription;
 }
 
-function isPaidSubscriptionActive(subscription?: { active: boolean; endsAt: Date | null } | null) {
+function isPaidSubscriptionActive(
+  subscription?: { active: boolean; endsAt: Date | null; billingStatus?: string | null } | null
+) {
   if (!subscription?.active) {
+    return false;
+  }
+
+  // Defense in depth: a PENDING subscription is never a live paid
+  // subscription, regardless of the `active` flag. New writes can no longer
+  // produce this combination (PENDING never activates), but a row written
+  // before that guard existed could still carry active: true + PENDING, and
+  // must not be treated as the current paid plan.
+  if ((subscription.billingStatus ?? "").toUpperCase() === "PENDING") {
     return false;
   }
 
@@ -624,15 +656,20 @@ export async function resolveBillingState(
     trialEndsAt: store.trialEndsAt,
   });
 
-  if (trial.trialDatesIncomplete && !store.uninstalledAt) {
+  const dbPlanName = normalizePlanName(store.subscription?.plan?.name) ?? "NONE";
+
+  // Under the plan-selected trial model, having no trial dates yet is the
+  // NORMAL state for any shop that hasn't approved a plan — not an anomaly.
+  // Only warn when a plan record exists (an approval happened at some
+  // point) but trial dates are still missing, which would indicate the
+  // approval-time grant genuinely failed.
+  if (trial.trialDatesIncomplete && !store.uninstalledAt && dbPlanName !== "NONE") {
     logEvent("warn", "billing.trial_dates_incomplete", {
       shop: shopDomain,
       hasTrialStartedAt: !!store.trialStartedAt,
       hasTrialEndsAt: !!store.trialEndsAt,
     });
   }
-
-  const dbPlanName = normalizePlanName(store.subscription?.plan?.name) ?? "NONE";
   const dbBillingStatus = store.subscription?.billingStatus ?? null;
   const latestIntent = store.billingPlanIntents[0] ?? null;
   const pendingIntentStatus = latestIntent?.status ?? null;
@@ -715,9 +752,10 @@ export async function resolveBillingState(
     billingStatus: subscriptionBillingStatus,
   });
 
-  const accessTier: ResolvedBillingState["accessTier"] = trialActive
-    ? "trial"
-    : normalizeTier(selectedPlanName);
+  // Plan-selected trial model: accessTier is always the SELECTED plan's own
+  // tier, trial or paid — the trial doesn't widen it to a generic "trial"
+  // tier, since only that plan's entitlements are unlocked either way.
+  const accessTier: ResolvedBillingState["accessTier"] = normalizeTier(selectedPlanName);
 
   return {
     lifecycle,
@@ -1056,19 +1094,74 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
   }
 
   const normalizedStatus = input.status?.toUpperCase() ?? "INACTIVE";
-  const isActive =
-    normalizedStatus === "ACTIVE" ||
-    normalizedStatus === "ACCEPTED" ||
-    normalizedStatus === "PENDING";
+  // ONLY these two mean "the merchant approved and Shopify considers the
+  // subscription live". PENDING is deliberately excluded — it means Shopify
+  // created the subscription but the merchant has not decided yet, so it must
+  // never set active=true, become the current paid plan, grant a trial, or
+  // suppress the choose-a-plan state.
+  const isApproved = normalizedStatus === "ACTIVE" || normalizedStatus === "ACCEPTED";
+  const isPending = normalizedStatus === "PENDING";
 
   const planName = normalizePlanName(input.planName);
   const currentPeriodEnd = input.currentPeriodEnd
     ? new Date(input.currentPeriodEnd)
     : null;
 
-  if (!isActive) {
+  // --- PENDING: record nothing -------------------------------------------
+  // Writing no local state at once satisfies every PENDING requirement: it
+  // cannot activate, cannot overwrite an existing ACTIVE subscription for a
+  // different plan, cannot be mistaken for the current paid plan, cannot
+  // grant a trial, and cannot suppress the choose-a-plan state. The
+  // ACTIVE/ACCEPTED webhook that follows a real approval is what reconciles.
+  if (isPending) {
+    logEvent("info", "billing.webhook_pending_ignored", {
+      shop: input.shopDomain,
+      incomingChargeId: input.shopifyChargeId ?? null,
+      incomingPlanName: input.planName ?? null,
+      hasExistingSubscription: !!store.subscription,
+      existingChargeId: store.subscription?.shopifyChargeId ?? null,
+      existingPlanName: store.subscription?.plan?.name ?? null,
+    });
+    return store.subscription;
+  }
+
+  if (!isApproved) {
     if (!store.subscription) {
       return null;
+    }
+
+    // A delayed inactive event (CANCELLED/DECLINED/EXPIRED) for an OLDER,
+    // already-replaced subscription must never deactivate the newer one that
+    // replaced it. Only act when this webhook is positively about the
+    // subscription currently stored.
+    const storedChargeId = store.subscription.shopifyChargeId ?? null;
+    const incomingChargeId = input.shopifyChargeId ?? null;
+
+    if (incomingChargeId && storedChargeId && incomingChargeId !== storedChargeId) {
+      logEvent("info", "billing.webhook_inactive_ignored_stale_charge", {
+        shop: input.shopDomain,
+        normalizedStatus,
+        incomingChargeId,
+        storedChargeId,
+        reason:
+          "inactive event is for a different (older/replaced) subscription — the current subscription is left untouched",
+      });
+      return store.subscription;
+    }
+
+    if (!incomingChargeId || !storedChargeId) {
+      // Cannot positively verify the match. Proceeding is deliberate:
+      // refusing here would make a row with no stored charge id (legacy data,
+      // or a webhook that omits the field) impossible to ever deactivate.
+      // The requirement's actual risk — a delayed cancel clobbering a newer
+      // replacement — always has both ids present and is handled above.
+      logEvent("warn", "billing.webhook_inactive_unverified_charge", {
+        shop: input.shopDomain,
+        normalizedStatus,
+        incomingChargeId,
+        storedChargeId,
+        reason: "could not positively match the webhook to the stored subscription; deactivating anyway",
+      });
     }
 
     const accessRemainsActive =
@@ -1182,6 +1275,58 @@ export async function reconcileStoreSubscriptionFromWebhook(input: {
     savedPlan: planName,
     savedStarterModule: normalizeStarterModule(updated.starterModule),
   });
+
+  // Plan-selected trial model: the trial is granted here — the ONE place
+  // both the browser return-redirect (confirmBillingApprovalReturn) and the
+  // independent app_subscriptions_update webhook funnel through once a
+  // subscription is reconciled. This makes trial granting redirect-
+  // independent: an approval that never completes the redirect (abandoned
+  // tab, browser crash) still gets its trial via the webhook alone, and a
+  // duplicate/replayed call from either path is a no-op (durable
+  // ShopTrialHistory grants exactly once, ever, per shop).
+  //
+  // Only reachable for an APPROVED status — PENDING returned early above and
+  // never reaches this point, so a subscription still awaiting the merchant's
+  // decision can never start a trial or write Store.trialStartedAt/trialEndsAt.
+  //
+  // A failure here is RE-THROWN, not swallowed. The merchant has a
+  // Shopify-approved subscription, so permanently losing their promised trial
+  // to a transient DB error is not acceptable. Throwing makes the webhook
+  // handler return non-2xx so Shopify redelivers (its own durable, hours-long
+  // retry schedule) and makes the redirect path show a recoverable error.
+  // Retries converge safely and cannot double-grant: the StoreSubscription
+  // upsert above is idempotent, and ShopTrialHistory yields exactly one
+  // window per shop forever, so a retry can neither create a second trial nor
+  // extend an existing trialEndsAt.
+  try {
+    const trialWindow = await resolveTrialWindowOnApproval(
+      input.shopDomain,
+      new Date(),
+      store.trialStartedAt && store.trialEndsAt
+        ? { trialStartedAt: store.trialStartedAt, trialEndsAt: store.trialEndsAt }
+        : null
+    );
+    if (trialWindow && (!store.trialStartedAt || !store.trialEndsAt)) {
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          trialStartedAt: trialWindow.trialStartedAt,
+          trialEndsAt: trialWindow.trialEndsAt,
+        },
+      });
+    }
+  } catch (error) {
+    logEvent("error", "billing.trial_grant_after_approval_failed", {
+      shop: input.shopDomain,
+      subscriptionId: updated.id,
+      shopifyChargeId: input.shopifyChargeId ?? null,
+      retryable: true,
+      reason:
+        "subscription is reconciled but the trial could not be persisted — failing so Shopify redelivers this webhook",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 
   return updated;
 }

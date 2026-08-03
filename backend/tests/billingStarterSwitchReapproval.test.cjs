@@ -56,6 +56,16 @@ test("active starter module change requires new Shopify billing approval", async
   };
 
   prisma.store.findUnique = async () => store;
+  // This shop already has an active (non-trial) STARTER subscription, so it
+  // already went through approval before — durable trial history exists
+  // and its window has long since closed, so this Starter-module switch
+  // must bill immediately (trialDays: 0), not grant a fresh trial.
+  prisma.shopTrialHistory.findUnique = async () => ({
+    shop: "test-shop.myshopify.com",
+    firstInstalledAt: new Date("2026-01-01T00:00:00.000Z"),
+    trialStartedAt: new Date("2026-01-01T00:00:00.000Z"),
+    trialEndsAt: new Date("2026-01-08T00:00:00.000Z"),
+  });
   prisma.subscriptionPlan.findUnique = async () => ({
     id: "plan-starter",
     name: "STARTER",

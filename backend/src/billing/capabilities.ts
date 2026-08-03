@@ -184,22 +184,20 @@ export function buildCapabilities(
   const capabilities = emptyCapabilities();
   const normalizedStarterModule = normalizeStarterModule(starterModule);
 
-  // A 7-day full-access trial grants Pro-equivalent capabilities regardless of
-  // which plan the merchant selected to start after it. The selected plan is
-  // still carried in `planName` so billing UI and post-trial entitlement
-  // resolution keep using it — the trial only overrides what is *unlocked*,
-  // never what the merchant has agreed to pay for.
+  // Plan-selected trial model: the trial does not change WHICH plan's
+  // entitlements apply — it only means Shopify has not billed for them yet.
+  // A merchant who approved STARTER gets exactly STARTER's entitlements
+  // during the trial, not every module. This is a deliberate product
+  // decision — see the 2026-08-03 "plan-selected Shopify trial model"
+  // change. `trialActive` still flows through to `billing.trialActive` for
+  // UI/copy purposes ("Starter trial active", no charge yet), but it no
+  // longer widens `effectivePlan`.
   //
-  // Legacy standalone "TRIAL" plan rows are treated the same way while their
-  // trial window is open, and collapse to NONE once it closes, so no shop can
-  // sit on an indefinite free TRIAL plan.
+  // Legacy standalone "TRIAL" plan rows (pre-dating this model) still
+  // collapse to NONE, so no shop can sit on an indefinite free TRIAL plan.
   const trialActive = options?.trialActive ?? false;
   const selectedPlan = planName;
-  const effectivePlan: BillingPlanName = trialActive
-    ? "PRO"
-    : selectedPlan === "TRIAL"
-    ? "NONE"
-    : selectedPlan;
+  const effectivePlan: BillingPlanName = selectedPlan === "TRIAL" ? "NONE" : selectedPlan;
 
   const isGrowth = effectivePlan === "GROWTH";
   const isPro = effectivePlan === "PRO";
@@ -214,8 +212,7 @@ export function buildCapabilities(
   const pricingModule = isStarterPricing || isGrowth || isPro;
   const creditScoreModule = isGrowth || isPro;
   const reportsModule = isGrowth || isPro;
-  // Full Profit Optimization stays Pro-only (and therefore trial-only via the
-  // Pro-equivalent override) — Starter and Growth never receive it.
+  // Full Profit Optimization stays Pro-only, trial or not.
   const profitModule = isPro;
 
   capabilities["reports.view"] = reportsModule;
@@ -295,9 +292,11 @@ export function resolveEntitlements(input: {
   billingStatus: string | null;
   starterModule: StarterModule | null;
   /**
-   * True only while a Shopify-backed 7-day trial window is still open. When
-   * set, capabilities resolve to Pro-equivalent while `plan` keeps reporting
-   * the merchant's selected post-trial plan.
+   * True only while the shop's one-time 7-day trial window (started at the
+   * moment a plan was approved in Shopify) is still open. Does not change
+   * which plan's entitlements apply — `plan` gets its own normal
+   * entitlements whether trialing or paid; the trial only means Shopify
+   * has not billed for them yet.
    */
   trialActive?: boolean;
 }) : ResolvedEntitlements {

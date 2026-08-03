@@ -76,9 +76,13 @@ const EXPIRED_TRIAL = {
 const NOW_DURING_TRIAL = new Date("2026-08-03T00:00:00.000Z");
 
 // ---------------------------------------------------------------------------
-// 1. No subscription + trial open
+// 1. No subscription + trial open. Under the plan-selected model this
+// shouldn't arise from any live code path (trial dates aren't set until a
+// plan is approved) — it's tested defensively for legacy/edge-case data.
+// The raw trialActive flag is still date-only and true, but with no plan
+// selected there is nothing to grant access to.
 // ---------------------------------------------------------------------------
-test("no subscription + trial open: trialActive=true, showTrialDate=true, full trial access", async () => {
+test("no subscription + trial open: trialActive=true (date-only), but no plan means no access tier granted", async () => {
   const { prisma, service } = freshSubscriptionService();
   prisma.store.findUnique = async () => buildStore({ ...OPEN_TRIAL });
 
@@ -87,8 +91,17 @@ test("no subscription + trial open: trialActive=true, showTrialDate=true, full t
   assert.equal(billing.trialActive, true);
   assert.equal(billing.showTrialDate, true);
   assert.equal(billing.selectedPlanName, "NONE");
-  assert.equal(billing.accessActive, true);
-  assert.equal(billing.accessTier, "trial");
+  assert.equal(billing.accessTier, "none", "no plan selected means no tier is granted, even with an open trial date");
+
+  // accessActive alone (date-only OR-condition) does not itself unlock any
+  // core module — buildCanonicalEntitlements separately refuses to grant
+  // access without a selected plan (see entitlementMatrix.test.cjs).
+  // ("settings" is always true regardless of plan, so it's excluded here.)
+  const subscription = await service.getCurrentSubscription("test-shop.myshopify.com");
+  assert.equal(subscription.enabledModules.fraud, false);
+  assert.equal(subscription.enabledModules.competitor, false);
+  assert.equal(subscription.enabledModules.pricingProfit, false);
+  assert.equal(subscription.enabledModules.profit, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -109,17 +122,33 @@ for (const plan of ["STARTER", "GROWTH", "PRO"]) {
       plan,
       `${plan}: the selected paid plan must be preserved for display`
     );
-    assert.equal(billing.accessTier, "trial", `${plan}: access tier is trial (Pro-equivalent), not the paid plan`);
+    assert.equal(
+      billing.accessTier,
+      plan.toLowerCase(),
+      `${plan}: access tier is the SELECTED plan's own tier — the trial does not widen it`
+    );
     assert.match(billing.merchantTitle, /trial/i, `${plan}: merchant copy must mention the trial, not "plan is active"`);
+    assert.match(billing.merchantTitle, new RegExp(plan, "i"), `${plan}: merchant copy must name the selected plan`);
 
     // The full end-to-end payload the frontend actually reads.
     const subscription = await service.getCurrentSubscription("test-shop.myshopify.com");
     assert.equal(subscription.trialActive, true);
     assert.equal(subscription.planName, plan);
     assert.equal(subscription.status, "trial_active");
-    // Full-access trial grants every module regardless of the selected plan.
-    assert.equal(subscription.enabledModules.pricingProfit, true);
-    assert.equal(subscription.enabledModules.profit, true);
+    // Plan-selected trial model: only the SELECTED plan's modules unlock.
+    if (plan === "PRO") {
+      assert.equal(subscription.enabledModules.pricingProfit, true);
+      assert.equal(subscription.enabledModules.profit, true);
+    } else if (plan === "GROWTH") {
+      assert.equal(subscription.enabledModules.pricingProfit, true);
+      assert.equal(subscription.enabledModules.profit, false, "Growth trial never includes full Profit Optimization");
+    } else {
+      // STARTER trial unlocks only the selected Starter module (fraud, per buildSubscription).
+      assert.equal(subscription.enabledModules.fraud, true);
+      assert.equal(subscription.enabledModules.competitor, false);
+      assert.equal(subscription.enabledModules.pricingProfit, false);
+      assert.equal(subscription.enabledModules.profit, false);
+    }
   });
 }
 

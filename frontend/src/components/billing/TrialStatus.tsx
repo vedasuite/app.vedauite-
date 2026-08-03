@@ -2,12 +2,18 @@ import { Badge, BlockStack, Banner, Box, Button, Card, Icon, InlineStack, Text }
 import { CalendarIcon, CheckCircleIcon, ConfettiIcon } from "@shopify/polaris-icons";
 
 /**
- * Shared presentation of the full-access trial.
+ * Shared presentation of the plan-selected trial.
  *
  * PRESENTATIONAL ONLY. It never decides whether a trial is active — callers
  * pass `trialActive`, which must come from the canonical entitlement state
  * (`appState.billing.trialActive`, resolved server-side by the same resolver
  * the Billing page uses). Nothing here infers access from a date.
+ *
+ * Plan-selected trial model (2026-08-03): the trial only starts once a plan
+ * (STARTER/GROWTH/PRO) is approved in Shopify, and only that plan's features
+ * unlock during it — never "every module". Before any plan is approved,
+ * `trialActive` is false and these components render nothing; use
+ * `ChoosePlanCard`/`ChoosePlanBanner` for that state instead.
  *
  * Centralising the date and days-remaining formatting here is what stops
  * Onboarding, Dashboard and Billing drifting apart.
@@ -67,17 +73,23 @@ export function selectedPaidPlan(planName: string | null): string | null {
   return normalized.charAt(0) + normalized.slice(1).toLowerCase();
 }
 
-/** Sentence describing what happens after the trial, with a safe fallback. */
-export function postTrialPlanSentence(planName: string | null): string {
+/**
+ * Sentence describing what's unlocked right now, scoped to the selected
+ * plan — plan-selected trial model, so only that plan's features are
+ * active, not "every module".
+ */
+export function trialPlanSentence(planName: string | null): string {
   const plan = selectedPaidPlan(planName);
   return plan
-    ? `Your selected ${plan} subscription will begin after the free trial ends. You will not be charged before then.`
-    : `Your selected subscription will begin after the free trial ends. You will not be charged before then.`;
+    ? `Your ${plan} features are active. You will not be charged until the trial ends.`
+    : `Your selected features are active. You will not be charged until the trial ends.`;
 }
 
 /**
  * Detailed card — Onboarding.
- * Renders nothing unless the canonical trial flag is set.
+ * Renders nothing unless the canonical trial flag is set (i.e. a plan has
+ * been approved in Shopify and its trial window is still open). Use
+ * `ChoosePlanCard` for the "no plan approved yet" state instead.
  */
 export function TrialStatusCard({
   data,
@@ -90,6 +102,7 @@ export function TrialStatusCard({
 
   const formattedDate = formatTrialDate(data.trialEndsAt);
   const remaining = trialRemainingLabel(data.trialEndsAt);
+  const plan = selectedPaidPlan(data.planName);
 
   return (
     <Card padding="400">
@@ -100,7 +113,7 @@ export function TrialStatusCard({
               <Icon source={ConfettiIcon} tone="success" />
             </Box>
             <Text as="h2" variant="headingMd">
-              Full-access trial active
+              {plan ? `${plan} trial active` : "Trial active"}
             </Text>
           </InlineStack>
           <Badge tone="success">{remaining}</Badge>
@@ -108,8 +121,8 @@ export function TrialStatusCard({
 
         <Text as="p" variant="bodyMd">
           {formattedDate
-            ? `All VedaSuite modules are unlocked until ${formattedDate}.`
-            : "All VedaSuite modules are currently unlocked."}
+            ? `${trialPlanSentence(data.planName)} Trial ends ${formattedDate}.`
+            : trialPlanSentence(data.planName)}
         </Text>
 
         <InlineStack gap="200" blockAlign="start" wrap={false}>
@@ -118,7 +131,9 @@ export function TrialStatusCard({
           </Box>
           <div style={{ minInlineSize: 0 }}>
             <Text as="p" variant="bodySm" tone="subdued">
-              {postTrialPlanSentence(data.planName)}
+              {plan
+                ? `Shopify will start billing for ${plan} only after the trial ends.`
+                : "Shopify will not bill you until the trial ends."}
             </Text>
           </div>
         </InlineStack>
@@ -157,17 +172,64 @@ export function TrialStatusBanner({
 
   const formattedDate = formatTrialDate(data.trialEndsAt);
   const remaining = trialRemainingLabel(data.trialEndsAt);
+  const plan = selectedPaidPlan(data.planName);
 
   return (
-    <Banner tone="success" title="Full-access trial active">
+    <Banner tone="success" title={plan ? `${plan} trial active` : "Trial active"}>
       <BlockStack gap="200">
         <Text as="p" variant="bodySm">
           {formattedDate
-            ? `${remaining} · All modules unlocked until ${formattedDate}.`
-            : `${remaining} · All modules unlocked.`}
+            ? `${remaining} · ${plan ? `${plan} features` : "Your selected features"} active until ${formattedDate}.`
+            : `${remaining} · ${plan ? `${plan} features` : "Your selected features"} active.`}
         </Text>
         <InlineStack gap="200" wrap>
           <Button onClick={onViewBilling}>View billing</Button>
+        </InlineStack>
+      </BlockStack>
+    </Banner>
+  );
+}
+
+/**
+ * Detailed card — Onboarding. Shown when NO plan has been approved yet
+ * (trialActive is false and no plan is selected) — the trial has not
+ * started, so this must never claim any module is unlocked.
+ */
+export function ChoosePlanCard({ onChoosePlan }: { onChoosePlan: () => void }) {
+  return (
+    <Card padding="400">
+      <BlockStack gap="300">
+        <Text as="h2" variant="headingMd">
+          Choose a plan to start your 7-day free trial
+        </Text>
+        <Text as="p" variant="bodyMd">
+          Select STARTER, GROWTH or PRO and approve it in Shopify to start your
+          7-day free trial. You will not be charged until the trial ends.
+        </Text>
+        <InlineStack gap="200" wrap>
+          <Button variant="primary" onClick={onChoosePlan}>
+            View plans / Start free trial
+          </Button>
+        </InlineStack>
+      </BlockStack>
+    </Card>
+  );
+}
+
+/**
+ * Compact banner — Dashboard equivalent of `ChoosePlanCard`.
+ */
+export function ChoosePlanBanner({ onChoosePlan }: { onChoosePlan: () => void }) {
+  return (
+    <Banner tone="info" title="Choose a plan to start your 7-day free trial">
+      <BlockStack gap="200">
+        <Text as="p" variant="bodySm">
+          You will not be charged until the trial ends.
+        </Text>
+        <InlineStack gap="200" wrap>
+          <Button variant="primary" onClick={onChoosePlan}>
+            View plans / Start free trial
+          </Button>
         </InlineStack>
       </BlockStack>
     </Banner>

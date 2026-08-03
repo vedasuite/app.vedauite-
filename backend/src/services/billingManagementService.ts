@@ -20,6 +20,8 @@ import {
   reconcileStoreSubscriptionFromWebhook,
   resolveBillingState,
 } from "./subscriptionService";
+import { getExistingTrialWindow } from "./trialEligibilityService";
+import { computeTrialState } from "../billing/trialState";
 import { logEvent } from "./observabilityService";
 
 const MANAGED_PAID_PLANS: BillingPlanName[] = ["STARTER", "GROWTH", "PRO"];
@@ -477,12 +479,40 @@ export async function requestBillingPlanChange(input: {
       returnUrl.searchParams.set("host", input.host);
     }
 
+    // Plan-selected trial model: Shopify must not charge until the shop's
+    // ONE durable trial window ends. This is not a simple "has ever used a
+    // trial" boolean — a plan switch mid-trial (e.g. STARTER -> PRO on day
+    // 2 of 7) must defer Shopify's billing for exactly the WHOLE days still
+    // remaining in the ORIGINAL window, never a fresh 7 (that would grant a
+    // second trial) and never 0 (that would charge the merchant before
+    // their original trialEndsAt — the replacement subscription's
+    // `replacementBehavior: STANDARD` bills immediately once approved if
+    // trialDays is 0, cancelling the old still-trialing subscription).
+    //
+    // computeTrialState's day count is a ceil, never a floor: rounding UP
+    // means this can only ever grant Shopify equal-or-more deferred time
+    // than the merchant's actual remaining trial, never less — so this can
+    // never cause an early charge. It never touches Store.trialStartedAt/
+    // trialEndsAt or ShopTrialHistory — only the number handed to Shopify
+    // for THIS replacement subscription.
+    //
+    // getExistingTrialWindow deliberately does not catch errors: a DB
+    // failure here fails this whole request (existing try/catch below marks
+    // the intent FAILED and the merchant can retry) rather than silently
+    // guessing a trialDays value that could charge early or grant a bonus.
+    const existingTrialWindow = await getExistingTrialWindow(input.shopDomain);
+    const shopifyTrialDays = !existingTrialWindow
+      ? env.billing.trialDays // genuinely first-ever approval for this shop
+      : computeTrialState(existingTrialWindow).trialActive
+      ? computeTrialState(existingTrialWindow).trialDaysRemaining // mid-trial plan switch — remaining whole days only
+      : 0; // the one durable trial already ran its course
+
     const result = await createAppSubscription({
       shopDomain: input.shopDomain,
       name: `VedaSuite AI - ${requestedPlan}`,
       price: getPlanPrice(requestedPlan),
       returnUrl: returnUrl.toString(),
-      trialDays: 0,
+      trialDays: shopifyTrialDays,
       test: env.billing.testMode,
     });
 
@@ -597,9 +627,19 @@ export async function confirmBillingApprovalReturn(input: {
   }
 
   const activeSubscription = await getActiveAppSubscription(input.shopDomain);
-  if (!activeSubscription) {
-    const declineMessage =
-      "Shopify billing was not approved. If you declined the plan, select a plan below to subscribe.";
+  // getActiveAppSubscription intentionally includes PENDING (it also serves
+  // staleness checks elsewhere that need to know about a subscription still
+  // awaiting the merchant's decision). Here, confirming an approval, PENDING
+  // must NOT count — it means the merchant has not actually approved
+  // anything yet, and treating it as confirmed would grant access and a
+  // trial before Shopify has genuinely approved the subscription.
+  const genuinelyApproved =
+    !!activeSubscription &&
+    ["ACTIVE", "ACCEPTED"].includes(activeSubscription.status?.toUpperCase?.() ?? "");
+  if (!genuinelyApproved) {
+    const declineMessage = !activeSubscription
+      ? "Shopify billing was not approved. If you declined the plan, select a plan below to subscribe."
+      : "Shopify has not finished confirming this subscription yet. Please try again in a moment.";
     if (intent) {
       await prisma.billingPlanIntent.update({
         where: { id: intent.id },
@@ -646,13 +686,39 @@ export async function confirmBillingApprovalReturn(input: {
     );
   }
 
-  await reconcileStoreSubscriptionFromWebhook({
-    shopDomain: input.shopDomain,
-    shopifyChargeId: activeSubscription.id,
-    planName: activeSubscription.name,
-    status: activeSubscription.status,
-    currentPeriodEnd: activeSubscription.currentPeriodEnd ?? null,
-  });
+  // Trial granting lives inside reconcileStoreSubscriptionFromWebhook itself
+  // (not here) — that function is the ONE place both this browser-redirect
+  // path AND the independent app_subscriptions_update webhook path funnel
+  // through, so the trial is granted exactly once no matter which path
+  // reaches "genuinely approved" first, and is never lost if the merchant
+  // never completes this redirect.
+  //
+  // If persisting the trial fails, that throws (by design — it must not be
+  // silently swallowed). Surface it as a recoverable, non-leaking message:
+  // the intent stays PENDING_APPROVAL, so both a merchant retry and the next
+  // Shopify webhook redelivery re-run this and converge.
+  try {
+    await reconcileStoreSubscriptionFromWebhook({
+      shopDomain: input.shopDomain,
+      shopifyChargeId: activeSubscription.id,
+      planName: activeSubscription.name,
+      status: activeSubscription.status,
+      currentPeriodEnd: activeSubscription.currentPeriodEnd ?? null,
+    });
+  } catch (error) {
+    logEvent("error", "billing.confirm_return_reconciliation_failed", {
+      shop: input.shopDomain,
+      shopifyChargeId: activeSubscription.id,
+      intentId: intent?.id ?? null,
+      retryable: true,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new HttpError(
+      503,
+      "Shopify approved your plan, but VedaSuite could not finish recording it. You have not been charged incorrectly — refresh this page in a moment to finish, or it will complete automatically."
+    );
+  }
+
   await reconcileBillingState(input.shopDomain);
 
   const confirmedStarterModule = normalizeStarterModule(

@@ -27,7 +27,6 @@ function buildHostParam(shop: string): string {
 }
 import { setShopifySessionCookie } from "../lib/shopifySessionCookie";
 import { ensureStoreBootstrapped } from "../services/bootstrapService";
-import { resolveTrialWindowForInstall } from "../services/trialEligibilityService";
 import { logEvent } from "../services/observabilityService";
 import { registerSyncWebhooks } from "../services/shopifyAdminService";
 import {
@@ -161,23 +160,13 @@ async function persistInstallationRecord(params: {
     },
   });
 
-  // Durable one-trial-per-shop gate: checks ShopTrialHistory (which survives
-  // a full Store row purge and recreation) before ever treating this as a
-  // first installation. Never falls back to "now + trialDays" on its own —
-  // only this function's resolved window (or nothing) is used below.
-  const trialWindow = await resolveTrialWindowForInstall(
-    params.shop,
-    params.installedAt,
-    existingStore?.trialStartedAt && existingStore?.trialEndsAt
-      ? {
-          trialStartedAt: existingStore.trialStartedAt,
-          trialEndsAt: existingStore.trialEndsAt,
-        }
-      : null
-  );
-
-  const trialStartedAt = trialWindow?.trialStartedAt ?? existingStore?.trialStartedAt ?? null;
-  const trialEndsAt = trialWindow?.trialEndsAt ?? existingStore?.trialEndsAt ?? null;
+  // Plan-selected trial model: installation itself never starts a trial —
+  // the trial begins only when a plan is approved in Shopify (see
+  // billingManagementService.confirmBillingApprovalReturn). This install
+  // path only ever preserves whatever trial dates already exist (a
+  // returning shop reconnecting after uninstall) and never sets new ones.
+  const trialStartedAt = existingStore?.trialStartedAt ?? null;
+  const trialEndsAt = existingStore?.trialEndsAt ?? null;
 
   const store = await prisma.store.upsert({
     where: { shop: params.shop },
@@ -234,12 +223,9 @@ async function persistInstallationRecord(params: {
     },
   });
 
-  // resolveTrialWindowForInstall already logs the detailed outcome (granted
-  // for a genuine first install / backfilled from an existing Store row /
-  // reused durable history). This just covers the two cases it doesn't:
-  // an existing store whose dates were already set (normal reauth — nothing
-  // changed, logged here for visibility) and the fail-closed case where
-  // eligibility could not be resolved at all.
+  // Install never grants a trial under the plan-selected model — only log
+  // when a returning shop's existing trial dates are being preserved, for
+  // visibility that reauthorization/reinstall never resets them.
   if (existingStore?.trialStartedAt && existingStore?.trialEndsAt) {
     logEvent("info", "billing.trial_reinitialization_blocked", {
       shop: params.shop,
@@ -247,12 +233,6 @@ async function persistInstallationRecord(params: {
       reason: "existing trial dates preserved — reauthorization never grants a second trial",
       trialStartedAt: existingStore.trialStartedAt.toISOString(),
       trialEndsAt: existingStore.trialEndsAt.toISOString(),
-    });
-  } else if (!trialStartedAt || !trialEndsAt) {
-    logEvent("warn", "billing.trial_eligibility_unresolved_manual_review", {
-      shop: params.shop,
-      route: "oauth_callback",
-      reason: "trial eligibility could not be resolved this request — no trial dates set, needs manual review",
     });
   }
 

@@ -222,22 +222,32 @@ for (const scenario of PRODUCTION_FAILURE_MATRIX) {
 
     // billing copy/status
     assert.equal(subscription.status, trialShouldBeActive ? "trial_active" : (selectedPlan === "NONE" ? "inactive" : "active_paid"));
-    if (trialShouldBeActive) {
+    if (trialShouldBeActive && selectedPlan !== "NONE") {
       assert.match(billing.merchantTitle, /trial/i, "merchant copy must mention the trial");
+      assert.match(billing.merchantTitle, new RegExp(selectedPlan, "i"), "merchant copy must name the selected plan");
     }
 
-    // effective module access. Full Pro-equivalent access during an open
-    // trial applies once a plan has been selected — this is pre-existing,
-    // already-tested, deliberate behavior (see entitlementMatrix.test.cjs:
-    // "a trial cannot be inferred without a selected plan", which stops a
-    // stale trialEndsAt from unlocking modules for a shop that never chose
-    // anything). This fix does not change that rule; it only fixes the case
-    // where a plan WAS selected and an active Shopify subscription exists.
-    if (trialShouldBeActive && selectedPlan !== "NONE") {
-      assert.equal(subscription.enabledModules.fraud, true, `${selectedPlan}: fraud module unlocked during trial`);
-      assert.equal(subscription.enabledModules.competitor, true, `${selectedPlan}: competitor module unlocked during trial`);
-      assert.equal(subscription.enabledModules.pricingProfit, true, `${selectedPlan}: pricing module unlocked during trial`);
-      assert.equal(subscription.enabledModules.profit, true, `${selectedPlan}: full Profit Optimization is Pro-equivalent during the trial, even for STARTER/GROWTH`);
+    // effective module access. Plan-selected trial model: the trial grants
+    // exactly the SELECTED plan's own entitlements — never every module.
+    // PRO's own entitlements already include everything, so a PRO trial (or
+    // PRO paid) unlocks everything; STARTER/GROWTH trials unlock only their
+    // own plan's modules, same as if already paying.
+    if (trialShouldBeActive && selectedPlan === "PRO") {
+      assert.equal(subscription.enabledModules.fraud, true);
+      assert.equal(subscription.enabledModules.competitor, true);
+      assert.equal(subscription.enabledModules.pricingProfit, true);
+      assert.equal(subscription.enabledModules.profit, true, "PRO unlocks full Profit Optimization, trial or paid");
+    } else if (trialShouldBeActive && selectedPlan === "GROWTH") {
+      assert.equal(subscription.enabledModules.fraud, true);
+      assert.equal(subscription.enabledModules.competitor, true);
+      assert.equal(subscription.enabledModules.pricingProfit, true);
+      assert.equal(subscription.enabledModules.profit, false, "Growth trial never includes full Profit Optimization");
+    } else if (trialShouldBeActive && selectedPlan === "STARTER") {
+      // buildSubscription("STARTER") selects the "fraud" Starter module.
+      assert.equal(subscription.enabledModules.fraud, true);
+      assert.equal(subscription.enabledModules.competitor, false, "STARTER trial unlocks only the selected Starter module");
+      assert.equal(subscription.enabledModules.pricingProfit, false);
+      assert.equal(subscription.enabledModules.profit, false);
     } else if (!trialShouldBeActive && selectedPlan === "PRO") {
       assert.equal(subscription.enabledModules.profit, true);
     } else if (selectedPlan === "NONE") {
@@ -287,7 +297,11 @@ test("route layer proof — GET /api/subscription/plan does not suppress an open
     assert.equal(body.subscription.planName, "PRO", "HTTP response: selected plan preserved");
     assert.equal(body.billingState.trialActive, true, "HTTP response: billingState.trialActive");
     assert.equal(body.billingState.showTrialDate, true, "HTTP response: billingState.showTrialDate");
-    assert.equal(body.entitlements.tier, "trial", "HTTP response: entitlements.tier");
+    // Plan-selected trial model: tier is the selected plan's own tier
+    // ("pro"), not a generic "trial" tier — PRO's own entitlements already
+    // include everything, so full access still follows from this tier alone.
+    assert.equal(body.entitlements.tier, "pro", "HTTP response: entitlements.tier");
+    assert.equal(body.entitlements.capabilities["billing.trialActive"], true, "HTTP response: trial flag still surfaced for UI copy");
   } finally {
     server.close();
   }

@@ -501,26 +501,36 @@ export function PricingPage() {
       subtitle="Choose a plan, compare included features, and manage Shopify billing."
     >
       <Layout>
-        {/* Full-access trial status. Shown only while the canonical
-            trialActive flag is true — a merchant who selected STARTER,
-            GROWTH or PRO still sees this while their trial window is open;
-            selecting a paid plan never suppresses it. Dates and days
-            remaining come straight from the backend, never re-derived. */}
+        {/* Plan-selected trial status. Shown only while the canonical
+            trialActive flag is true — the trial only starts once a plan is
+            approved in Shopify, so this only ever names the SELECTED plan's
+            features, never "every module". An active paid StoreSubscription
+            never suppresses it while the trial window is open. Dates and
+            days remaining come straight from the backend, never re-derived. */}
         {currentSummary.trialActive && currentSummary.trialEndsAt ? (
           <Layout.Section>
-            <Banner title="7-day full-access trial" tone="info">
+            <Banner
+              title={
+                currentSummary.planName && currentSummary.planName !== "NONE"
+                  ? `${currentSummary.planName} trial active`
+                  : "Trial active"
+              }
+              tone="info"
+            >
               <BlockStack gap="200">
                 <p>
-                  {`Every module is unlocked until ${formatDate(
-                    currentSummary.trialEndsAt
-                  )} · ${currentSummary.trialDaysRemaining} day${
-                    currentSummary.trialDaysRemaining === 1 ? "" : "s"
-                  } left.`}
+                  {`${
+                    currentSummary.planName && currentSummary.planName !== "NONE"
+                      ? `Your ${currentSummary.planName} features are active`
+                      : "Your selected features are active"
+                  } until ${formatDate(currentSummary.trialEndsAt)} · ${
+                    currentSummary.trialDaysRemaining
+                  } day${currentSummary.trialDaysRemaining === 1 ? "" : "s"} left.`}
                 </p>
                 <p>
                   {currentSummary.planName && currentSummary.planName !== "NONE"
-                    ? `Your ${currentSummary.planName} plan begins when the trial ends. You are not charged before then.`
-                    : "Choose a plan before the trial ends to keep your access."}
+                    ? `Shopify will start billing for ${currentSummary.planName} only after the trial ends.`
+                    : "You will not be charged until the trial ends."}
                 </p>
               </BlockStack>
             </Banner>

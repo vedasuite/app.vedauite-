@@ -23,53 +23,80 @@ function entitlementsFor(plan, starterModule, trialActive) {
 }
 
 // ---------------------------------------------------------------------------
-// 7-day full-access trial
+// Plan-selected trial model (2026-08-03 product decision): the trial only
+// starts once a plan is approved in Shopify, and grants exactly THAT plan's
+// entitlements — never every module. Shopify simply doesn't bill for them
+// yet. STARTER and GROWTH merchants still see Upgrade badges on modules
+// outside their plan during the trial; only PRO unlocks everything.
 // ---------------------------------------------------------------------------
 
-test("active trial grants every implemented module regardless of selected plan", () => {
-  for (const selectedPlan of ["STARTER", "GROWTH", "PRO"]) {
-    const result = entitlementsFor(selectedPlan, "fraud", true);
-    assert.deepEqual(
-      [...result.enabledModules].sort(),
-      [...ALL_MODULES].sort(),
-      `${selectedPlan} trial should unlock every module`
-    );
-    assert.equal(result.lockedModules.length, 0, `${selectedPlan} trial should lock nothing`);
-  }
-});
-
-test("active trial grants Pro-equivalent features, including full profit optimization", () => {
-  const trial = entitlementsFor("STARTER", "fraud", true);
-  const pro = entitlementsFor("PRO", null, false);
-
-  assert.equal(trial.featureAccess.fullProfitEngine, true);
+test("a STARTER trial unlocks only the selected Starter module, nothing else", () => {
+  const result = entitlementsFor("STARTER", "fraud", true);
+  assert.deepEqual(result.enabledModules, ["fraud"], "STARTER trial unlocks only its selected module");
   assert.deepEqual(
-    trial.featureAccess,
-    pro.featureAccess,
-    "every feature flag must match Pro during the trial"
+    [...result.lockedModules].sort(),
+    ["competitor", "pricing", "profit"],
+    "STARTER trial still locks everything outside the plan"
   );
+});
 
-  // Every capability must match Pro except the two billing-surface flags that
-  // legitimately reflect the merchant's own selection rather than their access.
-  const BILLING_SURFACE = ["billing.moduleSelectionStarter", "billing.trialActive"];
-  for (const key of Object.keys(pro.capabilities)) {
-    if (BILLING_SURFACE.includes(key)) continue;
-    assert.equal(
-      trial.capabilities[key],
-      pro.capabilities[key],
-      `capability ${key} should match Pro during the trial`
-    );
+test("a GROWTH trial unlocks fraud, competitor and pricing but not full profit", () => {
+  const result = entitlementsFor("GROWTH", null, true);
+  assert.deepEqual([...result.enabledModules].sort(), ["competitor", "fraud", "pricing"]);
+  assert.equal(result.lockedModules.length, 1);
+  assert.deepEqual(result.lockedModules, ["profit"], "Growth never includes full Profit Optimization, trial or not");
+});
+
+test("a PRO trial unlocks every implemented module, including full profit optimization", () => {
+  const result = entitlementsFor("PRO", null, true);
+  assert.deepEqual(
+    [...result.enabledModules].sort(),
+    [...ALL_MODULES].sort(),
+    "PRO trial unlocks everything, because PRO's own entitlements already are everything"
+  );
+  assert.equal(result.lockedModules.length, 0);
+  assert.equal(result.featureAccess.fullProfitEngine, true);
+});
+
+test("trial entitlements exactly match paying for the same plan (no Pro-equivalent widening)", () => {
+  for (const [plan, starterModule] of [["STARTER", "fraud"], ["GROWTH", null], ["PRO", null]]) {
+    const trialing = entitlementsFor(plan, starterModule, true);
+    const paid = entitlementsFor(plan, starterModule, false);
+
+    assert.deepEqual(trialing.enabledModules, paid.enabledModules, `${plan}: enabled modules must match paid access`);
+    assert.deepEqual(trialing.featureAccess, paid.featureAccess, `${plan}: feature access must match paid access`);
+
+    // Only the billing-surface trialActive flag itself should differ.
+    for (const key of Object.keys(paid.capabilities)) {
+      if (key === "billing.trialActive") continue;
+      assert.equal(
+        trialing.capabilities[key],
+        paid.capabilities[key],
+        `${plan}: capability ${key} must match paid access during the trial`
+      );
+    }
   }
 });
 
-test("trial exposes billing.trialActive so the UI can hide Upgrade badges", () => {
+test("trial exposes billing.trialActive for UI copy, without widening which modules are locked", () => {
   const trial = entitlementsFor("GROWTH", null, true);
   const paid = entitlementsFor("GROWTH", null, false);
 
   assert.equal(trial.capabilities["billing.trialActive"], true);
   assert.equal(paid.capabilities["billing.trialActive"], false);
-  // Nothing is locked during the trial, so no module can render an upgrade badge.
-  assert.equal(trial.lockedModules.length, 0);
+  // Growth still locks "profit" whether trialing or paid — an Upgrade badge
+  // on Profit Optimization is correct during a Growth trial, not a bug.
+  assert.deepEqual(trial.lockedModules, paid.lockedModules);
+});
+
+test("no plan selected: trialActive alone never grants access, even if somehow set", () => {
+  // Defensive: under the plan-selected model this combination should not
+  // arise in practice (trial dates aren't set until a plan is approved), but
+  // the entitlement resolver itself must still refuse to manufacture access
+  // from a date with no selected plan.
+  const result = entitlementsFor("NONE", null, true);
+  assert.deepEqual(result.enabledModules, []);
+  assert.deepEqual([...result.lockedModules].sort(), [...ALL_MODULES].sort());
 });
 
 test("trial retains the merchant's selected post-trial plan and Starter module", () => {
@@ -98,11 +125,15 @@ test("expired trial with no valid paid subscription blocks every paid module", (
   assert.deepEqual([...result.lockedModules].sort(), [...ALL_MODULES].sort());
 });
 
-test("a legacy standalone TRIAL plan grants nothing once its window closes", () => {
+test("a legacy standalone TRIAL plan grants nothing, open or closed", () => {
+  // "TRIAL" as a stored plan name predates the plan-selected model and never
+  // maps to a real chargeable plan — it always collapses to NONE now,
+  // regardless of trialActive, since there is no way to know which real
+  // plan (STARTER/GROWTH/PRO) it should represent.
   const open = entitlementsFor("TRIAL", null, true);
   const closed = entitlementsFor("TRIAL", null, false);
 
-  assert.equal(open.enabledModules.length, 4, "open trial window unlocks everything");
+  assert.deepEqual(open.enabledModules, [], "a legacy TRIAL plan name never unlocks anything on its own");
   assert.deepEqual(closed.enabledModules, [], "no indefinite free TRIAL plan is possible");
 });
 
