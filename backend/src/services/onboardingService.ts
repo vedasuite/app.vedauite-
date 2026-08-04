@@ -238,7 +238,39 @@ export async function getOnboardingState(shopDomain: string) {
   // the module pages themselves. `selectedModuleAvailable` is still tracked
   // above for display (e.g. "your pick isn't in your plan yet"), but it no
   // longer gates step completion.
-  const moduleSelectionComplete = readiness.initialSync.ready && !!selectedModule;
+  // Step 1 ("Sync Data") completion means exactly one thing: a Shopify sync ran
+  // and finished successfully. It must NOT depend on how much history the store
+  // happens to contain.
+  //
+  // `readiness.initialSync.ready` is only true for the READY_WITH_DATA state,
+  // which deriveSyncStatus reaches solely when
+  // products+orders+customers > 0 AND processed rows > 0. A brand-new store that
+  // syncs successfully has zero of both, so it lands on EMPTY_STORE_DATA ->
+  // canonical state "setup_needed" -> ready === false, leaving Step 1 permanently
+  // incomplete and every later step locked behind it. That is store *emptiness*,
+  // not a sync failure.
+  //
+  // EMPTY_STORE_DATA on its own cannot be the signal either: deriveSyncStatus
+  // returns it whenever raw counts are zero, including for a store that has never
+  // synced at all — using it would tick Step 1 before the merchant ever pressed
+  // Sync Data. The unambiguous evidence that a sync actually ran and succeeded is
+  // the latest shopify_sync job's terminal status, which finalizeSyncSuccess only
+  // ever writes on the success path (FAILED and SYNC_IN_PROGRESS are excluded).
+  //
+  // Readiness scoring, insight generation, and dashboard-entry states are left
+  // exactly as they are — limited data still legitimately suppresses insights.
+  const SUCCESSFUL_SYNC_JOB_STATUSES = new Set([
+    "READY_WITH_DATA",
+    "SUCCEEDED",
+    "SUCCEEDED_NO_DATA",
+    "SUCCEEDED_PROCESSING_PENDING",
+  ]);
+  const latestSyncJobStatus = operational.latestSyncJob?.status ?? null;
+  const syncCompletedSuccessfully =
+    !!latestSyncJobStatus && SUCCESSFUL_SYNC_JOB_STATUSES.has(latestSyncJobStatus);
+  const dataSyncComplete = readiness.initialSync.ready || syncCompletedSuccessfully;
+
+  const moduleSelectionComplete = dataSyncComplete && !!selectedModule;
   const firstInsightViewedComplete =
     moduleSelectionComplete && !!store.onboardingFirstInsightViewedAt;
   const planConfirmationComplete =
@@ -258,7 +290,7 @@ export async function getOnboardingState(shopDomain: string) {
   // and unnecessary. `setup.minimumComplete` is unchanged and still used for
   // readiness summaries elsewhere.
   const allVisibleStepsComplete =
-    readiness.initialSync.ready &&
+    dataSyncComplete &&
     moduleSelectionComplete &&
     firstInsightViewedComplete &&
     planConfirmationComplete;
@@ -269,7 +301,7 @@ export async function getOnboardingState(shopDomain: string) {
     {
       key: "DATA_SYNC",
       label: "Step 1: Sync Data",
-      complete: readiness.initialSync.ready,
+      complete: dataSyncComplete,
       description:
         "Sync live Shopify products, customers, and orders so VedaSuite can analyze the store.",
       helper: readiness.initialSync.description,
@@ -282,7 +314,7 @@ export async function getOnboardingState(shopDomain: string) {
       description:
         "Choose which VedaSuite feature to open first: Fraud Intelligence, Competitor Intelligence, or AI Pricing Engine.",
       helper:
-        !readiness.initialSync.ready
+        !dataSyncComplete
           ? "Finish syncing Shopify data first, then pick a feature below."
           : !selectedModule
           ? "Pick any feature to start with — you can switch later from the dashboard."
