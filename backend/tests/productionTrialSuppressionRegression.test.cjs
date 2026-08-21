@@ -80,13 +80,22 @@ function buildStore(overrides = {}) {
   };
 }
 
+// Trial windows are RELATIVE to the moment the suite runs — see the same note
+// in canonicalBillingTrialAbuse.test.cjs. The previous hardcoded
+// 2026-08-01 -> 2026-08-08 window expired in wall-clock time, which silently
+// disabled this entire production-regression proof. Both windows keep the real
+// 7-day length.
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const FIXTURE_NOW = Date.now();
 const OPEN_TRIAL = {
-  trialStartedAt: new Date("2026-08-01T00:00:00.000Z"),
-  trialEndsAt: new Date("2026-08-08T00:00:00.000Z"),
+  // Day 3 of 7 — open, and clear of both edges.
+  trialStartedAt: new Date(FIXTURE_NOW - 2 * MS_PER_DAY),
+  trialEndsAt: new Date(FIXTURE_NOW + 5 * MS_PER_DAY),
 };
 const EXPIRED_TRIAL = {
-  trialStartedAt: new Date("2026-01-01T00:00:00.000Z"),
-  trialEndsAt: new Date("2026-01-08T00:00:00.000Z"),
+  // A 7-day window that closed 30 days ago.
+  trialStartedAt: new Date(FIXTURE_NOW - 37 * MS_PER_DAY),
+  trialEndsAt: new Date(FIXTURE_NOW - 30 * MS_PER_DAY),
 };
 
 function freshServices() {

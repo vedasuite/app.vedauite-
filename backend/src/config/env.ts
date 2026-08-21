@@ -52,6 +52,14 @@ export const env = {
     "true",
   enableGuidedSetupData:
     (process.env.ENABLE_GUIDED_SETUP_DATA || "false").toLowerCase() === "true",
+  // Persistence of intelligence findings (IntelligenceFinding). OFF by default:
+  // the table and service ship inert, so this branch changes nothing until a
+  // later detector is wired up and the flag is switched on in that environment.
+  // Read paths are never gated by this — only writes.
+  enableIntelligenceFindingPersistence:
+    (
+      process.env.ENABLE_INTELLIGENCE_FINDING_PERSISTENCE || "false"
+    ).toLowerCase() === "true",
 };
 
 if (!env.shopifyApiKey || !env.shopifyApiSecret || !env.shopifyAppUrl) {
