@@ -54,172 +54,20 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
-/**
- * The 14 historical migrations and the structures each one creates, extracted
- * from the migration SQL in backend/prisma/migrations.
- *
- * Spec grammar:
- *   T:Table          -> that table must exist
- *   C:Table.column   -> that column must exist
- *   D:Table.column   -> that column's DEFAULT must be 7
- *
- * The `D:` form exists for 20260803_subscription_plan_trial_days_default, which
- * does not create anything — it only changes SubscriptionPlan.trialDays's
- * default from 3 to 7. An existence check would pass whether or not that
- * migration ever ran, so the default value itself is the only real evidence.
- */
-const HISTORICAL_MIGRATIONS = [
-  {
-    name: "20260403_billing_access_architecture",
-    specs: [
-      "T:BillingAuditLog",
-      "C:Store.trialStartedAt",
-      "C:Store.trialEndsAt",
-      "C:StoreSubscription.billingStatus",
-      "C:StoreSubscription.cancelledAt",
-      "C:StoreSubscription.lastBillingSyncAt",
-      "C:StoreSubscription.moduleSwitchedAt",
-      "C:StoreSubscription.planActivatedAt",
-    ],
-  },
-  { name: "20260404_core_engines", specs: ["T:SyncJob", "T:TimelineEvent"] },
-  {
-    name: "20260405_shopify_connection_health",
-    specs: [
-      "C:Store.installedAt",
-      "C:Store.isOffline",
-      "C:Store.lastConnectionCheckAt",
-      "C:Store.lastConnectionStatus",
-      "C:Store.lastSyncAt",
-      "C:Store.scope",
-      "C:Store.syncStatus",
-      "C:Store.uninstalledAt",
-      "C:Store.webhooksRegisteredAt",
-    ],
-  },
-  {
-    name: "20260405_shopify_oauth_hardening",
-    specs: ["C:Store.lastConnectionError"],
-  },
-  {
-    name: "20260406_activation_truthfulness",
-    specs: ["T:ProductSnapshot", "T:VariantSnapshot"],
-  },
-  {
-    name: "20260406_expiring_offline_tokens",
-    specs: ["C:Store.tokenAcquisitionMode"],
-  },
-  {
-    name: "20260406_shopify_installation_hardening",
-    specs: [
-      "C:Store.accessTokenExpiresAt",
-      "C:Store.authErrorCode",
-      "C:Store.authErrorMessage",
-      "C:Store.lastWebhookRegistrationStatus",
-      "C:Store.reauthorizedAt",
-      "C:Store.refreshToken",
-      "C:Store.refreshTokenExpiresAt",
-    ],
-  },
-  {
-    name: "20260408_billing_install_metadata_truth",
-    specs: [
-      "C:StoreSubscription.lastBillingResolutionSource",
-      "C:StoreSubscription.lastBillingSubscriptionName",
-      "C:StoreSubscription.lastBillingWebhookProcessedAt",
-    ],
-  },
-  {
-    name: "20260408_billing_management_intents",
-    specs: ["T:BillingPlanIntent"],
-  },
-  {
-    name: "20260409_onboarding_flow_refactor",
-    specs: [
-      "C:Store.onboardingFirstInsightViewedAt",
-      "C:Store.onboardingPlanConfirmedAt",
-      "C:Store.onboardingSelectedModule",
-    ],
-  },
-  {
-    name: "20260409_onboarding_state",
-    specs: ["C:Store.onboardingCompletedAt", "C:Store.onboardingDismissedAt"],
-  },
-  {
-    name: "20260502_order_identity_fields",
-    specs: [
-      "C:Order.orderName",
-      "C:Order.shopifyLegacyOrderId",
-      "C:Order.shopifyOrderGid",
-    ],
-  },
-  { name: "20260803_shop_trial_history", specs: ["T:ShopTrialHistory"] },
-  {
-    name: "20260803_subscription_plan_trial_days_default",
-    specs: ["D:SubscriptionPlan.trialDays"],
-  },
-];
+// The 14 historical migrations, the structures each one creates, the row-count
+// tables and the read-only probes all live in historical-migrations.js (see that
+// file for the spec grammar). Sharing them means this verifier and
+// baseline-staging-migrations.js can never disagree about what is being VERIFIED
+// versus what is being MARKED APPLIED.
+const {
+  NEW_MIGRATION_TABLE,
+  HISTORICAL_MIGRATIONS,
+  ROW_COUNT_TABLES,
+  buildProbes,
+} = require("./historical-migrations");
 
-/** The migration this whole exercise is trying to deploy. Must NOT exist yet. */
-const NEW_MIGRATION_TABLE = "IntelligenceFinding";
+const { tableExists, checkSpec } = buildProbes(prisma);
 
-/**
- * Tables whose COUNT(*) is captured so the same script can be re-run after the
- * deploy and the totals compared. Counts only — never row contents.
- */
-const ROW_COUNT_TABLES = [
-  "Store",
-  "Customer",
-  "Order",
-  "SubscriptionPlan",
-  "StoreSubscription",
-  "ShopTrialHistory",
-  "SyncJob",
-  "TimelineEvent",
-  "BillingAuditLog",
-  "BillingPlanIntent",
-  "ProductSnapshot",
-  "VariantSnapshot",
-  "SupportTicket",
-];
-
-// --- read-only probes --------------------------------------------------------
-// All three use parameterized $queryRaw against information_schema.
-
-async function tableExists(table) {
-  const rows = await prisma.$queryRaw`
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = ${table}
-    LIMIT 1`;
-  return rows.length > 0;
-}
-
-async function columnExists(table, column) {
-  const rows = await prisma.$queryRaw`
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}
-    LIMIT 1`;
-  return rows.length > 0;
-}
-
-async function columnDefaultIsSeven(table, column) {
-  const rows = await prisma.$queryRaw`
-    SELECT column_default AS d FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}
-    LIMIT 1`;
-  if (rows.length === 0) return false;
-  const value = rows[0].d;
-  return typeof value === "string" && value.trim().startsWith("7");
-}
-
-async function checkSpec(spec) {
-  const [kind, reference] = spec.split(":");
-  const [table, column] = reference.split(".");
-  if (kind === "T") return tableExists(table);
-  if (kind === "C") return columnExists(table, column);
-  if (kind === "D") return columnDefaultIsSeven(table, column);
-  throw new Error(`Unknown spec kind "${kind}" in "${spec}"`);
-}
 
 // --- report sections ---------------------------------------------------------
 
