@@ -38,7 +38,10 @@ CREATE TABLE IF NOT EXISTS "IntelligenceFinding" (
   "statusChangedBy" TEXT,
   "snapshotJson" TEXT,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- No DB default, matching what `prisma migrate` generates for @updatedAt
+  -- (Prisma Client always sets it on write). Keeps this file drift-free against
+  -- `prisma migrate diff`/`status`.
+  "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "IntelligenceFinding_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "IntelligenceFinding_storeId_fkey"
     FOREIGN KEY ("storeId") REFERENCES "Store"("id")
