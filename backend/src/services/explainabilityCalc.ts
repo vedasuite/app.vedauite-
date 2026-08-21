@@ -180,11 +180,15 @@ export const MODULE_CAPABILITY: Record<InsightModule, "fraud" | "competitor" | "
 // ---------- Small helpers ----------
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const round2 = (v: number) => Math.round(v * 100) / 100;
-const isEligibleStatus = (status: string) =>
+// Exported so the Part 2 detectors reuse the exact same rounding and
+// order-eligibility rules instead of re-deriving them. Behaviour unchanged for
+// every existing caller — these were already the module-private definitions.
+export const round2 = (v: number) => Math.round(v * 100) / 100;
+export const isEligibleStatus = (status: string) =>
   (ELIGIBLE_ORDER_STATUSES as readonly string[]).includes((status || "").toLowerCase());
 
-function daysBetween(nowIso: string, thenIso: string): number {
+// Exported for the Part 2 detectors so window arithmetic is identical everywhere.
+export function daysBetween(nowIso: string, thenIso: string): number {
   const now = new Date(nowIso).getTime();
   const then = new Date(thenIso).getTime();
   if (!Number.isFinite(now) || !Number.isFinite(then)) return Infinity;
@@ -630,6 +634,17 @@ export const EVIDENCE_ALLOWLIST = new Set([
   "match_confidence",
   "margin_percentage",
   "sales_velocity",
+  // Part 2 — Customer Loss. Aggregates and ratios only; no customer identity.
+  "observed_window_days",
+  "observed_loss_ratio",
+  "observed_loss_value",
+  "eligible_order_value",
+  // Part 2 — Product Profit. Unit economics and data-coverage reporting.
+  "retained_margin_ratio",
+  "unit_selling_price",
+  "unit_cost",
+  "data_completeness",
+  "missing_inputs",
 ]);
 
 const EVIDENCE_LABELS: Record<string, string> = {
@@ -643,6 +658,15 @@ const EVIDENCE_LABELS: Record<string, string> = {
   match_confidence: "Match confidence",
   margin_percentage: "Margin %",
   sales_velocity: "Sales velocity",
+  observed_window_days: "Observation window (days)",
+  observed_loss_ratio: "Share of order value refunded",
+  observed_loss_value: "Refunded order value (observed)",
+  eligible_order_value: "Eligible order value",
+  retained_margin_ratio: "Retained margin %",
+  unit_selling_price: "Selling price (unit)",
+  unit_cost: "Cost (unit)",
+  data_completeness: "Data completeness",
+  missing_inputs: "Missing inputs",
 };
 
 /**
