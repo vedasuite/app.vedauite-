@@ -11,6 +11,7 @@ import {
   resolveBackendStarterModule,
 } from "../lib/backendModuleAccess";
 import { buildNavigationModel } from "./navigationModel";
+import { recordNavDiagnostic } from "./navDiagnostics";
 import "./app-frame.css";
 
 type Props = {
@@ -188,18 +189,17 @@ export function AppFrame({ children }: Props) {
   // change, so the transition can be observed instead of inferred.
   // Contains no customer or order data. Remove once the cause is confirmed.
   useEffect(() => {
-    try {
-      const embedded = typeof window !== "undefined" && window.top !== window.self;
-      // eslint-disable-next-line no-console
-      console.info("[vedasuite:nav-diagnostic]", {
+    // Read after paint so the DOM comparison reflects this render.
+    const timer = window.setTimeout(() => {
+      recordNavDiagnostic({
         at: new Date().toISOString(),
-        origin: typeof window !== "undefined" ? window.location.origin : null,
+        origin: window.location.origin,
         pathname: location.pathname,
-        embeddedInIframe: embedded,
+        embeddedInIframe: window.top !== window.self,
         hasHostParam: new URLSearchParams(location.search).has("host"),
-        navLabels: navigationItems.map((i: { label: string }) => i.label),
-        navCount: navigationItems.length,
-        hasActionCenter: navigationItems.some(
+        builtNavLabels: navigationItems.map((i: { label: string }) => i.label),
+        builtNavCount: navigationItems.length,
+        builtHasActionCenter: navigationItems.some(
           (i: { label: string }) => i.label === "Action Center"
         ),
         appStateStatus,
@@ -210,9 +210,8 @@ export function AppFrame({ children }: Props) {
         bootstrapStatus: bootstrap?.status ?? null,
         installStatus: installState?.status ?? null,
       });
-    } catch {
-      /* diagnostics must never affect rendering */
-    }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [
     navigationItems,
     location.pathname,
