@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VedaSuite AI</title>
+    <!--
+      App Bridge reads the app identity from this tag. The content below is the
+      PRODUCTION default; vite.config.ts rewrites it at build time when
+      VITE_SHOPIFY_API_KEY is set, so staging can declare its own app. Do not
+      hardcode a non-production key here - set the environment variable instead.
+    -->
     <meta name="shopify-api-key" content="b7789c5899a579e9bc9e950a9bbd6547" />
     <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
     <style>
