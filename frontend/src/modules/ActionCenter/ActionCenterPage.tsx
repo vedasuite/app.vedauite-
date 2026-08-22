@@ -57,6 +57,8 @@ type ActionCard = {
   evidence: Evidence[];
   methodology: { summary: string; assumptions: string[]; caps: string[] } | null;
   dataComplete: boolean;
+  /** Stored details were unreadable; only safe row facts are shown. */
+  degraded?: boolean;
   impact: CardImpact;
   recommendedAction: string;
   route: string;
@@ -87,6 +89,8 @@ type Summary = {
   notQuantifiedCount: number;
   staleCount: number;
   incompleteDataCount: number;
+  degradedCount: number;
+  capReached: boolean;
   generatedAt: string;
 };
 
@@ -152,7 +156,7 @@ function impactText(impact: CardImpact): string {
   return `${impact.min}–${impact.max} ${impact.currency} (est., ${period})`;
 }
 
-export default function ActionCenterPage() {
+export function ActionCenterPage() {
   const { navigateEmbedded } = useEmbeddedNavigation();
   const [data, setData] = useState<ActionCenterResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -365,6 +369,25 @@ export default function ActionCenterPage() {
                     </Text>
                   </Banner>
                 ) : null}
+
+                {summary.degradedCount > 0 ? (
+                  <Banner tone="warning" title="Some finding details could not be read">
+                    <Text as="p">
+                      {summary.degradedCount} finding{summary.degradedCount === 1 ? "" : "s"} are
+                      shown with limited information because their stored details were unreadable.
+                      Run Sync Data to regenerate them.
+                    </Text>
+                  </Banner>
+                ) : null}
+
+                {summary.capReached ? (
+                  <Banner tone="info" title="Showing the most recent findings">
+                    <Text as="p">
+                      This store has a large number of findings. The most recent are shown; the
+                      counts above cover everything VedaSuite has recorded.
+                    </Text>
+                  </Banner>
+                ) : null}
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -442,7 +465,11 @@ export default function ActionCenterPage() {
                       <Badge tone={card.status === "new" ? "attention" : undefined}>
                         {STATUS_LABEL[card.status]}
                       </Badge>
-                      {!card.dataComplete ? <Badge tone="warning">Incomplete data</Badge> : null}
+                      {card.degraded ? (
+                        <Badge tone="warning">Details unavailable</Badge>
+                      ) : !card.dataComplete ? (
+                        <Badge tone="warning">Incomplete data</Badge>
+                      ) : null}
                       {card.isStale ? <Badge tone="warning">May be stale</Badge> : null}
                     </InlineStack>
                   </BlockStack>

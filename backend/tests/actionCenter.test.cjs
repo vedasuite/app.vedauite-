@@ -86,13 +86,16 @@ function buildWorld(rows = []) {
   require(OBS).logEvent = (l, e, d) => logged.push({ level: l, event: e, details: d });
 
   prisma.intelligenceFinding = {
-    findMany: async ({ where }) =>
-      rows.filter(
+    // Honours `take` the way Prisma does, so the pilot cap is exercised.
+    findMany: async ({ where, take }) => {
+      const matched = rows.filter(
         (r) =>
           r.storeId === where.storeId &&
           (where.status === undefined || r.status === where.status) &&
           (where.module === undefined || r.module === where.module)
-      ),
+      );
+      return take ? matched.slice(0, take) : matched;
+    },
   };
 
   return { service: require(SERVICE), brief: require(BRIEF), logged };
@@ -132,16 +135,20 @@ test("a stored finding is normalized into a complete action card", async () => {
   assert.ok(c.methodology);
 });
 
-test("a finding with an unreadable snapshot is SKIPPED, never rendered bare", async () => {
+test("a finding with an unreadable snapshot is never rendered with fabricated content", async () => {
+  // Superseded by the hardening behaviour below: it is surfaced as a degraded
+  // card rather than dropped, but it still carries no invented evidence.
   const w = buildWorld([
     findingRow({ id: "good" }),
     findingRow({ id: "bad", snapshotJson: "{not json" }),
-    findingRow({ id: "none", snapshotJson: null }),
   ]);
   const { cards } = await run(w);
 
-  assert.equal(cards.length, 1, "only the readable finding is shown");
-  assert.equal(cards[0].id, "good");
+  const readable = cards.find((c) => c.id === "good");
+  const unreadable = cards.find((c) => c.id === "bad");
+  assert.equal(readable.degraded, false);
+  assert.equal(unreadable.degraded, true);
+  assert.deepEqual(unreadable.evidence, []);
 });
 
 // ===========================================================================
@@ -473,4 +480,103 @@ test("AI guardrail: a response claiming AI detection is rejected", () => {
   );
   assert.equal(r.ok, false);
   assert.match(r.reason, /claimed AI detection/i);
+});
+
+// ===========================================================================
+// HARDENING — snapshot failure, pilot cap, and wiring contracts
+// ===========================================================================
+
+test("HARDENING: an unreadable snapshot becomes a visible DEGRADED card, not a silent drop", async () => {
+  const w = buildWorld([
+    findingRow({ id: "good" }),
+    findingRow({ id: "corrupt", snapshotJson: "{not json" }),
+    findingRow({ id: "empty", snapshotJson: null }),
+  ]);
+  const { cards, summary } = await run(w);
+
+  assert.equal(cards.length, 3, "nothing disappears silently");
+  assert.equal(summary.degradedCount, 2);
+
+  const degraded = cards.filter((c) => c.degraded);
+  for (const c of degraded) {
+    assert.equal(c.title, "A finding could not be displayed");
+    assert.equal(c.dataComplete, false);
+    assert.equal(c.confidence, "insufficient_data");
+    assert.equal(c.impact.status, "impact_not_quantifiable");
+    assert.deepEqual(c.evidence, [], "no fabricated evidence");
+    assert.equal(c.methodology, null, "no fabricated methodology");
+    assert.equal(c.rank.score, 0, "cannot outrank a real finding");
+    assert.match(c.recommendedAction, /Run Sync Data/i);
+  }
+});
+
+test("HARDENING: a degraded card exposes no raw snapshot bytes or PII", async () => {
+  const w = buildWorld([
+    findingRow({
+      id: "corrupt",
+      snapshotJson: '{"customerEmail":"shopper@example.com","secret":"shpat_XYZ" BROKEN',
+    }),
+  ]);
+  const { cards } = await run(w);
+  const serialized = JSON.stringify(cards);
+
+  assert.doesNotMatch(serialized, /shopper@example\.com/);
+  assert.doesNotMatch(serialized, /shpat_/);
+  assert.doesNotMatch(serialized, /BROKEN/);
+  assert.doesNotMatch(serialized, /snapshotJson/);
+});
+
+test("HARDENING: unreadable snapshots are logged with counts but no contents", async () => {
+  const w = buildWorld([
+    findingRow({ id: "c1", snapshotJson: "{bad" }),
+    findingRow({ id: "c2", snapshotJson: "{bad" }),
+  ]);
+  await run(w);
+
+  const warn = w.logged.find((e) => e.event === "action_center.unreadable_snapshots");
+  assert.ok(warn, "the failure is observable");
+  assert.equal(warn.level, "warn");
+  assert.equal(warn.details.count, 2);
+  assert.ok(Array.isArray(warn.details.findingTypes));
+  assert.doesNotMatch(JSON.stringify(warn), /snapshotJson|\{bad/);
+});
+
+test("HARDENING: degraded findings still respect entitlement gating", async () => {
+  const w = buildWorld([
+    findingRow({ id: "corrupt_paid", module: "profit", snapshotJson: "{bad" }),
+  ]);
+  assert.equal((await run(w, { enabledModules: [] })).cards.length, 0, "gated out");
+  assert.equal((await run(w, { enabledModules: ["profit"] })).cards.length, 1);
+});
+
+test("HARDENING: the pilot cap is explicit and reported honestly", async () => {
+  const many = Array.from({ length: 205 }, (_, i) => findingRow({ id: `f${i}` }));
+  const w = buildWorld(many);
+  const { cards, summary } = await run(w);
+
+  assert.ok(cards.length <= w.service.MAX_CARDS, "feed is bounded");
+  assert.equal(w.service.MAX_CARDS, 200, "the cap is an exported constant");
+  assert.equal(summary.capReached, true, "the UI can say the feed is truncated");
+});
+
+test("HARDENING: capReached is false for a normal store", async () => {
+  const w = buildWorld([findingRow(), findingRow({ id: "b" })]);
+  const { summary } = await run(w);
+  assert.equal(summary.capReached, false);
+});
+
+test("HARDENING: invalid filters are rejected rather than silently ignored", async () => {
+  const w = buildWorld([findingRow()]);
+  await assert.rejects(() => run(w, { status: "not_a_status" }), /Unknown status filter/);
+  // An unknown severity simply matches nothing — it cannot widen the result set.
+  assert.equal((await run(w, { severity: "catastrophic" })).cards.length, 0);
+});
+
+test("HARDENING: duplicate finding rows cannot produce duplicate cards", async () => {
+  // The DB unique index prevents this, but the feed must be defensive anyway:
+  // two rows with the same id must not both render.
+  const w = buildWorld([findingRow({ id: "dup" }), findingRow({ id: "dup" })]);
+  const { cards } = await run(w);
+  const ids = cards.map((c) => c.id);
+  assert.equal(new Set(ids).size, ids.length, "no duplicate card ids in the feed");
 });

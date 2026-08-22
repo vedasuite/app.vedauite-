@@ -35,8 +35,15 @@ import {
 /** A finding whose lastSeenAt is older than this is flagged stale in the UI. */
 export const STALE_AFTER_DAYS = 7;
 
-/** Bounded read so a noisy store cannot return an unbounded feed. */
-const MAX_CARDS = 200;
+/**
+ * Explicit pilot cap on the feed size.
+ *
+ * Deliberately not paginated for V1: a store with more than 200 open findings
+ * has a data-quality problem, not a browsing problem, and the summary counts
+ * remain accurate regardless. The API reports `capReached` so the UI can say so
+ * honestly instead of silently truncating.
+ */
+export const MAX_CARDS = 200;
 
 /**
  * Transparent ranking weights. Every component is derived from a stored,
@@ -95,6 +102,11 @@ export interface ActionCard {
   methodology: ExplainableInsight["methodology"] | null;
   /** Is the data complete? */
   dataComplete: boolean;
+  /**
+   * True when the stored snapshot could not be read and only safe row-level
+   * facts are shown. Never fabricates severity, evidence or impact.
+   */
+  degraded?: boolean;
   impact: ActionCardImpact;
   recommendedAction: string;
   /** Safe deep link to an existing VedaSuite page. */
@@ -145,6 +157,10 @@ export interface ActionCenterSummary {
   notQuantifiedCount: number;
   staleCount: number;
   incompleteDataCount: number;
+  /** Findings whose stored snapshot could not be read — surfaced, never hidden. */
+  degradedCount: number;
+  /** True when the feed hit MAX_CARDS and may therefore be truncated. */
+  capReached: boolean;
   generatedAt: string;
 }
 
@@ -229,16 +245,34 @@ export async function getActionCenter(input: {
 
   const enabled = new Set(input.enabledModules);
   const draft: Array<{ row: (typeof rows)[number]; snapshot: ExplainableInsight }> = [];
+  const degradedRows: Array<(typeof rows)[number]> = [];
+
+  // Defence in depth against duplicate cards. The unique index on
+  // (storeId, fingerprint) and the primary key both make this impossible at the
+  // database level, but the Action Center is an action INBOX — showing the same
+  // item twice would be a visible correctness failure, so it is cheap to
+  // guarantee here rather than rely on upstream invariants holding forever.
+  const seenIds = new Set<string>();
 
   for (const row of rows) {
-    const snapshot = parseFindingSnapshot(row.snapshotJson);
-    // A finding with no readable snapshot has no evidence to show. Showing a
-    // bare title with no proof would violate the whole premise, so skip it.
-    if (!snapshot) continue;
-
+    if (seenIds.has(row.id)) continue;
+    seenIds.add(row.id);
     const capability = MODULE_CAPABILITY[row.module as InsightModule] ?? null;
     // Entitlement: null capability (operational/store health) is always visible.
     if (capability !== null && !enabled.has(capability)) continue;
+
+    const snapshot = parseFindingSnapshot(row.snapshotJson);
+
+    if (!snapshot) {
+      // A finding whose stored snapshot cannot be parsed has no evidence to
+      // render. Silently dropping it would make a real finding disappear with
+      // no trace, so instead it becomes a DEGRADED card: the safe row-level
+      // facts only (module, type, timestamps), no fabricated content, no
+      // impact, and an explicit data-quality warning. Raw snapshot bytes are
+      // never surfaced or logged.
+      degradedRows.push(row);
+      continue;
+    }
 
     if (input.severity && snapshot.urgency !== input.severity) continue;
 
@@ -288,6 +322,7 @@ export async function getActionCenter(input: {
       evidence: snapshot.evidence ?? [],
       methodology: snapshot.methodology ?? null,
       dataComplete: snapshot.dataQuality === "ok",
+      degraded: false,
       impact: toCardImpact(snapshot.financialImpact),
       recommendedAction: snapshot.recommendedAction,
       route: snapshot.route,
@@ -298,6 +333,57 @@ export async function getActionCenter(input: {
       rank: { score: Math.round(score * 100) / 100, weights: RANK_WEIGHTS, components },
     };
   });
+
+  // Degraded cards for unreadable snapshots. Severity is deliberately "low":
+  // we cannot know the real severity without the snapshot, and inventing one
+  // would be exactly the fabrication this codebase refuses elsewhere.
+  for (const row of degradedRows) {
+    if (input.severity && input.severity !== "low") continue;
+    cards.push({
+      id: row.id,
+      findingType: row.findingType,
+      module: row.module,
+      capability: MODULE_CAPABILITY[row.module as InsightModule] ?? null,
+      status: row.status as FindingStatus,
+      severity: "low",
+      confidence: "insufficient_data",
+      title: "A finding could not be displayed",
+      whatHappened:
+        "VedaSuite recorded this finding, but its stored details could not be read.",
+      whyItMatters:
+        "The underlying issue may still be real. Re-running Sync Data regenerates the details.",
+      evidence: [],
+      methodology: null,
+      dataComplete: false,
+      degraded: true,
+      impact: {
+        status: "impact_not_quantifiable",
+        reason: "Stored finding details are unreadable, so no figure can be shown.",
+      },
+      recommendedAction:
+        "Run Sync Data to regenerate this finding. No automatic action was taken.",
+      route: "/app/dashboard",
+      firstDetectedAt: row.firstDetectedAt.toISOString(),
+      lastSeenAt: row.lastSeenAt.toISOString(),
+      detectionCount: row.detectionCount,
+      isStale: (now.getTime() - row.lastSeenAt.getTime()) / 86_400_000 > STALE_AFTER_DAYS,
+      rank: {
+        score: 0,
+        weights: RANK_WEIGHTS,
+        components: { severity: 0, confidence: 0, freshness: 0, impact: 0, completeness: 0 },
+      },
+    });
+  }
+
+  if (degradedRows.length > 0) {
+    // Observable, with no snapshot contents and no PII — ids and types only.
+    logEvent("warn", "action_center.unreadable_snapshots", {
+      storeId: input.storeId,
+      count: degradedRows.length,
+      findingTypes: [...new Set(degradedRows.map((r) => r.findingType))],
+      reason: "stored snapshot could not be parsed; surfaced as degraded cards",
+    });
+  }
 
   // Deterministic ordering. Ties break on severity, then lastSeenAt, then id,
   // so the same data always produces the same order.
@@ -323,12 +409,14 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
   let notQuantifiedCount = 0;
   let staleCount = 0;
   let incompleteDataCount = 0;
+  let degradedCount = 0;
 
   for (const card of cards) {
     bySeverity[card.severity] = (bySeverity[card.severity] ?? 0) + 1;
     byStatus[card.status] = (byStatus[card.status] ?? 0) + 1;
     if (card.isStale) staleCount += 1;
     if (!card.dataComplete) incompleteDataCount += 1;
+    if (card.degraded) degradedCount += 1;
 
     if (card.impact.status !== "quantified") {
       notQuantifiedCount += 1;
@@ -368,6 +456,8 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
     notQuantifiedCount,
     staleCount,
     incompleteDataCount,
+    degradedCount,
+    capReached: cards.length >= MAX_CARDS,
     generatedAt: now.toISOString(),
   };
 }
