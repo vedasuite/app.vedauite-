@@ -253,25 +253,25 @@ test("INVARIANT: fraud-gated modules are still genuinely gated", () => {
 // ===========================================================================
 
 test("NAV: the Action Center entry is not conditional on plan, entitlement or onboarding", () => {
-  const frame = fs.readFileSync(
-    path.resolve(__dirname, "../../frontend/src/layout/AppFrame.tsx"),
+  const model = fs.readFileSync(
+    path.resolve(__dirname, "../../frontend/src/layout/navigationModel.js"),
     "utf8"
   );
 
-  const entry = frame.match(
-    /createNavItem\(\s*"\/app\/action-center"\s*,\s*"Action Center"\s*(,[^)]*)?\)/
+  const entry = model.match(
+    /\{\s*path:\s*"\/app\/action-center"\s*,\s*label:\s*"Action Center"\s*(,[^}]*)?\}/
   );
   assert.ok(entry, "the Action Center nav entry must exist");
   assert.equal(
-    entry[1] ?? "",
+    (entry[1] ?? "").trim(),
     "",
-    "it must take no options — no badge, no gating, no plan condition"
+    "it must carry no badge, no gating and no plan condition"
   );
 
   // And it must not sit behind any conditional expression.
-  const line = frame
+  const line = model
     .split(/\r?\n/)
-    .find((l) => l.includes('createNavItem("/app/action-center"'));
+    .find((l) => l.includes('path: "/app/action-center"'));
   assert.doesNotMatch(line, /\?|&&|\|\|/, "the entry must not be conditionally rendered");
 });
 

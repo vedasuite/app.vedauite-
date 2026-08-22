@@ -23,9 +23,11 @@ const path = require("node:path");
 const FRONTEND = path.resolve(__dirname, "../../frontend/src");
 const APP_TSX = path.join(FRONTEND, "App.tsx");
 const APP_FRAME = path.join(FRONTEND, "layout/AppFrame.tsx");
+const NAV_MODEL = path.join(FRONTEND, "layout/navigationModel.js");
 
 const appSource = fs.readFileSync(APP_TSX, "utf8");
 const frameSource = fs.readFileSync(APP_FRAME, "utf8");
+const navModelSource = fs.readFileSync(NAV_MODEL, "utf8");
 
 /**
  * Routes that intentionally have no navigation entry. Anything added here needs
@@ -45,10 +47,18 @@ function routedPaths() {
   return [...new Set(paths)];
 }
 
-/** All `createNavItem("/app/...", "Label")` paths declared in AppFrame.tsx. */
+/**
+ * All `{ path, label }` entries declared in the navigation model.
+ *
+ * The entries live in navigationModel.js rather than inline in AppFrame so the
+ * list can also be executed (see navigationRuntime.test.cjs). These static
+ * checks stay here because they cross-reference App.tsx's routes.
+ */
 function navPaths() {
   const paths = [];
-  for (const m of frameSource.matchAll(/createNavItem\(\s*"(\/app[^"]*)"\s*,\s*"([^"]+)"/g)) {
+  for (const m of navModelSource.matchAll(
+    /\{\s*path:\s*"(\/app[^"]*)"\s*,\s*label:\s*"([^"]+)"/g
+  )) {
     paths.push({ path: m[1], label: m[2] });
   }
   return paths;
@@ -141,5 +151,14 @@ test("the navigation list is not filtered by entitlement or onboarding state", (
     section[1].trim(),
     "navigationItems",
     "items must be the full navigationItems array, never a filtered subset"
+  );
+
+  // AppFrame must map the model straight through — no .filter(), no slicing.
+  const memo = frameSource.match(/const navigationItems = useMemo\(([\s\S]*?)\n\s{2}\);/);
+  assert.ok(memo, "the navigationItems useMemo must exist");
+  assert.doesNotMatch(
+    memo[1],
+    /\.filter\(|\.slice\(/,
+    "AppFrame must not filter or slice the navigation model"
   );
 });

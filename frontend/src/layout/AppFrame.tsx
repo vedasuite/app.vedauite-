@@ -10,6 +10,7 @@ import {
   resolveBackendPlan,
   resolveBackendStarterModule,
 } from "../lib/backendModuleAccess";
+import { buildNavigationModel } from "./navigationModel";
 import "./app-frame.css";
 
 type Props = {
@@ -165,24 +166,14 @@ export function AppFrame({ children }: Props) {
     [location.pathname, navigateEmbedded]
   );
 
+  // The entry list comes from a pure model (navigationModel.ts) so the
+  // "every entry is always present" invariant is testable against real state
+  // permutations rather than by reading this JSX.
   const navigationItems = useMemo(
-    () => [
-      createNavItem("/app/onboarding", "Onboarding"),
-      createNavItem("/app/dashboard", "Dashboard"),
-      createNavItem("/app/action-center", "Action Center"),
-      createNavItem("/app/fraud-intelligence", "Fraud Intelligence", {
-        badge: moduleStatus.fraud ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/competitor-intelligence", "Competitor Intelligence", {
-        badge: moduleStatus.competitor ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/ai-pricing-engine", "AI Pricing Engine", {
-        badge: moduleStatus.pricing ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/billing", "Billing"),
-      createNavItem("/app/settings", "Settings"),
-      createNavItem("/app/support", "Support & Feedback"),
-    ],
+    () =>
+      buildNavigationModel(moduleStatus).map((entry) =>
+        createNavItem(entry.path, entry.label, entry.badge ? { badge: entry.badge } : undefined)
+      ),
     [
       createNavItem,
       moduleStatus.competitor,
@@ -190,6 +181,50 @@ export function AppFrame({ children }: Props) {
       moduleStatus.pricing,
     ]
   );
+
+  // TODO(remove): temporary diagnostic for the reported Action Center
+  // disappearance after plan confirmation / onboarding completion. Logs the
+  // exact rendered navigation and the surrounding runtime state on every
+  // change, so the transition can be observed instead of inferred.
+  // Contains no customer or order data. Remove once the cause is confirmed.
+  useEffect(() => {
+    try {
+      const embedded = typeof window !== "undefined" && window.top !== window.self;
+      // eslint-disable-next-line no-console
+      console.info("[vedasuite:nav-diagnostic]", {
+        at: new Date().toISOString(),
+        origin: typeof window !== "undefined" ? window.location.origin : null,
+        pathname: location.pathname,
+        embeddedInIframe: embedded,
+        hasHostParam: new URLSearchParams(location.search).has("host"),
+        navLabels: navigationItems.map((i: { label: string }) => i.label),
+        navCount: navigationItems.length,
+        hasActionCenter: navigationItems.some(
+          (i: { label: string }) => i.label === "Action Center"
+        ),
+        appStateStatus,
+        plan: activePlan,
+        moduleStatus,
+        billingLifecycle: billingState?.lifecycle ?? null,
+        billingFlowState,
+        bootstrapStatus: bootstrap?.status ?? null,
+        installStatus: installState?.status ?? null,
+      });
+    } catch {
+      /* diagnostics must never affect rendering */
+    }
+  }, [
+    navigationItems,
+    location.pathname,
+    location.search,
+    appStateStatus,
+    activePlan,
+    moduleStatus,
+    billingState?.lifecycle,
+    billingFlowState,
+    bootstrap?.status,
+    installState?.status,
+  ]);
 
   const navigation = (
     <Navigation
