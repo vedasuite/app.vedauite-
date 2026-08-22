@@ -4,7 +4,9 @@
 export type Confidence = "high" | "medium" | "low" | "insufficient_data";
 export type Urgency = "critical" | "high" | "medium" | "low";
 export type InsightModule =
-  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit";
+  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit"
+  // Store health / data delivery. Never entitlement-gated server-side.
+  | "operational";
 
 export type ImpactPeriod =
   | "per_order"
@@ -150,6 +152,7 @@ export const MODULE_LABEL: Record<InsightModule, string> = {
   competitor: "Competitor",
   pricing: "Pricing",
   profit: "Profit",
+  operational: "Store health",
 };
 
 export function impactRangeText(fi: FinancialImpact): string {

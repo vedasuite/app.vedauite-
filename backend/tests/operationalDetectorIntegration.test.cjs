@@ -191,15 +191,63 @@ test("operational detectors persist findings through the Part 1 foundation", asy
   assert.ok(types.includes("operational_high_risk_order_backlog"));
 });
 
-test("findings reuse an existing InsightModule so entitlements need no change", async () => {
+test("findings are classified as 'operational', never borrowed from fraud", async () => {
   const w = buildWorld({ orders: problemOrders() });
   const insights = await w.detectors.detectOperationalProblems({ storeId: STORE, nowIso: NOW });
 
+  assert.ok(insights.length > 0);
   for (const i of insights) {
-    assert.equal(i.module, "fraud", "reuses an existing module value");
+    assert.equal(
+      i.module,
+      "operational",
+      "store-health findings must not be filed under a paid analysis module"
+    );
     assert.equal(i.easeOfAction, "manual");
     assert.match(i.recommendedAction, /No automatic action was taken/i);
   }
+  for (const row of w.findingRows) {
+    assert.equal(row.module, "operational", "the persisted module matches");
+  }
+});
+
+test("operational findings are EXEMPT from capability filtering on every plan", async () => {
+  // The bug this classification fixes: filed under "fraud", a broken Shopify
+  // connection would be hidden from any merchant whose plan omits Fraud
+  // Intelligence — precisely the merchant who needs to act on it.
+  const calc = require(path.resolve(__dirname, "../dist/services/explainabilityCalc.js"));
+  const w = buildWorld({ orders: problemOrders() });
+  const insights = await w.detectors.detectOperationalProblems({ storeId: STORE, nowIso: NOW });
+
+  for (const enabled of [[], ["competitor"], ["pricing"], ["profit"], ["fraud"]]) {
+    const visible = calc.filterInsightsByCapability(insights, enabled);
+    assert.equal(
+      visible.length,
+      insights.length,
+      `all operational findings must survive capability filtering with modules=[${enabled}]`
+    );
+  }
+
+  assert.equal(
+    calc.MODULE_CAPABILITY.operational,
+    null,
+    "null capability is what exempts them"
+  );
+});
+
+test("existing module classifications and their gating are unchanged", async () => {
+  const calc = require(path.resolve(__dirname, "../dist/services/explainabilityCalc.js"));
+
+  assert.equal(calc.MODULE_CAPABILITY.fraud, "fraud");
+  assert.equal(calc.MODULE_CAPABILITY.trust, "fraud");
+  assert.equal(calc.MODULE_CAPABILITY.return_abuse, "fraud");
+  assert.equal(calc.MODULE_CAPABILITY.competitor, "competitor");
+  assert.equal(calc.MODULE_CAPABILITY.pricing, "pricing");
+  assert.equal(calc.MODULE_CAPABILITY.profit, "profit");
+
+  // A paid-module insight is still filtered out when its capability is absent.
+  const fraudInsight = { storeId: STORE, module: "fraud" };
+  assert.equal(calc.filterInsightsByCapability([fraudInsight], ["pricing"]).length, 0);
+  assert.equal(calc.filterInsightsByCapability([fraudInsight], ["fraud"]).length, 1);
 });
 
 test("methodology states the window, completeness and the cooldown rule", async () => {

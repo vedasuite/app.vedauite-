@@ -22,6 +22,7 @@
 // with an advanced lastSeenAt, never a duplicate.
 
 import { prisma } from "../db/prismaClient";
+import { env } from "../config/env";
 import { logEvent } from "./observabilityService";
 import {
   analysisWindowUTC,
@@ -373,6 +374,16 @@ export async function detectProductProfit(input: {
 export const OPERATIONAL_FINDING_TYPE_PREFIX = "operational_";
 
 /**
+ * Operational findings carry their own InsightModule rather than borrowing
+ * "fraud". Borrowing was wrong on four counts: entitlement (a merchant without
+ * the fraud module would never see "your Shopify connection is broken"),
+ * grouping and filtering, analytics (sync failures counted as fraud insights),
+ * and UI labelling. MODULE_CAPABILITY maps this value to null, so it is exempt
+ * from capability filtering by design.
+ */
+export const OPERATIONAL_MODULE: InsightModule = "operational";
+
+/**
  * Cooldown window. An operational alert the merchant has explicitly resolved or
  * dismissed is NOT re-raised for this long, even if the underlying condition is
  * still true.
@@ -565,7 +576,7 @@ export async function detectOperationalProblems(input: {
     const findingType = `${OPERATIONAL_FINDING_TYPE_PREFIX}${problem.detector}`;
     const fingerprint = computeFindingFingerprint({
       storeId: input.storeId,
-      module: "fraud",
+      module: OPERATIONAL_MODULE,
       findingType,
       subjectKey: problem.subjectKey,
     });
@@ -577,9 +588,12 @@ export async function detectOperationalProblems(input: {
 
     const insight = buildInsight({
       storeId: input.storeId,
-      // Reuses an existing InsightModule value so the capability map and the
-      // entitlement system need no change.
-      module: "fraud",
+      // Store health, NOT a paid analysis module. MODULE_CAPABILITY maps
+      // "operational" to null, so these findings are never entitlement-gated:
+      // a broken sync or stalled data feed degrades every plan equally, and
+      // hiding it behind Fraud Intelligence would keep a critical, actionable
+      // problem from merchants whose plan does not include that module.
+      module: OPERATIONAL_MODULE,
       id: `operational:${problem.detector}:${analysisWindowUTC(nowIso)}`,
       title: problem.title,
       reasons: [problem.what, problem.why],
@@ -612,7 +626,7 @@ export async function detectOperationalProblems(input: {
 
     await recordFinding({
       storeId: input.storeId,
-      module: "fraud",
+      module: OPERATIONAL_MODULE,
       findingType,
       subjectKey: problem.subjectKey,
       fingerprint,
@@ -646,4 +660,75 @@ export async function runIntelligenceDetectors(input: {
     detectOperationalProblems(input),
   ]);
   return { customerLoss, productProfit, operational };
+}
+
+/**
+ * The ONE execution path for Parts 2-3 detectors.
+ *
+ * Called from syncJobService.finalizeSyncSuccess — the single place a store
+ * sync completes successfully. That reuses the existing job infrastructure
+ * rather than adding a scheduler, and it is the correct moment: the data the
+ * detectors read has just been refreshed.
+ *
+ * GUARANTEES
+ *   never throws       - every failure is caught and logged here, so a detector
+ *                        fault can never fail or roll back a Shopify sync that
+ *                        actually succeeded. The caller does not even await it.
+ *   store-scoped       - every read and write is filtered by storeId.
+ *   idempotent         - findings dedupe on (storeId, fingerprint), so repeated
+ *                        syncs update one row per subject instead of piling up.
+ *   flag-gated         - returns immediately unless persistence is enabled, so
+ *                        the work is not even performed in environments where
+ *                        the feature is off.
+ *   observable         - emits a started/completed/failed/skipped event with
+ *                        counts and duration.
+ *
+ * Deliberately returns void: there is no result the sync path should branch on.
+ */
+export async function triggerIntelligenceDetectionAfterSync(input: {
+  storeId: string;
+  shopDomain: string;
+  jobId?: string;
+}): Promise<void> {
+  if (!env.enableIntelligenceFindingPersistence) {
+    logEvent("info", "intelligence.detection_skipped", {
+      shop: input.shopDomain,
+      storeId: input.storeId,
+      reason: "ENABLE_INTELLIGENCE_FINDING_PERSISTENCE is off",
+    });
+    return;
+  }
+
+  const startedAt = Date.now();
+  logEvent("info", "intelligence.detection_started", {
+    shop: input.shopDomain,
+    storeId: input.storeId,
+    jobId: input.jobId ?? null,
+  });
+
+  try {
+    const result = await runIntelligenceDetectors({ storeId: input.storeId });
+    logEvent("info", "intelligence.detection_completed", {
+      shop: input.shopDomain,
+      storeId: input.storeId,
+      jobId: input.jobId ?? null,
+      customerLossFindings: result.customerLoss.length,
+      productProfitFindings: result.productProfit.length,
+      operationalFindings: result.operational.length,
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    // Swallowed on purpose. The sync already succeeded and its results are
+    // committed; intelligence is a downstream enrichment, so a failure here
+    // must stay contained and visible rather than propagating.
+    logEvent("error", "intelligence.detection_failed", {
+      shop: input.shopDomain,
+      storeId: input.storeId,
+      jobId: input.jobId ?? null,
+      durationMs: Date.now() - startedAt,
+      reason:
+        "isolated failure — the Shopify sync completed successfully and is unaffected",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

@@ -12,7 +12,12 @@
 export type Confidence = "high" | "medium" | "low" | "insufficient_data";
 export type Urgency = "critical" | "high" | "medium" | "low";
 export type InsightModule =
-  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit";
+  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit"
+  // Store health / data delivery. Deliberately NOT a paid analysis module:
+  // "your Shopify connection is broken" or "no successful sync for 20 days"
+  // affects every merchant regardless of plan, so it is never entitlement-gated.
+  // See MODULE_CAPABILITY below.
+  | "operational";
 
 export type ImpactPeriod =
   | "per_order"
@@ -168,13 +173,29 @@ export const OPEN_HIGH_RISK_STATUSES = ["paid", "approved", "manual_review"] as 
 export const RECENCY_DECAY_DAYS = 30;
 
 // Insight module -> capability module used by the existing entitlement system.
-export const MODULE_CAPABILITY: Record<InsightModule, "fraud" | "competitor" | "pricing" | "profit"> = {
+/**
+ * Insight module -> capability module used by the existing entitlement system.
+ *
+ * `null` means "not gated by any paid capability". Only `operational` uses it:
+ * store-health and data-delivery findings must reach every merchant, because a
+ * broken Shopify connection or a stalled sync degrades the whole app regardless
+ * of which analysis modules the plan includes. Gating those behind `fraud`
+ * would hide a critical, actionable problem from a merchant on a plan that
+ * simply does not include Fraud Intelligence.
+ *
+ * Every other value is unchanged, so existing filtering behaviour is identical.
+ */
+export const MODULE_CAPABILITY: Record<
+  InsightModule,
+  "fraud" | "competitor" | "pricing" | "profit" | null
+> = {
   fraud: "fraud",
   trust: "fraud",
   return_abuse: "fraud",
   competitor: "competitor",
   pricing: "pricing",
   profit: "profit",
+  operational: null,
 };
 
 // ---------- Small helpers ----------
@@ -712,7 +733,12 @@ export function filterInsightsByCapability(
   enabledModules: string[]
 ): ExplainableInsight[] {
   const enabled = new Set(enabledModules);
-  return insights.filter((i) => enabled.has(MODULE_CAPABILITY[i.module]));
+  return insights.filter((i) => {
+    const capability = MODULE_CAPABILITY[i.module];
+    // null capability => store health, visible on every plan.
+    if (capability === null) return true;
+    return enabled.has(capability);
+  });
 }
 
 /** Defense-in-depth on top of DB scoping: keep only the authenticated store's rows. */

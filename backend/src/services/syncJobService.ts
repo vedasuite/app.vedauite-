@@ -4,6 +4,7 @@ import { recomputeStoreDerivedData } from "./coreEngineService";
 import { logEvent } from "./observabilityService";
 import { syncShopifyStoreData } from "./shopifyAdminService";
 import { ShopifyConnectionError } from "./shopifyConnectionService";
+import { triggerIntelligenceDetectionAfterSync } from "./intelligenceDetectorService";
 import {
   deriveSyncStatus,
   getStoreOperationalSnapshot,
@@ -178,6 +179,27 @@ async function finalizeSyncSuccess(params: {
     derivedStatus: derivedSync.status,
     counts: operational.counts,
   });
+
+  // Intelligence detection runs off the back of a genuinely successful sync —
+  // the one moment the data it reads has just been refreshed. This reuses the
+  // existing job path instead of introducing a scheduler.
+  //
+  // Deliberately NOT awaited, and it never throws: triggerIntelligenceDetection‑
+  // AfterSync catches everything internally. The sync is already committed by
+  // this point, so a detector fault must not delay the caller, change the sync
+  // result, or surface as a sync failure. It self-gates on the persistence
+  // feature flag and logs its own started/completed/failed/skipped events.
+  //
+  // Skipped when the derived status is FAILED: there is no fresh, trustworthy
+  // data to analyse, and re-running detectors on stale rows would only produce
+  // findings the merchant cannot act on.
+  if (derivedSync.status !== "FAILED") {
+    void triggerIntelligenceDetectionAfterSync({
+      storeId: params.storeId,
+      shopDomain: params.shopDomain,
+      jobId: completed.id,
+    });
+  }
 
   return {
     completed,
