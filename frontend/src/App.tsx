@@ -93,6 +93,7 @@ export default function App() {
         <Route path="/app" element={<EntryRoute />} />
         <Route path="/app/onboarding" element={withRouteBoundary("Onboarding", <OnboardingPage />)} />
         <Route path="/app/dashboard" element={withRouteBoundary("Dashboard", <DashboardPage />)} />
+        <Route path="/app/action-center" element={withRouteBoundary("Action Center", <ActionCenterPage />)} />
         <Route
           path="/app/fraud-intelligence"
           element={

@@ -169,6 +169,7 @@ export function AppFrame({ children }: Props) {
     () => [
       createNavItem("/app/onboarding", "Onboarding"),
       createNavItem("/app/dashboard", "Dashboard"),
+      createNavItem("/app/action-center", "Action Center"),
       createNavItem("/app/fraud-intelligence", "Fraud Intelligence", {
         badge: moduleStatus.fraud ? undefined : "Upgrade",
       }),

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { ensureOfflineToken } from "../middleware/ensureOfflineToken";
 import { verifyShopifySessionToken } from "../middleware/verifyShopifySessionToken";
+import { actionCenterRouter } from "./actionCenterRoutes";
 import { appStateRouter } from "./appStateRoutes";
 import { authRouter } from "./authRoutes";
 import { billingApiRouter, billingRouter } from "./billingRoutes";
@@ -39,6 +40,8 @@ router.use("/api", ensureOfflineToken);
 
 router.use("/api/billing", billingApiRouter);
 router.use("/api/app-state", appStateRouter);
+// Part 4 — Unified Action Center. Inherits session-token auth from /api above.
+router.use("/api/action-center", actionCenterRouter);
 router.use("/api/subscription", subscriptionRouter);
 router.use("/api/debug", subscriptionDebugRouter);
 router.use("/api/dashboard", dashboardRouter);
