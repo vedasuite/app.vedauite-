@@ -645,6 +645,17 @@ export const EVIDENCE_ALLOWLIST = new Set([
   "unit_cost",
   "data_completeness",
   "missing_inputs",
+  // Part 3 — Operational Problem Intelligence. Rates, counts and ages only.
+  "refund_rate_recent",
+  "refund_rate_baseline",
+  "refund_rate_shift",
+  "open_high_risk_orders",
+  "oldest_open_days",
+  "sync_failure_streak",
+  "last_successful_sync_days",
+  "cost_coverage_ratio",
+  "customer_linkage_ratio",
+  "window_days",
 ]);
 
 const EVIDENCE_LABELS: Record<string, string> = {
@@ -667,6 +678,16 @@ const EVIDENCE_LABELS: Record<string, string> = {
   unit_cost: "Cost (unit)",
   data_completeness: "Data completeness",
   missing_inputs: "Missing inputs",
+  refund_rate_recent: "Refund rate (recent window)",
+  refund_rate_baseline: "Refund rate (baseline window)",
+  refund_rate_shift: "Refund rate change",
+  open_high_risk_orders: "Open high-risk orders",
+  oldest_open_days: "Oldest open high-risk order (days)",
+  sync_failure_streak: "Consecutive sync failures",
+  last_successful_sync_days: "Days since last successful sync",
+  cost_coverage_ratio: "Products with cost data",
+  customer_linkage_ratio: "Orders linked to a customer",
+  window_days: "Window (days)",
 };
 
 /**

@@ -72,7 +72,38 @@ function buildWorld({ flagEnabled = true, orders = [], customers = [], profitRow
     },
   };
 
+  // Part 3 added detectOperationalProblems to runIntelligenceDetectors, which
+  // reads sync jobs and store connection state. Mocked here so this suite stays
+  // hermetic; the operational detector has its own dedicated coverage in
+  // operationalDetectorIntegration.test.cjs.
+  prisma.syncJob = {
+    findMany: async () => {
+      writes.push({ table: "syncJob", op: "read" });
+      return [];
+    },
+  };
+  prisma.store = {
+    findUnique: async () => {
+      writes.push({ table: "store", op: "read" });
+      return {
+        // A healthy, freshly-synced store so the sync-health detector stays
+        // quiet and cannot interfere with the Part 2 assertions.
+        lastSyncAt: daysAgo(1),
+        lastConnectionStatus: "OK",
+        lastWebhookRegistrationStatus: "OK",
+        accessTokenExpiresAt: null,
+      };
+    },
+  };
+
   prisma.intelligenceFinding = {
+    // Needed by the Part 3 cooldown lookup (getFindingByFingerprint).
+    findUnique: async ({ where }) => {
+      const { storeId, fingerprint } = where.storeId_fingerprint;
+      return (
+        findingRows.find((r) => r.storeId === storeId && r.fingerprint === fingerprint) ?? null
+      );
+    },
     upsert: async ({ where, update, create }) => {
       writes.push({ table: "intelligenceFinding", op: "upsert" });
       const { storeId, fingerprint } = where.storeId_fingerprint;

@@ -26,6 +26,7 @@ import { logEvent } from "./observabilityService";
 import {
   analysisWindowUTC,
   canonicalProductIdentity,
+  computeHighRiskOpenExposure,
   computeOpportunityScore,
   isEligibleStatus,
   RETURN_ABUSE,
@@ -36,7 +37,19 @@ import {
 } from "./explainabilityCalc";
 import { computeCustomerLoss, CUSTOMER_LOSS } from "./customerLossCalc";
 import { computeProductProfit, PRODUCT_PROFIT } from "./productProfitCalc";
-import { recordFinding } from "./intelligenceFindingService";
+import {
+  detectDataCoverage,
+  detectHighRiskBacklog,
+  detectRefundRateShift,
+  detectSyncHealth,
+  OPERATIONAL,
+  type OperationalProblem,
+} from "./operationalProblemCalc";
+import {
+  computeFindingFingerprint,
+  getFindingByFingerprint,
+  recordFinding,
+} from "./intelligenceFindingService";
 
 /** Bounded reads so a large store cannot pull an unbounded row set. */
 const READ_CAPS = {
@@ -353,8 +366,273 @@ export async function detectProductProfit(input: {
   return insights;
 }
 
+// ---------------------------------------------------------------------------
+// C. Operational Problem Intelligence (Part 3)
+// ---------------------------------------------------------------------------
+
+export const OPERATIONAL_FINDING_TYPE_PREFIX = "operational_";
+
 /**
- * Runs both detectors for one store. Explicit entry point — deliberately NOT
+ * Cooldown window. An operational alert the merchant has explicitly resolved or
+ * dismissed is NOT re-raised for this long, even if the underlying condition is
+ * still true.
+ *
+ * This is distinct from the Part 1 dedupe guarantee. Dedupe stops a second ROW
+ * appearing for the same subject; cooldown stops a dismissed alert being pushed
+ * back at the merchant on the next run. Without it, an operational condition
+ * the merchant has consciously accepted would nag on every detector pass.
+ */
+export const OPERATIONAL_COOLDOWN_DAYS = 7;
+
+function operationalRoute(detector: OperationalProblem["detector"]): string {
+  switch (detector) {
+    case "high_risk_order_backlog":
+      return "/app/fraud-intelligence";
+    case "data_coverage_low":
+      return "/app/ai-pricing-engine";
+    case "sync_health_degraded":
+      return "/app/settings";
+    default:
+      return "/app/dashboard";
+  }
+}
+
+/**
+ * True when a finding for this subject was resolved/dismissed inside the
+ * cooldown window and must therefore be suppressed this run.
+ */
+async function isInCooldown(input: {
+  storeId: string;
+  fingerprint: string;
+  nowIso: string;
+}): Promise<boolean> {
+  const existing = await getFindingByFingerprint(input.storeId, input.fingerprint);
+  if (!existing) return false;
+  if (existing.status !== "resolved" && existing.status !== "dismissed") return false;
+
+  const changedAt = existing.statusChangedAt ?? existing.updatedAt;
+  if (!changedAt) return false;
+
+  const ageDays =
+    (new Date(input.nowIso).getTime() - new Date(changedAt).getTime()) / 86_400_000;
+  return ageDays >= 0 && ageDays < OPERATIONAL_COOLDOWN_DAYS;
+}
+
+export async function detectOperationalProblems(input: {
+  storeId: string;
+  nowIso?: string;
+}): Promise<ExplainableInsight[]> {
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const historyStart = new Date(
+    new Date(nowIso).getTime() -
+      (OPERATIONAL.refundShift.recentDays + OPERATIONAL.refundShift.baselineDays) * 86_400_000
+  );
+
+  const [orders, syncJobs, store, products, profitRows] = await Promise.all([
+    prisma.order.findMany({
+      where: { storeId: input.storeId, createdAt: { gte: historyStart } },
+      select: {
+        id: true,
+        status: true,
+        refunded: true,
+        totalAmount: true,
+        currency: true,
+        fraudRiskLevel: true,
+        customerId: true,
+        createdAt: true,
+      },
+      take: 5000,
+    }),
+    prisma.syncJob.findMany({
+      where: { storeId: input.storeId },
+      select: { id: true, jobType: true, status: true, finishedAt: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    prisma.store.findUnique({
+      where: { id: input.storeId },
+      select: {
+        lastSyncAt: true,
+        lastConnectionStatus: true,
+        lastWebhookRegistrationStatus: true,
+        accessTokenExpiresAt: true,
+      },
+    }),
+    prisma.productSnapshot.findMany({
+      where: { storeId: input.storeId },
+      select: { handle: true },
+      take: 2000,
+    }),
+    prisma.profitOptimizationData.findMany({
+      where: { storeId: input.storeId },
+      select: { productHandle: true, productCost: true },
+      take: 2000,
+    }),
+  ]);
+
+  const currencies = Array.from(
+    new Set(orders.map((o) => (o.currency || "").trim().toUpperCase()).filter(Boolean))
+  );
+  const singleCurrency = currencies.length === 1 ? currencies[0] : null;
+
+  const eligibleOrders = orders.filter((o) => isEligibleStatus(o.status));
+
+  const openHighRisk = orders.filter(
+    (o) =>
+      o.fraudRiskLevel === "High" &&
+      !o.refunded &&
+      ["paid", "approved", "manual_review"].includes((o.status || "").toLowerCase())
+  );
+  const openExposure: FinancialImpact = singleCurrency
+    ? computeHighRiskOpenExposure(
+        orders.map((o) => ({
+          id: o.id,
+          status: o.status,
+          refunded: o.refunded,
+          fraudRiskLevel: o.fraudRiskLevel,
+          totalAmount: o.totalAmount,
+        })),
+        singleCurrency
+      ).financialImpact
+    : { status: "impact_not_quantifiable", reason: "No single store currency" };
+
+  const handlesWithCost = new Set(
+    profitRows
+      .filter((r) => Number.isFinite(r.productCost) && r.productCost > 0)
+      .map((r) => (r.productHandle || "").trim().toLowerCase())
+  );
+  const productHandles = new Set(products.map((p) => (p.handle || "").trim().toLowerCase()));
+
+  const problems: Array<OperationalProblem | null> = [
+    detectRefundRateShift({
+      nowIso,
+      orders: orders.map((o) => ({
+        id: o.id,
+        status: o.status,
+        refunded: o.refunded,
+        totalAmount: o.totalAmount,
+        createdAtIso: o.createdAt.toISOString(),
+      })),
+      currency: singleCurrency,
+    }),
+    detectHighRiskBacklog({
+      nowIso,
+      orders: orders.map((o) => ({
+        id: o.id,
+        status: o.status,
+        refunded: o.refunded,
+        fraudRiskLevel: o.fraudRiskLevel,
+        totalAmount: o.totalAmount,
+        createdAtIso: o.createdAt.toISOString(),
+      })),
+      openExposure,
+      openOrderCount: openHighRisk.length,
+      storeEligibleOrderCount: eligibleOrders.length,
+    }),
+    detectSyncHealth({
+      nowIso,
+      syncJobs: syncJobs.map((j) => ({
+        id: j.id,
+        jobType: j.jobType,
+        status: j.status,
+        finishedAtIso: j.finishedAt ? j.finishedAt.toISOString() : null,
+        createdAtIso: j.createdAt.toISOString(),
+      })),
+      lastSyncAtIso: store?.lastSyncAt ? store.lastSyncAt.toISOString() : null,
+      lastConnectionStatus: store?.lastConnectionStatus ?? null,
+      lastWebhookRegistrationStatus: store?.lastWebhookRegistrationStatus ?? null,
+      accessTokenExpiresAtIso: store?.accessTokenExpiresAt
+        ? store.accessTokenExpiresAt.toISOString()
+        : null,
+    }),
+    detectDataCoverage({
+      nowIso,
+      totalProducts: productHandles.size,
+      productsWithUsableCost: Array.from(productHandles).filter((h) => handlesWithCost.has(h))
+        .length,
+      totalOrders: orders.length,
+      ordersWithCustomer: orders.filter((o) => !!o.customerId).length,
+      distinctOrderCurrencies: currencies.length,
+    }),
+  ];
+
+  const insights: ExplainableInsight[] = [];
+  let suppressed = 0;
+
+  for (const problem of problems) {
+    if (!problem) continue;
+
+    const findingType = `${OPERATIONAL_FINDING_TYPE_PREFIX}${problem.detector}`;
+    const fingerprint = computeFindingFingerprint({
+      storeId: input.storeId,
+      module: "fraud",
+      findingType,
+      subjectKey: problem.subjectKey,
+    });
+
+    if (await isInCooldown({ storeId: input.storeId, fingerprint, nowIso })) {
+      suppressed += 1;
+      continue;
+    }
+
+    const insight = buildInsight({
+      storeId: input.storeId,
+      // Reuses an existing InsightModule value so the capability map and the
+      // entitlement system need no change.
+      module: "fraud",
+      id: `operational:${problem.detector}:${analysisWindowUTC(nowIso)}`,
+      title: problem.title,
+      reasons: [problem.what, problem.why],
+      evidence: problem.evidence,
+      financialImpact: problem.impact,
+      confidence: problem.confidence,
+      urgency: problem.severity,
+      recommendedAction: problem.recommendedAction,
+      route: operationalRoute(problem.detector),
+      methodology: {
+        summary: `${problem.what} ${problem.why}`,
+        assumptions: [
+          `Window: ${problem.window.fromIso.slice(0, 10)} to ${problem.window.toIso.slice(0, 10)} (${problem.window.days} days).`,
+          `Completeness: ${problem.completeness.level}. ${problem.completeness.note}`,
+          `Cooldown: a resolved or dismissed alert is not re-raised for ${OPERATIONAL_COOLDOWN_DAYS} days.`,
+        ],
+        caps: [
+          problem.completeness.missingInputs.length
+            ? `Missing inputs: ${problem.completeness.missingInputs.join(", ")}.`
+            : "No missing inputs for this detector.",
+          "Built only on stored Shopify order, sync and product data. No supplier, carrier, advertising, marketplace, ERP or WMS signal is available to VedaSuite, so none is claimed.",
+        ],
+      },
+      dataQuality: problem.completeness.level === "complete" ? "ok" : "insufficient_data",
+      nowIso,
+      storeImpactCap: Math.max(impactMax(problem.impact), IMPACT_CAP_FALLBACK),
+    });
+
+    insights.push(insight);
+
+    await recordFinding({
+      storeId: input.storeId,
+      module: "fraud",
+      findingType,
+      subjectKey: problem.subjectKey,
+      fingerprint,
+      snapshot: insight,
+      sourceInsightId: insight.id,
+    });
+  }
+
+  logEvent("info", "intelligence.operational_problems_detected", {
+    storeId: input.storeId,
+    findings: insights.length,
+    suppressedByCooldown: suppressed,
+    ordersEvaluated: orders.length,
+  });
+
+  return insights;
+}
+
+/**
+ * Runs all detectors for one store. Explicit entry point — deliberately NOT
  * scheduled and NOT called from sync, onboarding, billing or any route, so no
  * existing behaviour changes until it is wired up in a later part.
  */
@@ -362,9 +640,10 @@ export async function runIntelligenceDetectors(input: {
   storeId: string;
   nowIso?: string;
 }) {
-  const [customerLoss, productProfit] = await Promise.all([
+  const [customerLoss, productProfit, operational] = await Promise.all([
     detectCustomerLoss(input),
     detectProductProfit(input),
+    detectOperationalProblems(input),
   ]);
-  return { customerLoss, productProfit };
+  return { customerLoss, productProfit, operational };
 }
