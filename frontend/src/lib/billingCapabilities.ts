@@ -1,3 +1,11 @@
+import {
+  BILLING_STATE_CONTRACT,
+  SUBSCRIPTION_CONTRACT,
+  hasTrialActive,
+  hasTrialDays,
+  shouldWarnMissingField,
+} from "./subscriptionContract";
+
 export const BILLING_PLANS = ["NONE", "TRIAL", "STARTER", "GROWTH", "PRO"] as const;
 
 export type BillingPlanName = (typeof BILLING_PLANS)[number];
@@ -430,7 +438,11 @@ export const fallbackSubscription: SubscriptionInfo = {
 };
 
 export function normalizeSubscriptionInfo(
-  value: Partial<SubscriptionInfo> | null | undefined
+  value: Partial<SubscriptionInfo> | null | undefined,
+  // Which contract the payload comes from. normalizeBillingState reuses this
+  // function as a defaulting helper for a BillingState, which never carried
+  // trialDays/trialActive — warning about those there is a false positive.
+  contract: string = SUBSCRIPTION_CONTRACT
 ): SubscriptionInfo {
   if (!value) {
     return fallbackSubscription;
@@ -445,7 +457,13 @@ export function normalizeSubscriptionInfo(
   // API contract drift is visible in the field rather than invisible.
   const trialActive =
     typeof value.trialActive === "boolean" ? value.trialActive : isTrialWindowOpen(value);
-  if (typeof value.trialActive !== "boolean" && typeof console !== "undefined") {
+  if (
+    shouldWarnMissingField({
+      contract,
+      present: hasTrialActive(value.trialActive),
+    }) &&
+    typeof console !== "undefined"
+  ) {
     console.warn(
       "[billing] subscription payload missing trialActive — falling back to a client-side date guess. This indicates a backend/frontend contract drift."
     );
@@ -468,7 +486,11 @@ export function normalizeSubscriptionInfo(
 
   // trialDays must come from the backend. A missing value is reported as 0
   // (an explicit "unavailable" state) rather than inventing 3 or 7 days.
-  if (typeof value.trialDays !== "number" && typeof console !== "undefined" && trialActive) {
+  if (
+    trialActive &&
+    shouldWarnMissingField({ contract, present: hasTrialDays(value.trialDays) }) &&
+    typeof console !== "undefined"
+  ) {
     console.warn(
       "[billing] subscription payload missing trialDays while trialActive is true — reporting 0 instead of guessing a duration."
     );
@@ -546,7 +568,14 @@ export function normalizeEntitlementState(
 export function normalizeBillingState(
   value: Partial<BillingState> | null | undefined
 ): BillingState {
-  const subscription = normalizeSubscriptionInfo(value as Partial<SubscriptionInfo>);
+  // A BillingState is not a SubscriptionInfo — it is normalised here only to
+  // reuse the plan/status defaulting. Declaring the contract keeps the
+  // subscription-only drift warnings from firing on a payload that never
+  // promised those fields.
+  const subscription = normalizeSubscriptionInfo(
+    value as Partial<SubscriptionInfo>,
+    BILLING_STATE_CONTRACT
+  );
   const lifecycle = normalizeBillingLifecycle(value?.lifecycle);
   const merchantTitle =
     lifecycle === "active" && value?.merchantTitle?.toLowerCase().includes("test plan is active")

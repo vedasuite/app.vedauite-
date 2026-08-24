@@ -3,6 +3,7 @@
 // Shopify requires the CDN script as of March 2024.
 import { getEmbeddedContext } from "./lib/shopifyEmbeddedContext";
 import { withRequestTimeout } from "./lib/requestTimeout";
+import { waitForAppBridge } from "./lib/appBridgeReady";
 
 declare global {
   interface Window {
@@ -81,8 +82,45 @@ export function getEmbeddedAppBridge() {
   return window.shopify ?? null;
 }
 
+// One shared wait for the CDN script, not one per request. If App Bridge never
+// arrives we pay the timeout once; every later call then returns immediately.
+// The fast path below re-checks window.shopify first, so a late arrival is
+// still picked up without re-polling.
+let appBridgeReadyPromise: Promise<unknown> | null = null;
+
+function ensureAppBridgeReady(): Promise<unknown> {
+  if (window.shopify) {
+    return Promise.resolve(window.shopify);
+  }
+  if (!appBridgeReadyPromise) {
+    appBridgeReadyPromise = waitForAppBridge({
+      getBridge: () => window.shopify ?? null,
+      sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    });
+  }
+  return appBridgeReadyPromise;
+}
+
+/** Test seam: drop the memoised readiness wait. */
+export function resetAppBridgeReadyState() {
+  appBridgeReadyPromise = null;
+}
+
 export async function getEmbeddedSessionToken(): Promise<string | null> {
-  if (typeof window === "undefined" || !window.shopify) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  // The CDN App Bridge script may still be loading on a cold embedded start.
+  // Returning null here used to send the request with no Authorization header,
+  // which the backend answered with 401 — surfaced to the merchant as
+  // "Shopify connection needs attention". Wait for it instead.
+  if (!window.shopify) {
+    await ensureAppBridgeReady();
+  }
+
+  if (!window.shopify) {
     return null;
   }
 

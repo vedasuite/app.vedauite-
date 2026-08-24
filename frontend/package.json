@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "typecheck:gate": "node scripts/typecheck-gate.mjs",
+    "typecheck:baseline": "node scripts/typecheck-gate.mjs --update",
+    "validate": "npm run typecheck:gate && npm run build"
   },
   "dependencies": {
     "@shopify/polaris": "^13.9.5",

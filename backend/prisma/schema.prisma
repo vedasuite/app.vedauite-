@@ -45,19 +45,20 @@ model Store {
 
   subscription StoreSubscription? @relation("StoreToSubscription")
 
-  competitorDomains  CompetitorDomain[]
-  productSnapshots   ProductSnapshot[]
-  orders             Order[]
-  customers          Customer[]
-  fraudSignals       FraudSignal[]
-  competitorData     CompetitorData[]
-  priceHistory       PriceHistory[]
-  profitData         ProfitOptimizationData[]
-  billingAuditLogs   BillingAuditLog[]
-  billingPlanIntents BillingPlanIntent[]
-  timelineEvents     TimelineEvent[]
-  syncJobs           SyncJob[]
-  supportTickets     SupportTicket[]
+  competitorDomains    CompetitorDomain[]
+  productSnapshots     ProductSnapshot[]
+  orders               Order[]
+  customers            Customer[]
+  fraudSignals         FraudSignal[]
+  competitorData       CompetitorData[]
+  priceHistory         PriceHistory[]
+  profitData           ProfitOptimizationData[]
+  billingAuditLogs     BillingAuditLog[]
+  billingPlanIntents   BillingPlanIntent[]
+  timelineEvents       TimelineEvent[]
+  syncJobs             SyncJob[]
+  supportTickets       SupportTicket[]
+  intelligenceFindings IntelligenceFinding[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -395,4 +396,90 @@ model SupportTicket {
 
   @@index([storeId, createdAt])
   @@index([status, createdAt])
+}
+
+/// Persisted envelope around a computed intelligence finding.
+///
+/// This model deliberately stores NONE of the analytical semantics. Severity
+/// (`Urgency`), `Confidence`, `FinancialImpact`, `AggregateEvidence`,
+/// `Methodology`, `recommendedAction` and data coverage all remain owned by
+/// services/explainabilityCalc.ts + explainabilityService.ts, which are the
+/// single source of truth and are recomputed on read. Re-declaring any of them
+/// here would create a second, drifting definition.
+///
+/// What it adds is exactly what a per-request computation cannot provide:
+/// identity that survives across runs (`fingerprint`), merchant ownership,
+/// lifecycle state, and first/last-seen timestamps — the prerequisites for a
+/// later Action Center.
+///
+/// Cascades with the Store row, so a shop/redact purge removes it along with
+/// the derived data it describes.
+model IntelligenceFinding {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// Stable, caller-supplied identity for "the same finding, seen again".
+  /// Unique per store (see @@unique) so repeated detection updates one row
+  /// instead of accumulating duplicates. Never derived from volatile values
+  /// such as money amounts or timestamps.
+  fingerprint String
+
+  /// Which analysis produced this. Holds an existing `InsightModule` value
+  /// ("fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit")
+  /// as a plain string rather than a new enum, so the taxonomy stays owned by
+  /// explainabilityCalc.ts and adding a module needs no migration.
+  module String
+
+  /// Finer-grained detector key within a module, for later detectors to
+  /// distinguish their own finding kinds without a schema change.
+  findingType String
+
+  /// Reference back to the computed ExplainableInsight.id this envelope last
+  /// wrapped. A pointer for correlation only — not a foreign key, because the
+  /// computed insight is not persisted anywhere.
+  sourceInsightId String?
+
+  /// Lifecycle: new | seen | in_review | resolved | dismissed.
+  /// A plain string with an application-level whitelist, matching the existing
+  /// convention on SupportTicket.status and SyncJob.status.
+  status String @default("new")
+
+  /// Freshness. firstDetectedAt is written once and never moved; lastSeenAt
+  /// advances on every re-detection, so "how long has this been true" and
+  /// "is this still true" are both answerable.
+  firstDetectedAt DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  /// How many times this finding has been re-detected. Minimal persisted
+  /// signal for later prioritisation ("recurring" vs "one-off").
+  detectionCount Int @default(1)
+
+  /// Resolution / dismissal metadata.
+  statusChangedAt DateTime?
+  resolvedAt      DateTime?
+  dismissedAt     DateTime?
+  resolutionNote  String?
+  /// Free-form actor label (e.g. "merchant"). No PII is written here.
+  statusChangedBy String?
+
+  /// Last-seen serialization of the computed ExplainableInsight, kept so a
+  /// resolved or no-longer-emitted finding can still be displayed. A read-only
+  /// snapshot: never hand-edited, never treated as authoritative, and always
+  /// superseded by a fresh computation when one is available.
+  ///
+  /// Written ONLY through intelligenceFindingService.sanitizeSnapshotForPersistence,
+  /// which allow-lists the known ExplainableInsight fields (so a detector cannot
+  /// smuggle in raw customer data), drops the redundant storeId, masks email and
+  /// long-digit-run patterns in free text, and bounds string/array/total size to
+  /// MAX_SNAPSHOT_BYTES. Over-budget payloads are reduced to a renderable
+  /// minimum rather than stored truncated. Never write this column directly.
+  snapshotJson String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, fingerprint])
+  @@index([storeId, status, lastSeenAt])
+  @@index([storeId, module, status])
 }

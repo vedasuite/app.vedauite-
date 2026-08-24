@@ -12,7 +12,12 @@
 export type Confidence = "high" | "medium" | "low" | "insufficient_data";
 export type Urgency = "critical" | "high" | "medium" | "low";
 export type InsightModule =
-  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit";
+  | "fraud" | "trust" | "return_abuse" | "competitor" | "pricing" | "profit"
+  // Store health / data delivery. Deliberately NOT a paid analysis module:
+  // "your Shopify connection is broken" or "no successful sync for 20 days"
+  // affects every merchant regardless of plan, so it is never entitlement-gated.
+  // See MODULE_CAPABILITY below.
+  | "operational";
 
 export type ImpactPeriod =
   | "per_order"
@@ -168,23 +173,43 @@ export const OPEN_HIGH_RISK_STATUSES = ["paid", "approved", "manual_review"] as 
 export const RECENCY_DECAY_DAYS = 30;
 
 // Insight module -> capability module used by the existing entitlement system.
-export const MODULE_CAPABILITY: Record<InsightModule, "fraud" | "competitor" | "pricing" | "profit"> = {
+/**
+ * Insight module -> capability module used by the existing entitlement system.
+ *
+ * `null` means "not gated by any paid capability". Only `operational` uses it:
+ * store-health and data-delivery findings must reach every merchant, because a
+ * broken Shopify connection or a stalled sync degrades the whole app regardless
+ * of which analysis modules the plan includes. Gating those behind `fraud`
+ * would hide a critical, actionable problem from a merchant on a plan that
+ * simply does not include Fraud Intelligence.
+ *
+ * Every other value is unchanged, so existing filtering behaviour is identical.
+ */
+export const MODULE_CAPABILITY: Record<
+  InsightModule,
+  "fraud" | "competitor" | "pricing" | "profit" | null
+> = {
   fraud: "fraud",
   trust: "fraud",
   return_abuse: "fraud",
   competitor: "competitor",
   pricing: "pricing",
   profit: "profit",
+  operational: null,
 };
 
 // ---------- Small helpers ----------
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const round2 = (v: number) => Math.round(v * 100) / 100;
-const isEligibleStatus = (status: string) =>
+// Exported so the Part 2 detectors reuse the exact same rounding and
+// order-eligibility rules instead of re-deriving them. Behaviour unchanged for
+// every existing caller — these were already the module-private definitions.
+export const round2 = (v: number) => Math.round(v * 100) / 100;
+export const isEligibleStatus = (status: string) =>
   (ELIGIBLE_ORDER_STATUSES as readonly string[]).includes((status || "").toLowerCase());
 
-function daysBetween(nowIso: string, thenIso: string): number {
+// Exported for the Part 2 detectors so window arithmetic is identical everywhere.
+export function daysBetween(nowIso: string, thenIso: string): number {
   const now = new Date(nowIso).getTime();
   const then = new Date(thenIso).getTime();
   if (!Number.isFinite(now) || !Number.isFinite(then)) return Infinity;
@@ -630,6 +655,28 @@ export const EVIDENCE_ALLOWLIST = new Set([
   "match_confidence",
   "margin_percentage",
   "sales_velocity",
+  // Part 2 — Customer Loss. Aggregates and ratios only; no customer identity.
+  "observed_window_days",
+  "observed_loss_ratio",
+  "observed_loss_value",
+  "eligible_order_value",
+  // Part 2 — Product Profit. Unit economics and data-coverage reporting.
+  "retained_margin_ratio",
+  "unit_selling_price",
+  "unit_cost",
+  "data_completeness",
+  "missing_inputs",
+  // Part 3 — Operational Problem Intelligence. Rates, counts and ages only.
+  "refund_rate_recent",
+  "refund_rate_baseline",
+  "refund_rate_shift",
+  "open_high_risk_orders",
+  "oldest_open_days",
+  "sync_failure_streak",
+  "last_successful_sync_days",
+  "cost_coverage_ratio",
+  "customer_linkage_ratio",
+  "window_days",
 ]);
 
 const EVIDENCE_LABELS: Record<string, string> = {
@@ -643,6 +690,25 @@ const EVIDENCE_LABELS: Record<string, string> = {
   match_confidence: "Match confidence",
   margin_percentage: "Margin %",
   sales_velocity: "Sales velocity",
+  observed_window_days: "Observation window (days)",
+  observed_loss_ratio: "Share of order value refunded",
+  observed_loss_value: "Refunded order value (observed)",
+  eligible_order_value: "Eligible order value",
+  retained_margin_ratio: "Retained margin %",
+  unit_selling_price: "Selling price (unit)",
+  unit_cost: "Cost (unit)",
+  data_completeness: "Data completeness",
+  missing_inputs: "Missing inputs",
+  refund_rate_recent: "Refund rate (recent window)",
+  refund_rate_baseline: "Refund rate (baseline window)",
+  refund_rate_shift: "Refund rate change",
+  open_high_risk_orders: "Open high-risk orders",
+  oldest_open_days: "Oldest open high-risk order (days)",
+  sync_failure_streak: "Consecutive sync failures",
+  last_successful_sync_days: "Days since last successful sync",
+  cost_coverage_ratio: "Products with cost data",
+  customer_linkage_ratio: "Orders linked to a customer",
+  window_days: "Window (days)",
 };
 
 /**
@@ -667,7 +733,12 @@ export function filterInsightsByCapability(
   enabledModules: string[]
 ): ExplainableInsight[] {
   const enabled = new Set(enabledModules);
-  return insights.filter((i) => enabled.has(MODULE_CAPABILITY[i.module]));
+  return insights.filter((i) => {
+    const capability = MODULE_CAPABILITY[i.module];
+    // null capability => store health, visible on every plan.
+    if (capability === null) return true;
+    return enabled.has(capability);
+  });
 }
 
 /** Defense-in-depth on top of DB scoping: keep only the authenticated store's rows. */

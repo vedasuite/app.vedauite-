@@ -5,6 +5,7 @@ import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { useAppState } from "./hooks/useAppState";
 import { AppFrame } from "./layout/AppFrame";
 import { DashboardPage } from "./modules/Dashboard/DashboardPage";
+import { ActionCenterPage } from "./modules/ActionCenter/ActionCenterPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
 import { SettingsPage } from "./modules/Settings/SettingsPage";
 import { SupportPage } from "./modules/Support/SupportPage";
@@ -93,6 +94,7 @@ export default function App() {
         <Route path="/app" element={<EntryRoute />} />
         <Route path="/app/onboarding" element={withRouteBoundary("Onboarding", <OnboardingPage />)} />
         <Route path="/app/dashboard" element={withRouteBoundary("Dashboard", <DashboardPage />)} />
+        <Route path="/app/action-center" element={withRouteBoundary("Action Center", <ActionCenterPage />)} />
         <Route
           path="/app/fraud-intelligence"
           element={

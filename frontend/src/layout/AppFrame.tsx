@@ -10,6 +10,7 @@ import {
   resolveBackendPlan,
   resolveBackendStarterModule,
 } from "../lib/backendModuleAccess";
+import { buildNavigationModel } from "./navigationModel";
 import "./app-frame.css";
 
 type Props = {
@@ -165,23 +166,14 @@ export function AppFrame({ children }: Props) {
     [location.pathname, navigateEmbedded]
   );
 
+  // The entry list comes from a pure model (navigationModel.ts) so the
+  // "every entry is always present" invariant is testable against real state
+  // permutations rather than by reading this JSX.
   const navigationItems = useMemo(
-    () => [
-      createNavItem("/app/onboarding", "Onboarding"),
-      createNavItem("/app/dashboard", "Dashboard"),
-      createNavItem("/app/fraud-intelligence", "Fraud Intelligence", {
-        badge: moduleStatus.fraud ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/competitor-intelligence", "Competitor Intelligence", {
-        badge: moduleStatus.competitor ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/ai-pricing-engine", "AI Pricing Engine", {
-        badge: moduleStatus.pricing ? undefined : "Upgrade",
-      }),
-      createNavItem("/app/billing", "Billing"),
-      createNavItem("/app/settings", "Settings"),
-      createNavItem("/app/support", "Support & Feedback"),
-    ],
+    () =>
+      buildNavigationModel(moduleStatus).map((entry) =>
+        createNavItem(entry.path, entry.label, entry.badge ? { badge: entry.badge } : undefined)
+      ),
     [
       createNavItem,
       moduleStatus.competitor,

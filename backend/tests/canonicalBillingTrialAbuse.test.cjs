@@ -86,15 +86,28 @@ function buildSubscription(planName, overrides = {}) {
   };
 }
 
+// Trial windows are RELATIVE to the moment the suite runs.
+//
+// These fixtures previously hardcoded 2026-08-01 -> 2026-08-08. Once the wall
+// clock passed that end date, every `trialActive === true` assertion in this
+// file started failing even though the trial logic was unchanged and correct —
+// the fixture had silently expired. An absolute date in a trial fixture is a
+// time bomb; anchoring to Date.now() keeps "open" open and "expired" expired
+// for good. Both windows keep the real 7-day length.
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const FIXTURE_NOW = Date.now();
 const OPEN_TRIAL = {
-  trialStartedAt: new Date("2026-08-01T00:00:00.000Z"),
-  trialEndsAt: new Date("2026-08-08T00:00:00.000Z"),
+  // Day 3 of 7 — comfortably open, and far enough from both edges that clock
+  // skew or a slow suite cannot flip it.
+  trialStartedAt: new Date(FIXTURE_NOW - 2 * MS_PER_DAY),
+  trialEndsAt: new Date(FIXTURE_NOW + 5 * MS_PER_DAY),
 };
 const EXPIRED_TRIAL = {
-  trialStartedAt: new Date("2026-01-01T00:00:00.000Z"),
-  trialEndsAt: new Date("2026-01-08T00:00:00.000Z"),
+  // A 7-day window that closed 30 days ago.
+  trialStartedAt: new Date(FIXTURE_NOW - 37 * MS_PER_DAY),
+  trialEndsAt: new Date(FIXTURE_NOW - 30 * MS_PER_DAY),
 };
-const NOW_DURING_TRIAL = new Date("2026-08-03T00:00:00.000Z");
+const NOW_DURING_TRIAL = new Date(FIXTURE_NOW - 1 * MS_PER_DAY);
 
 // ---------------------------------------------------------------------------
 // 1. No subscription + trial open. Under the plan-selected model this

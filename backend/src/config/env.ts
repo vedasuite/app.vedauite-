@@ -2,6 +2,21 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+/**
+ * Reads a numeric env var, preserving an explicit 0.
+ *
+ * `Number(x) || fallback` silently turns a deliberate 0 into the fallback,
+ * which matters for values where 0 means "off" — e.g. setting the AI hourly
+ * call ceiling to 0 to stop all provider spend would otherwise grant 12.
+ */
+function numberFromEnv(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export const env = {
   port: Number(process.env.PORT) || 4000,
   shopifyApiKey: process.env.SHOPIFY_API_KEY || "",
@@ -52,6 +67,39 @@ export const env = {
     "true",
   enableGuidedSetupData:
     (process.env.ENABLE_GUIDED_SETUP_DATA || "false").toLowerCase() === "true",
+  // Persistence of intelligence findings (IntelligenceFinding). OFF by default:
+  // the table and service ship inert, so this branch changes nothing until a
+  // later detector is wired up and the flag is switched on in that environment.
+  // Read paths are never gated by this — only writes.
+  enableIntelligenceFindingPersistence:
+    (
+      process.env.ENABLE_INTELLIGENCE_FINDING_PERSISTENCE || "false"
+    ).toLowerCase() === "true",
+  // The controlled AI explanation layer for the Action Center brief.
+  //
+  // OFF by default and fails closed: with the flag off, no key, or any provider
+  // problem, the Action Center serves the deterministic brief it already
+  // serves today. AI never detects anything, never computes impact and never
+  // changes severity/confidence — it only rewords findings VedaSuite already
+  // verified. See services/ai/aiBriefProvider.ts.
+  ai: {
+    enabled: (process.env.ENABLE_AI_INTELLIGENCE_BRIEF || "false").toLowerCase() === "true",
+    // Server-side only. Never exposed to the frontend, never logged.
+    apiKey: process.env.OPENAI_API_KEY || "",
+    model: process.env.AI_BRIEF_MODEL || "gpt-4.1-mini",
+    // Kept short: the merchant is waiting on the Action Center response, and a
+    // slow provider must degrade to deterministic rather than stall the page.
+    timeoutMs: numberFromEnv(process.env.AI_BRIEF_TIMEOUT_MS, 8000),
+    // Cost/abuse protection, per store, in-process. Set to 0 to stop all
+    // provider spend while leaving the flag on.
+    maxCallsPerStorePerHour: numberFromEnv(
+      process.env.AI_BRIEF_MAX_CALLS_PER_HOUR,
+      12
+    ),
+    // Repeated Action Center loads reuse one brief while findings are
+    // unchanged. Set to 0 to disable caching.
+    cacheTtlMs: numberFromEnv(process.env.AI_BRIEF_CACHE_TTL_MS, 15 * 60 * 1000),
+  },
 };
 
 if (!env.shopifyApiKey || !env.shopifyApiSecret || !env.shopifyAppUrl) {
