@@ -18,6 +18,7 @@ import { HttpError } from "../lib/httpError";
 import {
   FINDING_STATUSES,
   isFindingStatus,
+  isOpenFindingStatus,
   parseFindingSnapshot,
   transitionFindingStatus,
   type FindingStatus,
@@ -399,9 +400,6 @@ export async function getActionCenter(input: {
   return { cards, summary: buildSummary(cards, now) };
 }
 
-/** Statuses that mean a finding still needs the merchant's attention. */
-const OPEN_STATUSES: FindingStatus[] = ["new", "seen", "in_review"];
-
 export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummary {
   const bySeverity: Record<Urgency, number> = { critical: 0, high: 0, medium: 0, low: 0 };
   const byStatus = Object.fromEntries(
@@ -428,7 +426,7 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
   // estimated-impact figure kept adding money from problems the merchant had
   // already resolved, and the staleness banner told them to re-sync because of
   // a dismissed finding.
-  const openCards = cards.filter((c) => OPEN_STATUSES.includes(c.status));
+  const openCards = cards.filter((c) => isOpenFindingStatus(c.status));
 
   for (const card of openCards) {
     bySeverity[card.severity] = (bySeverity[card.severity] ?? 0) + 1;

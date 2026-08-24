@@ -501,9 +501,12 @@ test("COST: a status change invalidates the cache so the brief stays truthful", 
     },
   };
 
+  // Both states are OPEN, so the provider is reachable in both cases and the
+  // cache key itself is what is under test. (Resolving is covered separately
+  // below: it must skip the provider entirely, not merely miss the cache.)
   await run([card({ status: "new" })], summary(), provider);
-  await run([card({ status: "resolved" })], summary(), provider);
-  assert.equal(calls, 2, "a resolved finding must not reuse the old brief");
+  await run([card({ status: "seen" })], summary(), provider);
+  assert.equal(calls, 2, "a lifecycle change must not reuse the previous brief");
 });
 
 test("COST: a failed attempt still consumes allowance, so an outage cannot be hammered", async () => {
@@ -880,4 +883,169 @@ test("DIAGNOSABILITY: the provider name has exactly one home", () => {
   // So a reported provider can never drift from the one actually called.
   assert.match(provider, /export const AI_PROVIDER_NAME = "openai"/);
   assert.match(provider, /readonly name = AI_PROVIDER_NAME/);
+});
+
+// ===========================================================================
+// RESOLVED FINDINGS MUST NEVER BE DESCRIBED AS CURRENT
+//
+// Reported from staging: Action Center showed "Open findings 0 / Critical-high
+// 0" while the AI brief above it said Shopify synchronisation was currently
+// unreliable and described an expired access token — a problem the merchant had
+// already resolved.
+//
+// Cause: buildAiBriefInput sent `cards` unfiltered. The Action Center feed
+// deliberately keeps resolved and dismissed findings retrievable, so `cards` is
+// not the list of current problems. The model can only describe what it is
+// given, so the payload is the enforcement point.
+// ===========================================================================
+
+const CLOSED_STATUSES = ["resolved", "dismissed"];
+
+test("REPRO: a resolved finding is never sent to the model", () => {
+  const payload = buildAiBriefInput(
+    [
+      card({ id: "open-one", status: "new", title: "Live problem" }),
+      card({ id: "fixed", status: "resolved", title: "Shopify sync unreliable" }),
+      card({ id: "ignored", status: "dismissed", title: "Expired access token" }),
+    ],
+    summary()
+  );
+
+  assert.deepEqual(
+    payload.findings.map((f) => f.findingId),
+    ["open-one"],
+    "only open findings may reach the model"
+  );
+
+  const serialised = JSON.stringify(payload);
+  assert.equal(
+    serialised.includes("Shopify sync unreliable"),
+    false,
+    "a resolved finding's text must not reach the model"
+  );
+  assert.equal(serialised.includes("Expired access token"), false);
+});
+
+test("REPRO: with every finding closed, the model is not called at all", async () => {
+  for (const status of CLOSED_STATUSES) {
+    resetAiBudgets();
+    let called = false;
+    const brief = await run([card({ status })], summary({ totalOpen: 0 }), {
+      name: "test",
+      generate: async () => {
+        called = true;
+        return { headline: "Sync is currently unreliable", bullets: ["Fix it."] };
+      },
+    });
+
+    assert.equal(called, false, `${status}: no provider call when nothing is open`);
+    assert.equal(brief.generatedBy, "deterministic");
+    assert.match(
+      brief.headline,
+      /Nothing needs your attention/i,
+      `${status}: the brief must say the store is clear`
+    );
+  }
+});
+
+test("REPRO: the brief agrees with the summary tiles the merchant sees beside it", async () => {
+  // The exact reported screen: 0 open, 0 critical/high.
+  const cards = [
+    card({ id: "a", status: "resolved" }),
+    card({ id: "b", status: "dismissed" }),
+  ];
+  const sum = summary({
+    totalOpen: 0,
+    bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+  });
+
+  const brief = await run(cards, sum, providerReturning({
+    headline: "Synchronisation is currently unreliable",
+    bullets: ["Your access token has expired."],
+  }));
+
+  assert.equal(brief.generatedBy, "deterministic", "no AI text about closed findings");
+  assert.doesNotMatch(brief.headline, /unreliable|expired/i);
+  assert.equal(
+    brief.bullets.some((b) => /unreliable|expired/i.test(b)),
+    false,
+    "no bullet may describe a resolved problem as current"
+  );
+});
+
+test("MIXED: an open finding is still described while a closed one is not", async () => {
+  const brief = await run(
+    [
+      // cuid-shaped, as in production — not short words that appear in prose.
+      card({ id: "clx0open00000000000000001", status: "new", title: "Live problem" }),
+      card({ id: "clx0done00000000000000002", status: "resolved", title: "Old problem" }),
+    ],
+    summary(),
+    providerReturning({
+      headline: "One thing needs your attention",
+      bullets: ["A live problem needs review."],
+    })
+  );
+
+  assert.equal(brief.generatedBy, "ai_assisted", "an open finding still gets AI wording");
+  assert.equal(brief.referencedFindingIds.includes("clx0done00000000000000002"), false);
+});
+
+test("DETERMINISTIC: the fallback brief also ignores closed findings", () => {
+  const brief = buildDeterministicBrief(
+    [card({ id: "done", status: "resolved", title: "Old problem" })],
+    summary({ totalOpen: 0, bySeverity: { critical: 0, high: 0, medium: 0, low: 0 } })
+  );
+
+  assert.match(brief.headline, /Nothing needs your attention/i);
+  assert.deepEqual(brief.referencedFindingIds, []);
+  assert.equal(
+    JSON.stringify(brief).includes("Old problem"),
+    false,
+    "a resolved finding must not appear in the deterministic brief either"
+  );
+});
+
+test("INVARIANT: the AI payload can never contain a closed finding, in any mix", () => {
+  // Exhaustive over the lifecycle: whatever the feed contains, the payload
+  // carries open findings only.
+  const all = ["new", "seen", "in_review", "resolved", "dismissed"].map((status) =>
+    card({ id: `s-${status}`, status })
+  );
+  const payload = buildAiBriefInput(all, summary());
+
+  assert.deepEqual(
+    payload.findings.map((f) => f.findingId),
+    ["s-new", "s-seen", "s-in_review"],
+    "exactly the open statuses, in feed order"
+  );
+  assert.equal(payload.findings.length, 3);
+});
+
+test("INVARIANT: 'open' has exactly one definition across all three surfaces", () => {
+  // Three hand-rolled copies of this list is how the AI payload drifted out of
+  // step with the summary and the deterministic brief.
+  const fs = require("node:fs");
+  const findingSrc = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/intelligenceFindingService.ts"),
+    "utf8"
+  );
+  assert.match(
+    findingSrc,
+    /export const OPEN_FINDING_STATUSES = \["new", "seen", "in_review"\] as const;/,
+    "the single definition must live with the status taxonomy"
+  );
+
+  for (const file of [
+    "../src/services/actionCenterService.ts",
+    "../src/services/intelligenceBriefService.ts",
+  ]) {
+    const src = fs.readFileSync(path.resolve(__dirname, file), "utf8");
+    assert.match(src, /isOpenFindingStatus/, `${file} must use the shared predicate`);
+    assert.doesNotMatch(
+      src,
+      /\["new", "seen", "in_review"\]/,
+      `${file} must not re-declare the open-status list`
+    );
+  }
 });

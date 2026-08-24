@@ -13,6 +13,7 @@
 
 import { logEvent } from "./observabilityService";
 import type { ActionCard, ActionCenterSummary } from "./actionCenterService";
+import { isOpenFindingStatus } from "./intelligenceFindingService";
 import { env } from "../config/env";
 import {
   AiBriefError,
@@ -69,7 +70,17 @@ export function buildAiBriefInput(cards: ActionCard[], summary: ActionCenterSumm
     notQuantifiedCount: summary.notQuantifiedCount,
     staleCount: summary.staleCount,
     incompleteDataCount: summary.incompleteDataCount,
-    findings: cards.slice(0, 10).map((c) => ({
+    // OPEN findings only.
+    //
+    // The Action Center feed deliberately keeps resolved and dismissed findings
+    // retrievable, so `cards` is not the list of current problems. Passing all
+    // of them here told the model that a resolved issue was still happening,
+    // and it duly wrote it up as current — a merchant was shown "synchronisation
+    // is currently unreliable" for a problem they had already resolved.
+    //
+    // The model can only describe what it is given, so this is the enforcement
+    // point: a resolved finding never reaches it.
+    findings: cards.filter((c) => isOpenFindingStatus(c.status)).slice(0, 10).map((c) => ({
       findingId: c.id,
       findingType: c.findingType,
       severity: c.severity,
@@ -217,8 +228,14 @@ export function validateAiBrief(
   }
 
   // 2. Internal finding ids must never be shown to a merchant.
+  //
+  // Only ids long enough to actually identify something are checked. Finding
+  // ids are cuids (25 chars) in production; a plain substring test against a
+  // very short id matches ordinary prose — "live" inside "a live problem" —
+  // and would reject a perfectly good brief.
+  const MIN_IDENTIFYING_ID_LENGTH = 8;
   for (const id of allowedFindingIds) {
-    if (id && text.includes(id)) {
+    if (id && id.length >= MIN_IDENTIFYING_ID_LENGTH && text.includes(id)) {
       return { ok: false, reason: "exposed an internal finding id" };
     }
   }
@@ -270,8 +287,13 @@ export function buildDeterministicBrief(
   summary: ActionCenterSummary
 ): IntelligenceBrief {
   const generatedAt = summary.generatedAt;
+  const open = cards.filter((c) => isOpenFindingStatus(c.status));
 
-  if (cards.length === 0) {
+  // Keyed on OPEN findings, not on the size of the feed. A store whose only
+  // finding is resolved has cards but nothing to act on, and previously fell
+  // through to the "N findings to review" branch and reported "0 findings to
+  // review" instead of saying everything was clear.
+  if (open.length === 0) {
     return {
       headline: "Nothing needs your attention right now",
       bullets: [
@@ -286,7 +308,6 @@ export function buildDeterministicBrief(
     };
   }
 
-  const open = cards.filter((c) => ["new", "seen", "in_review"].includes(c.status));
   const top = open.slice(0, 3);
   const critical = summary.bySeverity.critical + summary.bySeverity.high;
 
@@ -400,8 +421,13 @@ export async function getIntelligenceBrief(
     if (!provider) {
       return deterministic;
     }
-    // Nothing to reword; do not spend a call.
-    if (cards.length === 0) {
+    // Nothing OPEN to reword; do not spend a call.
+    //
+    // Checking cards.length would be wrong: the feed keeps resolved and
+    // dismissed findings retrievable, so a store whose only finding is resolved
+    // still has cards. Calling the provider there produced a brief about a
+    // problem that no longer exists.
+    if (!cards.some((c) => isOpenFindingStatus(c.status))) {
       return deterministic;
     }
 
