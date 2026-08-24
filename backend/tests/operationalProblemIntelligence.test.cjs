@@ -238,13 +238,25 @@ test("O3: a single failure after a success is NOT a degradation", () => {
   assert.equal(r, null, "one failure is noise, not a streak");
 });
 
-test("O3: a broken connection and an expiring token are CRITICAL", () => {
+test("O3: a broken connection is CRITICAL", () => {
+  // An OBSERVED failure — Shopify actually rejected a call.
   assert.equal(syncHealth({ lastConnectionStatus: "SHOPIFY_RECONNECT_REQUIRED" }).severity, "critical");
-  assert.equal(
-    syncHealth({ accessTokenExpiresAtIso: new Date(new Date(NOW).getTime() + DAY).toISOString() })
-      .severity,
-    "critical"
-  );
+});
+
+test("O3: an expiring token alone is NOT critical", () => {
+  // Corrected from an earlier assertion that required "critical" here. Token
+  // expiry is a PREDICTION, not an observed failure, and this app refreshes
+  // expiring offline tokens automatically. Treating it as critical produced a
+  // false "VedaSuite is not receiving reliable Shopify data" alert in
+  // production on a store whose sync had just succeeded.
+  const r = syncHealth({
+    accessTokenExpiresAtIso: new Date(new Date(NOW).getTime() + DAY).toISOString(),
+    syncJobs: [],
+    lastSyncAtIso: null,
+  });
+  assert.ok(r, "with no sync evidence at all it is still worth surfacing");
+  assert.notEqual(r.severity, "critical", "metadata alone must never be critical");
+  assert.equal(r.severity, "medium");
 });
 
 test("O3: a token expiring far in the future does not fire", () => {
@@ -414,4 +426,100 @@ test("thresholds are exported so they are documented in one place", () => {
   assert.equal(OPERATIONAL.highRiskBacklog.minOpenOrders, 3);
   assert.equal(OPERATIONAL.syncHealth.failureStreak, 2);
   assert.equal(OPERATIONAL.coverage.minCostCoverage, 0.5);
+});
+
+// ===========================================================================
+// PRODUCTION REGRESSION — the false critical token alert
+//
+// Reported from production on the day persistence was enabled. Render logs at
+// essentially the same moment showed:
+//   shopify.sync.completed, syncStatus SUCCEEDED,
+//   finalJobStatus READY_WITH_DATA, derivedStatus READY_WITH_DATA,
+//   products/pricing/competitor data processed
+// yet the Action Center showed a CRITICAL
+//   "VedaSuite is not receiving reliable Shopify data ... the access token
+//    expired"
+//
+// Cause: accessTokenExpiresAt (a prediction) was weighted equally with observed
+// sync outcomes, and on its own forced severity to critical.
+// ===========================================================================
+
+test("PRODUCTION REPRO: a successful sync minutes ago + a token expiring today = NO alert", () => {
+  const r = syncHealth({
+    // The sync that succeeded, exactly as production logged it.
+    syncJobs: [syncJob("READY_WITH_DATA", 0)],
+    lastSyncAtIso: daysAgo(0),
+    lastConnectionStatus: null,
+    // Token metadata that previously forced "critical".
+    accessTokenExpiresAtIso: new Date(new Date(NOW).getTime() + 2 * 60 * 60 * 1000).toISOString(),
+  });
+
+  assert.equal(
+    r,
+    null,
+    "a sync that just succeeded is direct proof the connection works; token metadata must not contradict it"
+  );
+});
+
+test("PRODUCTION REPRO: an ALREADY-EXPIRED token plus a successful sync = NO alert", () => {
+  // The refresh already happened; the stored expiry is simply stale metadata.
+  const r = syncHealth({
+    syncJobs: [syncJob("READY_WITH_DATA", 0)],
+    lastSyncAtIso: daysAgo(0),
+    accessTokenExpiresAtIso: daysAgo(5),
+  });
+  assert.equal(r, null, "a stale expiry timestamp must not outrank a working sync");
+});
+
+test("PRECEDENCE: token expiry is reported once live evidence goes stale", () => {
+  // Never suppress a genuine problem merely because an OLD sync succeeded.
+  const r = syncHealth({
+    syncJobs: [syncJob("READY_WITH_DATA", 30)],
+    lastSyncAtIso: daysAgo(30),
+    accessTokenExpiresAtIso: daysAgo(5),
+  });
+  assert.ok(r, "with no recent success, token state is worth reporting");
+  assert.match(r.what, /expired 5 day\(s\) ago/i);
+  assert.equal(r.severity, "medium", "still not critical — no observed failure");
+});
+
+test("PRECEDENCE: a genuinely broken connection stays CRITICAL despite a recent success", () => {
+  // The safety direction that matters most: a real auth failure must never be
+  // hidden by the fact that a sync succeeded earlier.
+  const r = syncHealth({
+    syncJobs: [syncJob("READY_WITH_DATA", 0)],
+    lastSyncAtIso: daysAgo(0),
+    lastConnectionStatus: "SHOPIFY_AUTH_REQUIRED",
+  });
+  assert.ok(r);
+  assert.equal(r.severity, "critical");
+  assert.match(r.what, /reauthorisation/i);
+});
+
+test("PRECEDENCE: consecutive sync failures stay HIGH regardless of token state", () => {
+  const r = syncHealth({
+    syncJobs: [syncJob("FAILED", 0, "a"), syncJob("FAILED", 1, "b")],
+    lastSyncAtIso: daysAgo(10),
+    accessTokenExpiresAtIso: new Date(new Date(NOW).getTime() + DAY).toISOString(),
+  });
+  assert.ok(r);
+  assert.equal(r.severity, "high", "observed failures outrank token metadata");
+  assert.match(r.what, /consecutive sync failures/i);
+});
+
+test("PRECEDENCE: a healthy store with a far-future token still produces nothing", () => {
+  assert.equal(
+    syncHealth({ accessTokenExpiresAtIso: new Date(new Date(NOW).getTime() + 60 * DAY).toISOString() }),
+    null
+  );
+});
+
+test("WORDING: the alert never claims expiry when a recent sync proves otherwise", () => {
+  // Guards the merchant-facing claim itself, not just the severity number.
+  const r = syncHealth({
+    syncJobs: [syncJob("READY_WITH_DATA", 0)],
+    lastSyncAtIso: daysAgo(0),
+    accessTokenExpiresAtIso: daysAgo(1),
+  });
+  assert.equal(r, null, "no finding at all, so no claim can be made");
 });
