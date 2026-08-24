@@ -448,6 +448,100 @@ async function main() {
       console.log(`  ${table.padEnd(34)} ${String(counts[table]).padStart(10)}`);
     }
 
+    // --- Deep diagnostic mode ---------------------------------------------
+    // Run with --deep to turn a STOP verdict into exact facts: which objects
+    // are missing, whether adding the unique index would change any data, and
+    // where production disagrees with the migration SQL in ways a name-only
+    // check cannot see. Read-only, like everything else here.
+    if (process.argv.includes("--deep")) {
+      const line = "-".repeat(74);
+
+      console.log("\n" + line);
+      console.log("DEEP 1 — exactly which named objects are missing");
+      console.log(line);
+      let anyMissing = false;
+      for (const migration of HISTORICAL_MIGRATIONS) {
+        const bad = [];
+        for (const t of migration.tables ?? []) {
+          if (!tables.has(t)) bad.push("table " + t);
+        }
+        for (const [t, c] of migration.columns ?? []) {
+          if (!columns.has(t + "." + c)) bad.push("column " + t + "." + c);
+        }
+        for (const i of migration.indexes ?? []) {
+          if (!indexes.has(i)) bad.push("index " + i);
+        }
+        for (const c of migration.constraints ?? []) {
+          if (!constraints.has(c) && !indexes.has(c)) bad.push("constraint " + c);
+        }
+        if (bad.length) {
+          anyMissing = true;
+          console.log("  " + migration.name);
+          bad.forEach((b) => console.log("    MISSING: " + b));
+        }
+      }
+      if (!anyMissing) console.log("  Nothing missing by name.");
+
+      console.log("\n" + line);
+      console.log("DEEP 2 — would adding Order_shopifyOrderGid_key change any data?");
+      console.log(line);
+      if (!tables.has("Order")) {
+        console.log("  Order table absent — nothing to report.");
+      } else {
+        const one = async (sql) => (await client.query(sql)).rows[0].n;
+        const total = await one('SELECT COUNT(*)::bigint n FROM "Order"');
+        const nonNull = await one(
+          'SELECT COUNT(*)::bigint n FROM "Order" WHERE "shopifyOrderGid" IS NOT NULL'
+        );
+        const blank = await one(
+          'SELECT COUNT(*)::bigint n FROM "Order" WHERE "shopifyOrderGid" IS NOT NULL AND BTRIM("shopifyOrderGid") = \'\''
+        );
+        const dupes = await client.query(
+          'SELECT "shopifyOrderGid", COUNT(*)::bigint n FROM "Order" WHERE "shopifyOrderGid" IS NOT NULL GROUP BY "shopifyOrderGid" HAVING COUNT(*) > 1'
+        );
+        const affected = dupes.rows.reduce((sum, r) => sum + (Number(r.n) - 1), 0);
+
+        console.log("  Order rows                : " + total);
+        console.log("  with a shopifyOrderGid    : " + nonNull);
+        console.log("  blank-string gids         : " + blank);
+        console.log("  duplicated gid values     : " + dupes.rows.length);
+        console.log("  rows that would be NULLed : " + affected);
+        console.log(
+          affected === 0 && Number(blank) === 0
+            ? "\n  => SAFE: the unique index can be added with NO data change."
+            : "\n  => NOT purely additive: the migration would NULL the values above.\n" +
+                "     This needs an explicit decision before anything is run."
+        );
+      }
+
+      console.log("\n" + line);
+      console.log("DEEP 3 — actual FK delete rules (a name-only check cannot see these)");
+      console.log(line);
+      const RULE = {
+        a: "NO ACTION",
+        r: "RESTRICT",
+        c: "CASCADE",
+        n: "SET NULL",
+        d: "SET DEFAULT",
+      };
+      const fks = await client.query(
+        "SELECT con.conname, con.confdeltype FROM pg_constraint con JOIN pg_namespace ns ON ns.oid = con.connamespace WHERE ns.nspname = 'public' AND con.contype = 'f' ORDER BY con.conname"
+      );
+      fks.rows.forEach((r) =>
+        console.log(
+          "  " + r.conname.padEnd(52) + " ON DELETE " + (RULE[r.confdeltype] ?? r.confdeltype)
+        )
+      );
+
+      console.log("\n" + line);
+      console.log("DEEP 4 — index definitions on the tables the migrations touch");
+      console.log(line);
+      const defs = await client.query(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('Order','BillingAuditLog','TimelineEvent','SyncJob','ProductSnapshot','VariantSnapshot','BillingPlanIntent','ShopTrialHistory','Store','StoreSubscription','SubscriptionPlan') ORDER BY indexname"
+      );
+      defs.rows.forEach((r) => console.log("  " + r.indexdef));
+    }
+
     // --- Post-deploy mode -------------------------------------------------
     // Run with --post-deploy AFTER `prisma migrate deploy`, to prove the one
     // new migration landed correctly and nothing else moved.
