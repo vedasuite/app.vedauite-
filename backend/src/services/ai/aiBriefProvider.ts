@@ -42,6 +42,9 @@ export class AiBriefError extends Error {
   }
 }
 
+/** The configured provider name. One home, so reports cannot drift from reality. */
+export const AI_PROVIDER_NAME = "openai";
+
 export interface AiBriefProvider {
   readonly name: string;
   /**
@@ -87,7 +90,7 @@ At most 5 bullets. Each bullet covers one finding.`;
 
 /** OpenAI implementation. The only network caller in the AI layer. */
 class OpenAiBriefProvider implements AiBriefProvider {
-  readonly name = "openai";
+  readonly name = AI_PROVIDER_NAME;
   private client: OpenAI;
 
   constructor(apiKey: string) {

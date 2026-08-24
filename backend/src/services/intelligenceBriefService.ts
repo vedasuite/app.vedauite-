@@ -376,6 +376,20 @@ export async function getIntelligenceBrief(
 
   try {
     if (!isAiExplanationEnabled()) {
+      // Distinguish "deliberately off" from "switched on but unusable".
+      //
+      // This branch used to return silently in BOTH cases, and the only place
+      // that logged a missing key was resolveAiBriefProvider() below — which
+      // this early return never reached. A deployment with the flag ON and no
+      // usable key therefore produced no signal anywhere, which is exactly how
+      // a build reading a different key name went unnoticed.
+      if (env.ai.enabled && !env.ai.apiKey) {
+        logEvent("warn", "ai.misconfigured", {
+          reason:
+            "ENABLE_AI_INTELLIGENCE_BRIEF is true but no server-side AI key is set; serving the deterministic brief",
+          expectedEnvVar: "OPENAI_API_KEY",
+        });
+      }
       return deterministic;
     }
     const provider =

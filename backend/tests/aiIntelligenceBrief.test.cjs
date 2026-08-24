@@ -771,3 +771,113 @@ test("PROVIDER SWAP: no Anthropic references remain in the AI layer", () => {
   assert.match(envSrc, /process\.env\.OPENAI_API_KEY/);
   assert.doesNotMatch(envSrc, /ANTHROPIC/);
 });
+
+// ===========================================================================
+// Diagnosability
+//
+// The live staging investigation found that a build with the AI flag ON but no
+// usable key returned the deterministic brief SILENTLY: the early
+// isAiExplanationEnabled() return happened before the only code that logged a
+// missing key, so a stale deploy reading a different env var name produced no
+// signal anywhere and looked identical to "AI is off".
+// ===========================================================================
+
+test("DIAGNOSABILITY: flag on with no key logs a misconfiguration warning", async () => {
+  const events = [];
+  const obs = require(OBS);
+  const original = obs.logEvent;
+  obs.logEvent = (level, event, details) => events.push({ level, event, details });
+
+  // Re-read env with the key removed, exactly as a wrong-key-name build sees it.
+  const envMod = require(path.resolve(__dirname, "../dist/config/env.js"));
+  const realKey = envMod.env.ai.apiKey;
+  envMod.env.ai.apiKey = "";
+
+  try {
+    const brief = await run([card()], summary(), undefined);
+    assert.equal(brief.generatedBy, "deterministic", "must still serve a brief");
+
+    const warned = events.find((e) => e.event === "ai.misconfigured");
+    assert.ok(
+      warned,
+      "a flag that is ON with no key must be reported, not silently ignored"
+    );
+    assert.equal(warned.level, "warn");
+    assert.equal(warned.details.expectedEnvVar, "OPENAI_API_KEY");
+    // The warning must name the variable, never the value.
+    assert.equal(
+      JSON.stringify(warned).includes(realKey),
+      false,
+      "a diagnostic must never echo the credential"
+    );
+  } finally {
+    envMod.env.ai.apiKey = realKey;
+    obs.logEvent = original;
+  }
+});
+
+test("DIAGNOSABILITY: the flag being OFF stays silent — that is the normal state", async () => {
+  const events = [];
+  const obs = require(OBS);
+  const original = obs.logEvent;
+  obs.logEvent = (level, event, details) => events.push({ level, event, details });
+
+  const envMod = require(path.resolve(__dirname, "../dist/config/env.js"));
+  const wasEnabled = envMod.env.ai.enabled;
+  envMod.env.ai.enabled = false;
+
+  try {
+    const brief = await run([card()], summary(), undefined);
+    assert.equal(brief.generatedBy, "deterministic");
+    assert.equal(
+      events.some((e) => e.event === "ai.misconfigured"),
+      false,
+      "AI switched off must not warn on every Action Center load"
+    );
+  } finally {
+    envMod.env.ai.enabled = wasEnabled;
+    obs.logEvent = original;
+  }
+});
+
+test("DIAGNOSABILITY: an unconfigured AI layer sets no merchant-facing outage note", async () => {
+  // The two must stay distinguishable: `used: false` with no fallbackReason
+  // means never attempted; a fallbackReason means attempted and failed.
+  const notConfigured = await run([card()], summary(), null);
+  assert.equal(notConfigured.aiFallbackReason, undefined);
+
+  const attemptedAndFailed = await run(
+    [card()],
+    summary(),
+    providerThrowing(new AiBriefError("timeout", "t"))
+  );
+  assert.ok(attemptedAndFailed.aiFallbackReason, "a real failure must be reported");
+});
+
+test("DIAGNOSABILITY: the route reports AI status without exposing the key", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(
+    path.resolve(__dirname, "../src/routes/actionCenterRoutes.ts"),
+    "utf8"
+  );
+
+  // meta.ai must report configuration and outcome...
+  assert.match(src, /configured: isAiExplanationEnabled\(\)/);
+  assert.match(src, /used: brief\.generatedBy === "ai_assisted"/);
+  assert.match(src, /fallbackReason: brief\.aiFallbackReason \?\? null/);
+  assert.match(src, /model: isAiExplanationEnabled\(\) \? env\.ai\.model : null/);
+
+  // ...and must never put the credential in a response, in any form.
+  assert.doesNotMatch(src, /env\.ai\.apiKey/, "the API key must never reach a response");
+});
+
+test("DIAGNOSABILITY: the provider name has exactly one home", () => {
+  const fs = require("node:fs");
+  const provider = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/ai/aiBriefProvider.ts"),
+    "utf8"
+  );
+  // So a reported provider can never drift from the one actually called.
+  assert.match(provider, /export const AI_PROVIDER_NAME = "openai"/);
+  assert.match(provider, /readonly name = AI_PROVIDER_NAME/);
+});

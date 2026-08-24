@@ -17,7 +17,12 @@ import {
   getActionCenter,
   updateActionStatus,
 } from "../services/actionCenterService";
-import { getIntelligenceBrief } from "../services/intelligenceBriefService";
+import {
+  getIntelligenceBrief,
+  isAiExplanationEnabled,
+} from "../services/intelligenceBriefService";
+import { env } from "../config/env";
+import { AI_PROVIDER_NAME } from "../services/ai/aiBriefProvider";
 import { FINDING_STATUSES } from "../services/intelligenceFindingService";
 
 export const actionCenterRouter = Router();
@@ -99,6 +104,20 @@ actionCenterRouter.get("/", async (req: Request, res: Response) => {
       // Honest capability reporting so the UI can explain an empty feed.
       enabledModules,
       aiEnabled: brief.generatedBy === "ai_assisted",
+      // Observability for the AI layer, so "why is this not AI-assisted?" is
+      // answerable from the response itself rather than only from server logs.
+      // Contains NO credential — the model name is not a secret, and the key is
+      // never included in any form, not even a length or prefix.
+      ai: {
+        /** Flag on AND a server-side key present. */
+        configured: isAiExplanationEnabled(),
+        provider: isAiExplanationEnabled() ? AI_PROVIDER_NAME : null,
+        model: isAiExplanationEnabled() ? env.ai.model : null,
+        /** True only when a model produced the prose shown above. */
+        used: brief.generatedBy === "ai_assisted",
+        /** Set only when AI was attempted and did not succeed. */
+        fallbackReason: brief.aiFallbackReason ?? null,
+      },
     },
   });
 });
