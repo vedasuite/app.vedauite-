@@ -11,7 +11,6 @@ import {
   resolveBackendStarterModule,
 } from "../lib/backendModuleAccess";
 import { buildNavigationModel } from "./navigationModel";
-import { recordNavDiagnostic } from "./navDiagnostics";
 import "./app-frame.css";
 
 type Props = {
@@ -182,48 +181,6 @@ export function AppFrame({ children }: Props) {
       moduleStatus.pricing,
     ]
   );
-
-  // TODO(remove): temporary diagnostic for the reported Action Center
-  // disappearance after plan confirmation / onboarding completion. Logs the
-  // exact rendered navigation and the surrounding runtime state on every
-  // change, so the transition can be observed instead of inferred.
-  // Contains no customer or order data. Remove once the cause is confirmed.
-  useEffect(() => {
-    // Read after paint so the DOM comparison reflects this render.
-    const timer = window.setTimeout(() => {
-      recordNavDiagnostic({
-        at: new Date().toISOString(),
-        origin: window.location.origin,
-        pathname: location.pathname,
-        embeddedInIframe: window.top !== window.self,
-        hasHostParam: new URLSearchParams(location.search).has("host"),
-        builtNavLabels: navigationItems.map((i: { label: string }) => i.label),
-        builtNavCount: navigationItems.length,
-        builtHasActionCenter: navigationItems.some(
-          (i: { label: string }) => i.label === "Action Center"
-        ),
-        appStateStatus,
-        plan: activePlan,
-        moduleStatus,
-        billingLifecycle: billingState?.lifecycle ?? null,
-        billingFlowState,
-        bootstrapStatus: bootstrap?.status ?? null,
-        installStatus: installState?.status ?? null,
-      });
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [
-    navigationItems,
-    location.pathname,
-    location.search,
-    appStateStatus,
-    activePlan,
-    moduleStatus,
-    billingState?.lifecycle,
-    billingFlowState,
-    bootstrap?.status,
-    installState?.status,
-  ]);
 
   const navigation = (
     <Navigation

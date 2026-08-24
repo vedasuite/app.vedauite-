@@ -1,0 +1,10 @@
+# Declares the datasource provider for the migrations directory.
+#
+# Prisma normally creates this file; it was missing because this schema was
+# originally bootstrapped with `prisma db push` rather than `migrate dev`, which
+# is the same history that produced the P3005 baseline situation.
+#
+# Without it, `prisma migrate diff --from-migrations` cannot determine the
+# connector, so migration-vs-schema drift could not be verified at all. Adding
+# it changes no migration and no data.
+provider = "postgresql"

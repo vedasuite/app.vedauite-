@@ -1,22 +1,31 @@
-// PART 4 — "VedaSuite Intelligence Brief" and the AI boundary.
+// "VedaSuite Intelligence Brief" — the deterministic brief and the controlled
+// AI explanation layer that sits ABOVE it.
 //
-// AUDIT RESULT: VedaSuite has NO AI/LLM infrastructure.
-// No provider package in either package.json, no client, no endpoint, no API
-// key, no prompt framework, no configuration. (Source greps for "llm" match
-// only the substring inside "fu-llm-ent".)
+// The brief is always assembled deterministically first, from the same stored,
+// verified findings the Action Center renders. When AI is enabled, the model is
+// asked to reword that verified material — it never detects, computes or ranks
+// anything. On ANY failure (disabled, no key, rate limited, timeout, provider
+// error, malformed output, failed validation) the deterministic brief is what
+// the merchant sees, so the Action Center cannot be broken by the AI layer.
 //
-// The brief is therefore fully DETERMINISTIC today. It is assembled from the
-// same stored, verified findings the Action Center renders — no model, no
-// inference, no generated facts. It is deliberately useful on its own so the
-// Action Center never depends on AI existing.
-//
-// The seam below is the AI-ready boundary. If a provider is later configured,
-// an explanation layer plugs in HERE and nowhere else, receiving the redacted
-// structured payload defined by buildAiBriefInput() and returning only prose.
-// Deterministic values remain the source of truth in every case.
+// Provenance is reported honestly: generatedBy is only ever "ai_assisted" when
+// a model actually produced the prose that is displayed.
 
 import { logEvent } from "./observabilityService";
 import type { ActionCard, ActionCenterSummary } from "./actionCenterService";
+import { env } from "../config/env";
+import {
+  AiBriefError,
+  resolveAiBriefProvider,
+  type AiBriefProvider,
+} from "./ai/aiBriefProvider";
+import {
+  buildBriefCacheKey,
+  isWithinAiRateLimit,
+  readCachedBrief,
+  recordAiCall,
+  writeCachedBrief,
+} from "./ai/aiBriefBudget";
 
 export interface IntelligenceBrief {
   headline: string;
@@ -33,11 +42,11 @@ export interface IntelligenceBrief {
 /**
  * Is an AI explanation layer configured and usable?
  *
- * Always false today — no provider exists. Kept as a single predicate so the
- * decision has exactly one home when a provider is introduced.
+ * The single home for this decision. Fails closed: the flag must be on AND a
+ * server-side key must be present.
  */
 export function isAiExplanationEnabled(): boolean {
-  return false;
+  return env.ai.enabled && !!env.ai.apiKey;
 }
 
 /**
@@ -92,42 +101,158 @@ export function buildAiBriefInput(cards: ActionCard[], summary: ActionCenterSumm
  * Rejects a response that introduces a monetary figure absent from the verified
  * input — the specific failure mode where a model invents an amount.
  */
+export const MAX_AI_BULLETS = 5;
+export const MAX_AI_BULLET_CHARS = 320;
+export const MAX_AI_HEADLINE_CHARS = 160;
+
+/**
+ * Every numeric string the model is permitted to quote, gathered from the
+ * verified payload. Anything numeric outside this set is an invented figure.
+ */
+export function collectAllowedNumbers(payload: {
+  openCount: number;
+  severityCounts: Record<string, number>;
+  notQuantifiedCount: number;
+  staleCount: number;
+  incompleteDataCount: number;
+  findings: Array<Record<string, unknown>>;
+}): string[] {
+  const allowed = new Set<string>();
+
+  const addFrom = (value: unknown) => {
+    if (value === null || value === undefined) return;
+    for (const match of String(value).match(/\d[\d,.]*/g) ?? []) {
+      allowed.add(match);
+    }
+  };
+
+  // Summary counts the brief legitimately reports.
+  [
+    payload.openCount,
+    payload.notQuantifiedCount,
+    payload.staleCount,
+    payload.incompleteDataCount,
+    ...Object.values(payload.severityCounts ?? {}),
+    // The brief may also count the findings it lists.
+    payload.findings.length,
+  ].forEach(addFrom);
+
+  // Everything textual the model was shown.
+  for (const finding of payload.findings) {
+    for (const value of Object.values(finding)) {
+      if (Array.isArray(value)) {
+        value.forEach((entry) =>
+          entry && typeof entry === "object"
+            ? Object.values(entry).forEach(addFrom)
+            : addFrom(entry)
+        );
+      } else if (value && typeof value === "object") {
+        Object.values(value).forEach(addFrom);
+      } else {
+        addFrom(value);
+      }
+    }
+  }
+
+  return [...allowed];
+}
+
+/**
+ * Guardrails an AI response must satisfy before it may be shown.
+ *
+ * This is the real security boundary, not the prompt: it holds regardless of
+ * what the model was told or what the stored finding text tried to tell it.
+ */
 export function validateAiBrief(
   candidate: unknown,
   allowedFindingIds: string[],
   allowedNumbers: string[]
 ): { ok: true; brief: { headline: string; bullets: string[] } } | { ok: false; reason: string } {
-  if (!candidate || typeof candidate !== "object") {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
     return { ok: false, reason: "response was not an object" };
   }
   const c = candidate as Record<string, unknown>;
+
   if (typeof c.headline !== "string" || !c.headline.trim()) {
     return { ok: false, reason: "missing headline" };
+  }
+  if (c.headline.length > MAX_AI_HEADLINE_CHARS) {
+    return { ok: false, reason: "headline too long" };
   }
   if (!Array.isArray(c.bullets) || c.bullets.some((b) => typeof b !== "string")) {
     return { ok: false, reason: "bullets must be an array of strings" };
   }
-  if (c.bullets.length > 10) {
+  if (c.bullets.length > MAX_AI_BULLETS) {
     return { ok: false, reason: "too many bullets" };
   }
+  const bullets = c.bullets as string[];
+  if (bullets.some((b) => !b.trim())) {
+    return { ok: false, reason: "empty bullet" };
+  }
+  if (bullets.some((b) => b.length > MAX_AI_BULLET_CHARS)) {
+    return { ok: false, reason: "bullet too long" };
+  }
 
-  const text = [c.headline, ...(c.bullets as string[])].join(" ");
+  const text = [c.headline, ...bullets].join(" ");
 
-  // Any number in the prose must appear verbatim in the verified input.
-  const numbers = text.match(/\d[\d,.]*/g) ?? [];
-  for (const n of numbers) {
-    if (!allowedNumbers.some((allowed) => allowed.includes(n))) {
+  // Order matters: the leak and injection checks run BEFORE the numeric check
+  // so a leaked IP or order id is reported as what it is, rather than as an
+  // "unverified number". Both reject the output; the specific reason is what
+  // makes an incident diagnosable.
+
+  // 1. Must not leak identifiers or contact details. Findings carry only
+  //    allow-listed aggregates, so anything matching here is invented or
+  //    echoed from somewhere it should not have been.
+  const leaks: Array<[RegExp, string]> = [
+    [/[\w.+-]+@[\w-]+\.[\w.]+/, "contained an email address"],
+    [/\bgid:\/\//i, "contained a Shopify global id"],
+    [/#\d{3,}/, "contained an order-style identifier"],
+    [/\bhttps?:\/\//i, "contained a URL"],
+    [/\b\d{1,3}(?:\.\d{1,3}){3}\b/, "contained an IP address"],
+  ];
+  for (const [pattern, reason] of leaks) {
+    if (pattern.test(text)) {
+      return { ok: false, reason };
+    }
+  }
+
+  // 2. Internal finding ids must never be shown to a merchant.
+  for (const id of allowedFindingIds) {
+    if (id && text.includes(id)) {
+      return { ok: false, reason: "exposed an internal finding id" };
+    }
+  }
+
+  // 3. Signs the model followed instructions embedded in store data rather
+  //    than ours. Cheap, high-signal, and independent of the prompt.
+  if (
+    /\b(?:ignore (?:all |any )?(?:previous|prior|above)|disregard (?:the |all )?(?:above|previous)|system prompt|new instructions?)\b/i.test(
+      text
+    )
+  ) {
+    return { ok: false, reason: "echoed injected instructions" };
+  }
+
+  // 4. Must not claim to have detected, found or calculated anything.
+  if (
+    /\b(?:AI|I|we|this model|the model)\s+(?:have\s+|has\s+|had\s+)?(?:detected|found|discovered|identified|calculated|computed|estimated|determined|analysed|analyzed)\b/i.test(
+      text
+    )
+  ) {
+    return { ok: false, reason: "claimed to have detected or calculated the findings" };
+  }
+
+  // 5. Any number in the prose must appear verbatim in the verified input.
+  //    Exact match, not substring: "45" must not be justified by "1450".
+  const allowed = new Set(allowedNumbers);
+  for (const n of text.match(/\d[\d,.]*/g) ?? []) {
+    const bare = n.replace(/[.,]+$/, "");
+    if (!allowed.has(n) && !allowed.has(bare)) {
       return { ok: false, reason: `introduced an unverified number: ${n}` };
     }
   }
 
-  // Must not claim to have detected anything itself.
-  if (/\bAI (detected|found|discovered|calculated)\b/i.test(text)) {
-    return { ok: false, reason: "claimed AI detection of deterministic findings" };
-  }
-
-  void allowedFindingIds;
-  return { ok: true, brief: { headline: c.headline, bullets: c.bullets as string[] } };
+  return { ok: true, brief: { headline: c.headline, bullets } };
 }
 
 function pluralise(n: number, one: string, many: string) {
@@ -214,16 +339,22 @@ export function buildDeterministicBrief(
  * brief with aiFallbackReason set. The Action Center therefore cannot be broken
  * by an AI outage, because the deterministic result is what it already renders.
  */
-export function getIntelligenceBrief(
+export async function getIntelligenceBrief(
   cards: ActionCard[],
-  summary: ActionCenterSummary
-): IntelligenceBrief {
+  summary: ActionCenterSummary,
+  options: {
+    /** Required for caching and per-store cost control. */
+    storeId?: string;
+    /** Injected in tests; production resolves the configured provider. */
+    provider?: AiBriefProvider | null;
+    now?: number;
+  } = {}
+): Promise<IntelligenceBrief> {
+  // The deterministic brief is computed FIRST and is always the fallback, so
+  // no AI failure path can leave the merchant without a brief.
+  let deterministic: IntelligenceBrief;
   try {
-    if (!isAiExplanationEnabled()) {
-      return buildDeterministicBrief(cards, summary);
-    }
-    // No provider configured; unreachable today. The AI call would go here.
-    return buildDeterministicBrief(cards, summary);
+    deterministic = buildDeterministicBrief(cards, summary);
   } catch (error) {
     logEvent("error", "action_center.brief_failed", {
       reason: "brief generation failed; returning a minimal deterministic brief",
@@ -236,5 +367,106 @@ export function getIntelligenceBrief(
       generatedBy: "deterministic",
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  const withFallback = (reason: string): IntelligenceBrief => ({
+    ...deterministic,
+    aiFallbackReason: reason,
+  });
+
+  try {
+    if (!isAiExplanationEnabled()) {
+      return deterministic;
+    }
+    const provider =
+      options.provider !== undefined ? options.provider : resolveAiBriefProvider();
+    // Not configured is the normal state, not an outage. Setting a fallback
+    // reason here would show every merchant a "service unavailable" note on
+    // every load, which would be misleading.
+    if (!provider) {
+      return deterministic;
+    }
+    // Nothing to reword; do not spend a call.
+    if (cards.length === 0) {
+      return deterministic;
+    }
+
+    const storeId = options.storeId;
+    if (!storeId) {
+      // Without a store we cannot cost-control or cache, so we do not call out.
+      // An internal condition, not something to report to the merchant.
+      return deterministic;
+    }
+
+    const now = options.now ?? Date.now();
+    const cacheKey = buildBriefCacheKey(
+      cards.map((c) => ({
+        id: c.id,
+        status: c.status,
+        lastSeenAt: c.lastSeenAt,
+        severity: c.severity,
+      }))
+    );
+
+    const cached = readCachedBrief<IntelligenceBrief>(storeId, cacheKey, now);
+    if (cached) {
+      // Reuse the cached PROSE, but report this response's own timestamp and
+      // the current ranking. A cached generatedAt would disagree with the
+      // summary rendered beside it, which reads as stale data to a merchant.
+      return {
+        ...cached,
+        referencedFindingIds: deterministic.referencedFindingIds,
+        generatedAt: deterministic.generatedAt,
+      };
+    }
+
+    if (!isWithinAiRateLimit(storeId, now)) {
+      logEvent("warn", "ai.rate_limited", { storeId });
+      return withFallback("AI usage limit reached for this store");
+    }
+
+    const payload = buildAiBriefInput(cards, summary);
+    const allowedNumbers = collectAllowedNumbers(payload);
+    const allowedIds = payload.findings.map((f) => f.findingId);
+
+    // Counted before the call, so a provider outage cannot be retried in a
+    // loop at our expense.
+    recordAiCall(storeId, now);
+
+    const candidate = await provider.generate(payload, env.ai.timeoutMs);
+    const validated = validateAiBrief(candidate, allowedIds, allowedNumbers);
+
+    if (!validated.ok) {
+      logEvent("warn", "ai.brief_rejected", { storeId, reason: validated.reason });
+      return withFallback(`AI output rejected: ${validated.reason}`);
+    }
+
+    const brief: IntelligenceBrief = {
+      headline: validated.brief.headline,
+      bullets: validated.brief.bullets,
+      // Deterministic values remain the source of truth: the referenced
+      // findings come from OUR ranking, never from the model.
+      referencedFindingIds: deterministic.referencedFindingIds,
+      generatedBy: "ai_assisted",
+      generatedAt: deterministic.generatedAt,
+    };
+
+    writeCachedBrief(storeId, cacheKey, brief, now);
+    logEvent("info", "ai.brief_generated", {
+      storeId,
+      provider: provider.name,
+      bulletCount: brief.bullets.length,
+    });
+    return brief;
+  } catch (error) {
+    const kind = error instanceof AiBriefError ? error.kind : "provider_error";
+    const message = error instanceof Error ? error.message : String(error);
+    logEvent("warn", "ai.brief_failed", {
+      storeId: options.storeId ?? null,
+      kind,
+      // The provider layer never puts credentials in its messages.
+      error: message,
+    });
+    return withFallback(`AI unavailable (${kind})`);
   }
 }

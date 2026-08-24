@@ -390,14 +390,14 @@ test("an empty store yields an empty feed and a zeroed summary, not an error", a
 test("the brief is deterministic and never claims AI detection", async () => {
   const w = buildWorld([findingRow()]);
   const { cards, summary } = await run(w);
-  const brief = w.brief.getIntelligenceBrief(cards, summary);
+  const brief = await w.brief.getIntelligenceBrief(cards, summary);
 
   assert.equal(brief.generatedBy, "deterministic");
   assert.ok(brief.headline.length > 0);
   assert.doesNotMatch(JSON.stringify(brief), /AI (detected|found|discovered|calculated)/i);
 });
 
-test("AI is not enabled — no provider exists in this repository", () => {
+test("AI is OFF by default — the flag and a server-side key are both required", () => {
   const w = buildWorld([]);
   assert.equal(w.brief.isAiExplanationEnabled(), false);
 });
@@ -413,7 +413,7 @@ test("the brief discloses unquantified and stale findings rather than hiding the
     }),
   ]);
   const { cards, summary } = await run(w);
-  const text = w.brief.getIntelligenceBrief(cards, summary).bullets.join(" ");
+  const text = (await w.brief.getIntelligenceBrief(cards, summary)).bullets.join(" ");
 
   assert.match(text, /not included in any total/i);
   assert.match(text, /stale/i);
@@ -422,7 +422,7 @@ test("the brief discloses unquantified and stale findings rather than hiding the
 test("the empty-state brief is still useful", async () => {
   const w = buildWorld([]);
   const { cards, summary } = await run(w);
-  const brief = w.brief.getIntelligenceBrief(cards, summary);
+  const brief = await w.brief.getIntelligenceBrief(cards, summary);
   assert.match(brief.headline, /Nothing needs your attention/i);
   assert.equal(brief.generatedBy, "deterministic");
 });
@@ -439,9 +439,14 @@ test("the AI input payload carries NO identifiers or PII", async () => {
   assert.match(payload, /"range":"0–500 USD"/);
 });
 
-test("AI guardrail: a response inventing a number is REJECTED", () => {
-  const w = buildWorld([]);
-  const allowed = ["0–500 USD", "3"];
+test("AI guardrail: a response inventing a number is REJECTED", async () => {
+  const w = buildWorld([findingRow()]);
+  const { cards, summary } = await run(w);
+  // Use the REAL allowed-number set the production path builds, so this test
+  // cannot pass on a looser hand-written list than the app actually uses.
+  const allowed = w.brief.collectAllowedNumbers(
+    w.brief.buildAiBriefInput(cards, summary)
+  );
 
   const bad = w.brief.validateAiBrief(
     { headline: "You lost 9999 USD", bullets: [] },
@@ -451,12 +456,14 @@ test("AI guardrail: a response inventing a number is REJECTED", () => {
   assert.equal(bad.ok, false);
   assert.match(bad.reason, /unverified number: 9999/);
 
+  // 500 is quotable because it appears in the verified impact range.
+  assert.ok(allowed.includes("500"), "sanity: the verified range contributes 500");
   const good = w.brief.validateAiBrief(
-    { headline: "Up to 500 USD is exposed", bullets: ["3 refunds seen"] },
+    { headline: "Up to 500 USD is exposed", bullets: [] },
     ["f-1"],
     allowed
   );
-  assert.equal(good.ok, true);
+  assert.equal(good.ok, true, good.reason);
 });
 
 test("AI guardrail: malformed responses are rejected, not rendered", () => {
@@ -479,7 +486,7 @@ test("AI guardrail: a response claiming AI detection is rejected", () => {
     []
   );
   assert.equal(r.ok, false);
-  assert.match(r.reason, /claimed AI detection/i);
+  assert.match(r.reason, /claimed to have detected or calculated/i);
 });
 
 // ===========================================================================

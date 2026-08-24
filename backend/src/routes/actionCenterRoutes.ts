@@ -66,7 +66,8 @@ actionCenterRouter.get("/", async (req: Request, res: Response) => {
     since: typeof req.query.since === "string" ? req.query.since : undefined,
   });
 
-  const brief = getIntelligenceBrief(cards, summary);
+  // Never throws: any AI failure degrades to the deterministic brief.
+  const brief = await getIntelligenceBrief(cards, summary, { storeId: store.id });
 
   // Pilot instrumentation: aggregate counts only, never finding contents.
   // Wrapped so an analytics failure can never break the response.
