@@ -12,7 +12,6 @@
     "prisma:generate": "prisma generate"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
     "@prisma/client": "^5.16.0",
     "axios": "^1.7.7",
     "cookie-parser": "^1.4.6",
@@ -23,6 +22,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
+    "openai": "^7.5.0",
     "pg": "^8.20.0",
     "qs": "^6.12.0"
   },

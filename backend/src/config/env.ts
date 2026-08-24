@@ -85,8 +85,8 @@ export const env = {
   ai: {
     enabled: (process.env.ENABLE_AI_INTELLIGENCE_BRIEF || "false").toLowerCase() === "true",
     // Server-side only. Never exposed to the frontend, never logged.
-    apiKey: process.env.ANTHROPIC_API_KEY || "",
-    model: process.env.AI_BRIEF_MODEL || "claude-opus-5",
+    apiKey: process.env.OPENAI_API_KEY || "",
+    model: process.env.AI_BRIEF_MODEL || "gpt-4.1-mini",
     // Kept short: the merchant is waiting on the Action Center response, and a
     // slow provider must degrade to deterministic rather than stall the page.
     timeoutMs: numberFromEnv(process.env.AI_BRIEF_TIMEOUT_MS, 8000),

@@ -22,7 +22,7 @@ process.env.SHOPIFY_API_SECRET ||= "test-secret";
 process.env.SHOPIFY_APP_URL ||= "https://app.vedasuite.in";
 process.env.DATABASE_URL ||= "postgresql://example:example@localhost:5432/example";
 process.env.ENABLE_AI_INTELLIGENCE_BRIEF = "true";
-process.env.ANTHROPIC_API_KEY = "test-key-not-a-real-credential";
+process.env.OPENAI_API_KEY = "test-key-not-a-real-credential";
 
 const BRIEF = path.resolve(__dirname, "../dist/services/intelligenceBriefService.js");
 const BUDGET = path.resolve(__dirname, "../dist/services/ai/aiBriefBudget.js");
@@ -638,4 +638,136 @@ test("ISOLATION: one store's AI budget and cache cannot affect another", async (
   });
 
   assert.equal(calls, 2, "a cache hit must never cross a store boundary");
+});
+
+// ===========================================================================
+// OpenAI provider plumbing
+//
+// The validation, fallback, caching and cost-control layers above are
+// provider-agnostic and are covered by the tests earlier in this file. These
+// tests cover the provider-specific translation layer, using REAL SDK error
+// instances rather than stand-ins.
+// ===========================================================================
+
+const OpenAI = require("openai").default || require("openai");
+
+/** SDK error constructors require a real Headers instance. */
+const sdkError = (Ctor, status) =>
+  new Ctor(status, { message: "provider said no" }, "provider said no", new Headers());
+
+test("OPENAI: SDK errors map to the right failure kinds", () => {
+  const cases = [
+    [sdkError(OpenAI.RateLimitError, 429), "rate_limited"],
+    [sdkError(OpenAI.AuthenticationError, 401), "provider_error"],
+    [sdkError(OpenAI.PermissionDeniedError, 403), "provider_error"],
+    [sdkError(OpenAI.NotFoundError, 404), "provider_error"],
+    [sdkError(OpenAI.InternalServerError, 500), "provider_error"],
+    [new OpenAI.APIConnectionTimeoutError({ message: "timed out" }), "timeout"],
+    [new OpenAI.APIConnectionError({ message: "econnreset" }), "provider_error"],
+  ];
+
+  for (const [raw, expected] of cases) {
+    const classified = classifyProviderError(raw);
+    assert.ok(classified instanceof AiBriefError, `${raw.constructor.name} must be wrapped`);
+    assert.equal(
+      classified.kind,
+      expected,
+      `${raw.constructor.name} should classify as ${expected}`
+    );
+  }
+});
+
+test("OPENAI: a rate-limit error degrades to deterministic, not an error page", async () => {
+  const brief = await run(
+    [card()],
+    summary(),
+    // The real provider classifies before it throws; mirror that here.
+    providerThrowing(classifyProviderError(sdkError(OpenAI.RateLimitError, 429)))
+  );
+  assert.equal(brief.generatedBy, "deterministic");
+  assert.match(brief.aiFallbackReason, /rate_limited/);
+});
+
+test("OPENAI: a missing/inaccessible model degrades instead of breaking the page", async () => {
+  // The most likely misconfiguration: AI_BRIEF_MODEL set to a model the
+  // account cannot reach.
+  const brief = await run(
+    [card()],
+    summary(),
+    providerThrowing(classifyProviderError(sdkError(OpenAI.NotFoundError, 404)))
+  );
+  assert.equal(brief.generatedBy, "deterministic");
+  assert.ok(brief.headline, "the merchant still gets a brief");
+});
+
+test("OPENAI: classified errors never echo the API key or the model name", () => {
+  const secret = process.env.OPENAI_API_KEY;
+  const raw = new Error(`request to model failed using key ${secret}`);
+  const classified = classifyProviderError(raw);
+  assert.equal(classified.message.includes(secret), false);
+});
+
+test("OPENAI: the system prompt contains the word JSON, which json_object mode requires", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/ai/aiBriefProvider.ts"),
+    "utf8"
+  );
+  const prompt = src.match(/const SYSTEM_PROMPT = `([\s\S]*?)`;/);
+  assert.ok(prompt, "the system prompt must exist");
+  assert.match(
+    prompt[1],
+    /JSON/,
+    "OpenAI's json_object response format requires 'JSON' in the prompt"
+  );
+  assert.match(src, /response_format: \{ type: "json_object" \}/);
+});
+
+test("OPENAI: forward-compatible request params are used", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/ai/aiBriefProvider.ts"),
+    "utf8"
+  );
+  // max_tokens is deprecated and rejected by reasoning models.
+  assert.match(src, /max_completion_tokens: 2048/);
+  // The parameter form, not the bare word — the surrounding comment mentions
+  // max_tokens precisely to explain why it is not used.
+  assert.doesNotMatch(
+    src,
+    /max_tokens:/,
+    "the deprecated max_tokens parameter must not be used"
+  );
+  // temperature is rejected by reasoning models; omitting it keeps the model
+  // choice open to the owner.
+  assert.doesNotMatch(src, /temperature:/, "temperature must not be set");
+  // Our own budget owns retries.
+  assert.match(src, /maxRetries: 0/);
+});
+
+test("OPENAI: truncated and filtered responses are treated as failures", () => {
+  const fs = require("node:fs");
+  const src = fs.readFileSync(
+    path.resolve(__dirname, "../src/services/ai/aiBriefProvider.ts"),
+    "utf8"
+  );
+  assert.match(src, /finish_reason === "content_filter"/);
+  assert.match(src, /finish_reason === "length"/);
+});
+
+test("PROVIDER SWAP: no Anthropic references remain in the AI layer", () => {
+  const fs = require("node:fs");
+  for (const file of ["aiBriefProvider.ts", "aiBriefBudget.ts"]) {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../src/services/ai", file),
+      "utf8"
+    );
+    assert.doesNotMatch(src, /anthropic/i, `${file} must not reference Anthropic`);
+  }
+  const envSrc = fs.readFileSync(
+    path.resolve(__dirname, "../src/config/env.ts"),
+    "utf8"
+  );
+  assert.match(envSrc, /process\.env\.OPENAI_API_KEY/);
+  assert.doesNotMatch(envSrc, /ANTHROPIC/);
 });
