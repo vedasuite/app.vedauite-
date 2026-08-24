@@ -55,18 +55,71 @@ cd frontend && npm install && npm run build && cd ../backend && npm install && n
 
 ## Step 1 — Read-only verification (safe, makes no changes)
 
-Set the production service's Build Command to:
+> **The production Render service builds from `main`, and the verifier exists
+> only on `staging`.** A Build Command on the production service therefore
+> cannot see the file. Use Method A below. (An earlier draft of this runbook got
+> this wrong.)
+
+**What the script does, whichever method you use:** connects, opens
+`BEGIN TRANSACTION READ ONLY` — which PostgreSQL itself enforces, so no write is
+possible even if the script were wrong — introspects the schema, and rolls back.
+It never prints the connection string; it identifies the database by name and a
+one-way host fingerprint.
+
+### Method A — run it from your own machine (recommended)
+
+Nothing changes on Render at all: no branch switch, no Build Command edit, no
+new service, no deploy. The verifier is read-only, so pointing it at production
+from a laptop is no more privileged than a `SELECT`.
+
+You already have everything needed: the repository on `staging`, Node, and the
+`pg` driver in `backend/node_modules`.
+
+1. In the Render dashboard open the **production Postgres instance** (not the
+   web service) and copy its **External Database URL**. The Internal URL only
+   works from inside Render.
+2. From the repository root, with `staging` checked out:
+
+```bash
+cd backend && VEDASUITE_BASELINE_CONFIRM=verify-production-baseline DATABASE_URL='PASTE_EXTERNAL_URL_HERE' node scripts/verify-production-baseline.js
+```
+
+Keep the single quotes — connection strings contain characters the shell would
+otherwise interpret. Paste the URL only into your own terminal: it is not needed
+anywhere else, and the script never prints it back.
+
+If your shell records history and you would rather it did not, prefix the
+command with a space (works in bash/zsh with the default `HIST_IGNORE_SPACE`
+behaviour), or clear the entry afterwards.
+
+**If the connection is refused or times out**, the provider may not allow
+external connections from your network. Use Method B.
+
+### Method B — a verification-only branch (fallback)
+
+Only if Method A cannot reach the database.
+
+The idea: give the production service a branch whose application code is
+**byte-identical to `main`**, plus the one script file. Even if it deployed by
+accident, it would deploy exactly what production is already running.
+
+Ask for this branch to be prepared — it is `main` plus
+`backend/scripts/verify-production-baseline.js` and nothing else. Then:
+
+1. Point the production service at that branch.
+2. Set its Build Command to:
 
 ```bash
 cd backend && npm install && VEDASUITE_BASELINE_CONFIRM=verify-production-baseline node scripts/verify-production-baseline.js
 ```
 
-Deploy, then read the log.
+3. Deploy. **The build will report as failed** — the command runs the verifier
+   instead of building the app, so nothing is deployed and the running service
+   stays exactly where it is. That is the intended outcome; read the log.
+4. **Restore the branch to `main` and restore the original Build Command.**
 
-**What the script does:** connects, opens `BEGIN TRANSACTION READ ONLY` — which
-PostgreSQL itself enforces, so no write is possible even if the script were
-wrong — introspects the schema, and rolls back. It never prints the connection
-string; it identifies the database by name and a one-way host fingerprint.
+Method B is worse than Method A only because it touches production service
+settings. It never merges anything into `main`.
 
 **Expected output ends with:**
 
