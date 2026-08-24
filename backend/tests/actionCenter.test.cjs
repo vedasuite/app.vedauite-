@@ -587,3 +587,135 @@ test("HARDENING: duplicate finding rows cannot produce duplicate cards", async (
   const ids = cards.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "no duplicate card ids in the feed");
 });
+
+// ===========================================================================
+// SUMMARY SELF-CONSISTENCY
+//
+// Reported from staging: "Open findings 0" displayed beside "Critical / high 1".
+// Cause: totalOpen filtered to open statuses while bySeverity, staleCount,
+// incompleteDataCount, notQuantifiedCount and quantifiedImpact counted EVERY
+// card, resolved and dismissed included. The four tiles sit in one row and read
+// as the current state of the store, so they must agree.
+// ===========================================================================
+
+test("REPRO: resolving the last finding leaves no severity counted against it", async () => {
+  const w = buildWorld([
+    findingRow({ id: "done", status: "resolved", snapshot: snapshot({ urgency: "critical" }) }),
+  ]);
+  const { summary } = await run(w);
+
+  assert.equal(summary.totalOpen, 0, "nothing is open");
+  assert.equal(
+    summary.bySeverity.critical + summary.bySeverity.high,
+    0,
+    "a resolved finding must not be counted as critical/high — the reported bug"
+  );
+  assert.equal(summary.byStatus.resolved, 1, "but it is still visible in the status breakdown");
+});
+
+test("REPRO: a dismissed finding is not counted either", async () => {
+  const w = buildWorld([
+    findingRow({ id: "gone", status: "dismissed", snapshot: snapshot({ urgency: "high" }) }),
+  ]);
+  const { summary } = await run(w);
+  assert.equal(summary.totalOpen, 0);
+  assert.equal(summary.bySeverity.high, 0);
+  assert.equal(summary.byStatus.dismissed, 1);
+});
+
+test("MONEY: resolved findings do not keep inflating the estimated impact", async () => {
+  // The most damaging form of the bug: money still shown as at risk from a
+  // problem the merchant has already fixed.
+  const quantified = (id, status, max) =>
+    findingRow({
+      id,
+      status,
+      snapshot: snapshot({
+        financialImpact: {
+          status: "quantified",
+          min: 0,
+          max,
+          currency: "USD",
+          period: "last_30_days",
+          basis: "b",
+          isEstimate: true,
+        },
+      }),
+    });
+
+  const w = buildWorld([
+    quantified("open", "new", 100),
+    quantified("fixed", "resolved", 900),
+    quantified("ignored", "dismissed", 500),
+  ]);
+  const { summary } = await run(w);
+
+  const usd = summary.quantifiedImpact.find((g) => g.currency === "USD");
+  assert.equal(usd.max, 100, "only the open finding contributes to money at risk");
+  assert.equal(usd.findingCount, 1);
+});
+
+test("STALENESS: a resolved stale finding does not ask the merchant to re-sync", async () => {
+  const w = buildWorld([
+    findingRow({ id: "old-done", status: "resolved", lastSeenAt: daysAgo(30) }),
+  ]);
+  const { summary } = await run(w);
+  assert.equal(
+    summary.staleCount,
+    0,
+    "a resolved finding must not trigger the staleness banner"
+  );
+});
+
+test("CONSISTENCY: every state metric is bounded by totalOpen", async () => {
+  // The invariant behind the whole class of bug: no current-state count can
+  // exceed the number of findings that are actually open.
+  const w = buildWorld([
+    findingRow({ id: "a", status: "new", snapshot: snapshot({ urgency: "critical" }) }),
+    findingRow({ id: "b", status: "seen", snapshot: snapshot({ urgency: "high" }) }),
+    findingRow({ id: "c", status: "in_review", snapshot: snapshot({ urgency: "low" }) }),
+    findingRow({ id: "d", status: "resolved", snapshot: snapshot({ urgency: "critical" }) }),
+    findingRow({ id: "e", status: "dismissed", snapshot: snapshot({ urgency: "high" }) }),
+    findingRow({ id: "f", status: "resolved", lastSeenAt: daysAgo(60) }),
+  ]);
+  const { summary } = await run(w);
+
+  assert.equal(summary.totalOpen, 3);
+
+  const severityTotal = Object.values(summary.bySeverity).reduce((a, b) => a + b, 0);
+  assert.equal(severityTotal, summary.totalOpen, "severity counts must sum to totalOpen");
+
+  for (const [name, value] of [
+    ["notQuantifiedCount", summary.notQuantifiedCount],
+    ["staleCount", summary.staleCount],
+    ["incompleteDataCount", summary.incompleteDataCount],
+    ["degradedCount", summary.degradedCount],
+  ]) {
+    assert.ok(
+      value <= summary.totalOpen,
+      `${name} (${value}) must never exceed totalOpen (${summary.totalOpen})`
+    );
+  }
+
+  // byStatus still describes the whole feed — that is its purpose.
+  const statusTotal = Object.values(summary.byStatus).reduce((a, b) => a + b, 0);
+  assert.equal(statusTotal, 6, "byStatus counts every card, open or not");
+});
+
+test("CONSISTENCY: all lifecycle statuses keep the summary coherent", async () => {
+  for (const status of ["new", "seen", "in_review", "resolved", "dismissed"]) {
+    const w = buildWorld([
+      findingRow({ id: `s-${status}`, status, snapshot: snapshot({ urgency: "critical" }) }),
+    ]);
+    const { summary, cards } = await run(w);
+    const open = ["new", "seen", "in_review"].includes(status);
+
+    assert.equal(cards.length, 1, `${status} is still retrievable`);
+    assert.equal(summary.totalOpen, open ? 1 : 0, `${status} open count`);
+    assert.equal(
+      summary.bySeverity.critical,
+      open ? 1 : 0,
+      `${status}: severity must agree with open count`
+    );
+  }
+});

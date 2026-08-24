@@ -399,6 +399,9 @@ export async function getActionCenter(input: {
   return { cards, summary: buildSummary(cards, now) };
 }
 
+/** Statuses that mean a finding still needs the merchant's attention. */
+const OPEN_STATUSES: FindingStatus[] = ["new", "seen", "in_review"];
+
 export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummary {
   const bySeverity: Record<Urgency, number> = { critical: 0, high: 0, medium: 0, low: 0 };
   const byStatus = Object.fromEntries(
@@ -411,9 +414,24 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
   let incompleteDataCount = 0;
   let degradedCount = 0;
 
+  // byStatus describes the whole feed by definition, so it counts every card.
   for (const card of cards) {
-    bySeverity[card.severity] = (bySeverity[card.severity] ?? 0) + 1;
     byStatus[card.status] = (byStatus[card.status] ?? 0) + 1;
+  }
+
+  // Everything else describes the CURRENT state of the store and is therefore
+  // computed over open findings only.
+  //
+  // These metrics previously counted every card, including resolved and
+  // dismissed ones, which made the summary contradict itself: resolving the
+  // last finding left "Open findings 0" beside "Critical / high 1". Worse, the
+  // estimated-impact figure kept adding money from problems the merchant had
+  // already resolved, and the staleness banner told them to re-sync because of
+  // a dismissed finding.
+  const openCards = cards.filter((c) => OPEN_STATUSES.includes(c.status));
+
+  for (const card of openCards) {
+    bySeverity[card.severity] = (bySeverity[card.severity] ?? 0) + 1;
     if (card.isStale) staleCount += 1;
     if (!card.dataComplete) incompleteDataCount += 1;
     if (card.degraded) degradedCount += 1;
@@ -446,10 +464,8 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
     group.max = Math.round(group.max * 100) / 100;
   }
 
-  const openStatuses: FindingStatus[] = ["new", "seen", "in_review"];
-
   return {
-    totalOpen: cards.filter((c) => openStatuses.includes(c.status)).length,
+    totalOpen: openCards.length,
     bySeverity,
     byStatus,
     quantifiedImpact: [...groups.values()].sort((a, b) => b.max - a.max),
