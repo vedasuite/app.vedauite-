@@ -1,4 +1,22 @@
 import { HttpError } from "../lib/httpError";
+import {
+  classifyMonetaryClaim,
+  storedProfitValueIsObserved,
+  NOT_ENOUGH_DATA,
+} from "./evidenceEligibility";
+
+/**
+ * The SAME gate the Dashboard and Pricing use.
+ *
+ * Every money figure in this file derives from ProfitOptimizationData /
+ * PriceHistory, whose cost and velocity inputs are assumptions that are then
+ * persisted. Reading them back is not evidence, so the verdict is constant
+ * here - and identical to what the other two surfaces compute.
+ */
+const PROFIT_CLAIM = classifyMonetaryClaim({
+  salesVelocityObserved: storedProfitValueIsObserved(),
+  productCostObserved: storedProfitValueIsObserved(),
+});
 import { prisma } from "../db/prismaClient";
 
 type DecisionItem = {
@@ -135,11 +153,27 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       id: "pricing_move",
       title: `Approve pricing on ${pricingMove.productHandle}`,
       module: "Pricing & Profit",
-      severity:
-        (pricingMove.expectedProfitGain ?? 0) >= 100 ? "High" : "Medium",
-      rationale: `Recommended move from ${pricingMove.currentPrice.toFixed(2)} to ${pricingMove.recommendedPrice.toFixed(2)}.`,
+      // Severity and confidence must not be driven by expectedProfitGain,
+      // which is delta x salesVelocity(?? 8) x 6 - two assumptions and a
+      // magic constant.
+      severity: PROFIT_CLAIM.allowed
+        ? (pricingMove.expectedProfitGain ?? 0) >= 100
+          ? "High"
+          : "Medium"
+        : "Medium",
+      // An exact target implies an analysis behind it. Without evidence this
+      // states the direction only, matching the Pricing card's behaviour.
+      rationale: PROFIT_CLAIM.allowed
+        ? `Recommended move from $${pricingMove.currentPrice.toFixed(2)} to $${pricingMove.recommendedPrice.toFixed(2)}.`
+        : `Current price is $${pricingMove.currentPrice.toFixed(2)}. ${
+            pricingMove.recommendedPrice > pricingMove.currentPrice
+              ? "There may be room to increase it"
+              : "It may be above the market"
+          }, but VedaSuite cannot recommend a specific price yet.`,
       route: "/pricing-profit?focus=pricing",
-      confidence: Math.max(
+      confidence: !PROFIT_CLAIM.allowed
+        ? 0
+        : Math.max(
         56,
         Math.min(
           95,
@@ -153,7 +187,12 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       recommendedAction: "Validate and publish price recommendation",
       explanationPoints: [
         `Expected margin delta is ${pricingMove.expectedMarginDelta.toFixed(1)} points.`,
-        `Projected profit gain is $${(pricingMove.expectedProfitGain ?? 0).toFixed(2)}.`,
+        // expectedProfitGain = delta x salesVelocity(?? 8) x 6. Both factors are
+        // assumptions, so this may not be stated as money. Same shared gate as
+        // the Dashboard and Pricing use, so all three agree.
+        PROFIT_CLAIM.allowed
+          ? `Projected profit gain is $${(pricingMove.expectedProfitGain ?? 0).toFixed(2)}.`
+          : `Projected profit gain: ${NOT_ENOUGH_DATA}. ${PROFIT_CLAIM.explanation}`,
         "Use merchant approval before pushing the change into Shopify.",
       ],
       automationPosture: "Approval-led pricing automation",
@@ -165,11 +204,20 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       id: "profit_move",
       title: `Protect margin on ${profitMove.productHandle}`,
       module: "Pricing & Profit",
-      severity:
-        (profitMove.projectedMonthlyProfit ?? 0) >= 1000 ? "High" : "Medium",
-      rationale: `Projected monthly profit gain is $${(profitMove.projectedMonthlyProfit ?? 0).toFixed(2)}.`,
+      // Severity must not be driven by a fabricated figure either.
+      severity: PROFIT_CLAIM.allowed
+        ? (profitMove.projectedMonthlyProfit ?? 0) >= 1000
+          ? "High"
+          : "Medium"
+        : "Medium",
+      rationale: PROFIT_CLAIM.allowed
+        ? `Projected monthly profit gain is $${(profitMove.projectedMonthlyProfit ?? 0).toFixed(2)}.`
+        : `This product may be worth repricing, but VedaSuite cannot size the gain yet. ${PROFIT_CLAIM.explanation}`,
       route: "/pricing-profit?focus=profit",
-      confidence: Math.max(
+      // A confidence derived from a fabricated projection is itself fabricated.
+      confidence: !PROFIT_CLAIM.allowed
+        ? 0
+        : Math.max(
         54,
         Math.min(
           94,
@@ -178,7 +226,9 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       ),
       recommendedAction: "Review margin-defense playbook",
       explanationPoints: [
-        `Projected margin increase is ${(profitMove.projectedMarginIncrease ?? 0).toFixed(1)} points.`,
+        PROFIT_CLAIM.allowed
+          ? `Projected margin increase is ${(profitMove.projectedMarginIncrease ?? 0).toFixed(1)} points.`
+          : PROFIT_CLAIM.explanation,
         `Current selling price is $${profitMove.sellingPrice.toFixed(2)}.`,
         "Use profit guidance to decide whether to reprice, bundle, or defend premium SKUs.",
       ],
