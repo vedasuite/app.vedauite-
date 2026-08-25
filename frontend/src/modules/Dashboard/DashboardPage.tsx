@@ -114,10 +114,27 @@ type DashboardState = {
     reason: string;
   };
   kpis: {
+    storeHealth: number;
     fraudAlerts: number;
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+  };
+  /**
+   * PHASE F. Every tile above is now a projection of the OPEN findings Action
+   * Center shows, so the two pages cannot disagree. `available` is false when
+   * VedaSuite is not recording findings — in that case the counts are all zero
+   * but mean nothing, and the tiles must render a dash rather than a "0" the
+   * merchant would read as "no problems".
+   */
+  findings?: {
+    available: boolean;
+    unavailableReason: string | null;
+    totalOpen: number;
+    bySeverity: { critical: number; high: number; medium: number; low: number };
+    attentionTitle: string;
+    attentionDetail: string;
+    route: string;
   };
   recentInsights: DashboardInsight[];
   quickAccess: {
@@ -220,6 +237,7 @@ type DashboardRefreshResult = {
 
 type DashboardVisibleSnapshot = {
   kpis: {
+    storeHealth: number;
     fraudAlerts: number;
     competitorChanges: number;
     pricingOpportunities: number;
@@ -432,6 +450,9 @@ function buildDashboardSnapshot(
 
   return {
     kpis: {
+      // Both branches now read the same server-side projection: the top-level
+      // fields are a copy of dashboardState.kpis, not a rival calculation.
+      storeHealth: dashboardState?.kpis.storeHealth ?? 0,
       fraudAlerts:
         dashboardState?.kpis.fraudAlerts ?? payload.metrics.fraudAlertsToday,
       competitorChanges:
@@ -992,6 +1013,7 @@ export function DashboardPage() {
             metrics && diagnostics ? { metrics, diagnostics } : null
           ) ?? {
             kpis: {
+              storeHealth: 0,
               fraudAlerts: 0,
               competitorChanges: 0,
               pricingOpportunities: 0,
@@ -1044,39 +1066,56 @@ export function DashboardPage() {
     }
   }, [applyDashboardPayload, host, loadDashboard]);
 
+  const dashboardFindings = dashboardState?.findings ?? null;
+  // When findings are not being recorded, the counts are all zero but say
+  // nothing about the store. A "0" would be read as "no problems found", which
+  // is a claim VedaSuite has not earned, so the tiles show a dash instead.
+  const findingsAvailable = dashboardFindings ? dashboardFindings.available : true;
+  const kpiValue = (n: number) => (findingsAvailable ? n : "—");
+
   const metricsCards = useMemo(
     () => [
       {
+        title: "Store health",
+        value: kpiValue(dashboardState?.kpis.storeHealth ?? 0),
+        note: "Connection and sync issues",
+      },
+      {
         title: "Fraud alerts",
-        value: dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0,
-        note: "Refund abuse and risky orders",
+        value: kpiValue(
+          dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0
+        ),
+        note: "Open refund-abuse and risky-order findings",
       },
       {
         title: "Competitor changes",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.competitorChanges ??
-          metrics?.competitorPriceChanges ??
-          0,
-        note: "Latest monitored price moves",
+            metrics?.competitorPriceChanges ??
+            0
+        ),
+        note: "Open findings from monitored competitors",
       },
       {
         title: "Pricing opportunities",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.pricingOpportunities ??
-          metrics?.aiPricingSuggestions ??
-          0,
-        note: "Pricing records ready to review",
+            metrics?.aiPricingSuggestions ??
+            0
+        ),
+        note: "Open pricing findings to review",
       },
       {
         title: "Profit opportunities",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.profitOpportunities ??
-          metrics?.profitOptimizationOpportunities ??
-          0,
-        note: "Optimization records available",
+            metrics?.profitOptimizationOpportunities ??
+            0
+        ),
+        note: "Open product-profit findings",
       },
     ],
-    [dashboardState, metrics]
+    [dashboardState, metrics, findingsAvailable]
   );
   const currentRefreshSummary =
     syncing
@@ -1370,8 +1409,43 @@ export function DashboardPage() {
           </Layout.Section>
         ) : null}
 
+        {/*
+          PHASE F. One statement of what needs attention, derived from the same
+          open findings Action Center shows — so this band and that page can
+          never disagree, and every tile below it is a breakdown of this number.
+        */}
+        {!syncing && dashboardFindings ? (
+          <Layout.Section>
+            <Banner
+              title={dashboardFindings.attentionTitle}
+              tone={
+                !dashboardFindings.available
+                  ? "warning"
+                  : dashboardFindings.bySeverity.critical > 0
+                  ? "critical"
+                  : dashboardFindings.totalOpen > 0
+                  ? "info"
+                  : "success"
+              }
+              action={
+                dashboardFindings.available && dashboardFindings.totalOpen > 0
+                  ? {
+                      content: "Open Action Center",
+                      onAction: () => navigateEmbedded(dashboardFindings.route),
+                    }
+                  : undefined
+              }
+            >
+              <p>
+                {dashboardFindings.unavailableReason ??
+                  dashboardFindings.attentionDetail}
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="300">
+          <InlineGrid columns={{ xs: 1, sm: 2, md: 5 }} gap="300">
             {syncing
               ? metricsCards.map((item) => (
                   <Card key={item.title}>
@@ -1408,7 +1482,7 @@ export function DashboardPage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
                   <Text as="h2" variant="headingLg">
-                    Recent insights
+                    Top findings
                   </Text>
                   <Badge tone={toneForReadiness(metrics?.dataState)}>
                     {labelForReadiness(metrics?.dataState)}
@@ -1448,10 +1522,20 @@ export function DashboardPage() {
                         </InlineStack>
                       </div>
                     ))
-                  ) : (
-                    <Banner title="No urgent alerts right now" tone="success">
+                  ) : !findingsAvailable ? (
+                    // Not the same as "nothing is wrong". Saying so would be a
+                    // claim about the store that VedaSuite cannot currently make.
+                    <Banner title="Findings are not available" tone="warning">
                       <p>
-                        No refund reviews, pricing actions, or competitor alerts currently require attention.
+                        {dashboardFindings?.unavailableReason ??
+                          "VedaSuite cannot show findings for this store right now."}
+                      </p>
+                    </Banner>
+                  ) : (
+                    <Banner title="Nothing needs your attention right now" tone="success">
+                      <p>
+                        VedaSuite found no open findings for this store. This is a
+                        real result, not a loading state.
                       </p>
                     </Banner>
                   )}
