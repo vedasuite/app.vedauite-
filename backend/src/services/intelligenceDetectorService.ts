@@ -37,6 +37,13 @@ import {
   type Urgency,
 } from "./explainabilityCalc";
 import { computeCustomerLoss, CUSTOMER_LOSS } from "./customerLossCalc";
+import {
+  INDIVIDUAL_FINDING_LIMIT,
+  qualifiesAsCustomerLossAction,
+  qualifiesAsPricingAction,
+  qualifiesAsCompetitorAction,
+  splitForActionCenter,
+} from "./actionQualification";
 import { computeProductProfit, PRODUCT_PROFIT } from "./productProfitCalc";
 import {
   detectDataCoverage,
@@ -65,6 +72,9 @@ const IMPACT_CAP_FALLBACK = 1000;
 
 export const CUSTOMER_LOSS_FINDING_TYPE = "customer_loss_repeated_refund";
 export const PRODUCT_PROFIT_FINDING_TYPE = "product_profit_weakened_retained_margin";
+export const CUSTOMER_LOSS_GROUP_FINDING_TYPE = "customer_loss_repeated_refund_group";
+export const PRICING_FINDING_TYPE = "pricing_actionable_opportunity";
+export const COMPETITOR_FINDING_TYPE = "competitor_material_price_gap";
 
 function impactMax(impact: FinancialImpact): number {
   return impact.status === "quantified" ? impact.max : 0;
@@ -116,6 +126,65 @@ function buildInsight(input: {
   };
 }
 
+/**
+ * One finding standing in for N related items that did not get their own.
+ *
+ * Never states a monetary total. Summing across the group would double-count
+ * against the individual findings raised alongside it, and a total that
+ * overlaps its own components is exactly the kind of indefensible number this
+ * programme exists to remove.
+ */
+function buildAggregateInsight(input: {
+  storeId: string;
+  module: InsightModule;
+  id: string;
+  count: number;
+  shownIndividually: number;
+  limit: number;
+  title: string;
+  firstReason: string;
+  secondReason: string;
+  countLabel: string;
+  notQuantifiableReason: string;
+  recommendedAction: string;
+  route: string;
+  orderingNote: string;
+  nowIso: string;
+}): ExplainableInsight {
+  return buildInsight({
+    storeId: input.storeId,
+    module: input.module,
+    id: input.id,
+    title: input.title,
+    reasons: [input.firstReason, input.secondReason],
+    evidence: [
+      { label: input.countLabel, value: String(input.count) },
+      { label: "Shown individually", value: String(input.shownIndividually) },
+    ],
+    financialImpact: {
+      status: "impact_not_quantifiable",
+      reason: input.notQuantifiableReason,
+    },
+    confidence: "high",
+    urgency: "medium",
+    recommendedAction: input.recommendedAction,
+    route: input.route,
+    methodology: {
+      summary:
+        "Groups " +
+        input.count +
+        " items that qualified beyond the " +
+        input.limit +
+        " shown individually.",
+      assumptions: [input.orderingNote],
+      caps: ["No monetary total is stated, to avoid double-counting."],
+    },
+    dataQuality: "ok",
+    nowIso: input.nowIso,
+    storeImpactCap: IMPACT_CAP_FALLBACK,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // A. Customer Loss
 // ---------------------------------------------------------------------------
@@ -147,6 +216,12 @@ export async function detectCustomerLoss(input: {
   });
 
   const insights: ExplainableInsight[] = [];
+  /** Qualifying customers, pending the individual/aggregate split. */
+  const candidates: Array<{
+    id: string;
+    rankValue: number | null;
+    insight: ExplainableInsight;
+  }> = [];
 
   for (const customer of customers) {
     const orders = await prisma.order.findMany({
@@ -226,14 +301,74 @@ export async function detectCustomerLoss(input: {
 
     insights.push(insight);
 
+    // Collected, not recorded yet. Action Center is a prioritized ACTION layer:
+    // a store with hundreds of refund-abusing customers must not produce
+    // hundreds of findings, or the operational and profit findings that need a
+    // decision are buried. Qualification is evidence-derived; the split below
+    // decides which are shown individually and which are summarised. Full
+    // detail always remains in the Customer Loss workspace.
+    if (
+      qualifiesAsCustomerLossAction({
+        hasPattern: result.pattern !== null,
+        confidence: result.confidence as "high" | "medium" | "low" | "insufficient_data",
+        observedLoss: impactMax(result.observedImpact) || null,
+      })
+    ) {
+      candidates.push({
+        id: customer.id,
+        rankValue: impactMax(result.observedImpact) || null,
+        insight,
+      });
+    }
+  }
+
+  const split = splitForActionCenter("customer_loss", candidates);
+
+  for (const candidate of split.individual) {
     await recordFinding({
       storeId: input.storeId,
       module: "return_abuse",
       findingType: CUSTOMER_LOSS_FINDING_TYPE,
       // Subject is the customer — stable across runs, independent of amounts.
-      subjectKey: customer.id,
-      snapshot: insight,
-      sourceInsightId: insight.id,
+      subjectKey: candidate.id,
+      snapshot: candidate.insight,
+      sourceInsightId: candidate.insight.id,
+    });
+  }
+
+  if (split.needsAggregate) {
+    const aggregate = buildAggregateInsight({
+      storeId: input.storeId,
+      module: "return_abuse",
+      id: "customer_loss_group:" + analysisWindowUTC(nowIso),
+      count: split.aggregated.length,
+      shownIndividually: split.individual.length,
+      limit: INDIVIDUAL_FINDING_LIMIT.customer_loss,
+      title: split.aggregated.length + " more customers show repeated refund loss",
+      firstReason:
+        split.aggregated.length +
+        " further customers meet the same repeated-refund pattern.",
+      secondReason:
+        "They are listed individually in Customer Loss. The highest-impact customers appear as their own findings.",
+      countLabel: "Additional customers",
+      // Deliberately NOT quantified: summing observed loss across customers
+      // here would double-count against the individual findings above.
+      notQuantifiableReason:
+        "Individual customer losses are reported on their own findings; summing them here would double-count.",
+      recommendedAction:
+        "Review the remaining customers in Customer Loss. No automatic action was taken.",
+      route: "/app/fraud-intelligence",
+      orderingNote: "Ordering is by observed refunded value, then customer id.",
+      nowIso,
+    });
+    insights.push(aggregate);
+    await recordFinding({
+      storeId: input.storeId,
+      module: "return_abuse",
+      findingType: CUSTOMER_LOSS_GROUP_FINDING_TYPE,
+      subjectKey: "customer_loss_group",
+      snapshot: aggregate,
+      sourceInsightId: aggregate.id,
     });
   }
 
