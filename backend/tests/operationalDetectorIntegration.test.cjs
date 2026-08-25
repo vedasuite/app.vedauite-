@@ -61,6 +61,11 @@ function buildWorld({
     },
   };
   prisma.customer = { findMany: async () => [] };
+  // Phase E: the Pricing and Market Signals families read these. Empty means
+  // both correctly produce zero findings, which is valid behaviour.
+  prisma.priceHistory = { findMany: async () => [] };
+  prisma.competitorDomain = { findMany: async () => [] };
+  prisma.competitorData = { findMany: async () => [] };
   prisma.syncJob = {
     findMany: async ({ where }) => {
       writes.push({ table: "syncJob", op: "read" });

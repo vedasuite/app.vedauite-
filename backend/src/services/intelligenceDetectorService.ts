@@ -44,6 +44,9 @@ import {
   qualifiesAsCompetitorAction,
   splitForActionCenter,
 } from "./actionQualification";
+import { profitRowProvenance } from "./evidenceEligibility";
+import { classifyPricingEvidence } from "./pricingEvidenceCalc";
+import { isCurrentEvidence } from "./competitorFetchStatus";
 import { computeProductProfit, PRODUCT_PROFIT } from "./productProfitCalc";
 import {
   detectDataCoverage,
@@ -75,6 +78,8 @@ export const PRODUCT_PROFIT_FINDING_TYPE = "product_profit_weakened_retained_mar
 export const CUSTOMER_LOSS_GROUP_FINDING_TYPE = "customer_loss_repeated_refund_group";
 export const PRICING_FINDING_TYPE = "pricing_actionable_opportunity";
 export const COMPETITOR_FINDING_TYPE = "competitor_material_price_gap";
+export const PRICING_GROUP_FINDING_TYPE = "pricing_actionable_opportunity_group";
+export const COMPETITOR_GROUP_FINDING_TYPE = "competitor_material_price_gap_group";
 
 function impactMax(impact: FinancialImpact): number {
   return impact.status === "quantified" ? impact.max : 0;
@@ -842,16 +847,470 @@ export async function detectOperationalProblems(input: {
  * scheduled and NOT called from sync, onboarding, billing or any route, so no
  * existing behaviour changes until it is wired up in a later part.
  */
+// ---------------------------------------------------------------------------
+// D. Pricing — actionable opportunities only
+// ---------------------------------------------------------------------------
+
+/**
+ * Pricing opportunities that a merchant can actually act on.
+ *
+ * Deliberately NOT every priced product. A recommendation VedaSuite will not
+ * show a price for is not an action, so qualification reuses the exact gate the
+ * Pricing card uses (pricingEvidenceCalc). With no observed cost or velocity
+ * and no competitor match, this correctly yields ZERO findings — that is the
+ * right answer, not a bug to be worked around.
+ *
+ * CURRENT-STATE family: an opportunity that no longer qualifies is auto-closed.
+ */
+export async function detectPricingOpportunities(input: {
+  storeId: string;
+  nowIso?: string;
+}): Promise<ExplainableInsight[]> {
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const insights: ExplainableInsight[] = [];
+
+  const rows = await prisma.priceHistory.findMany({
+    where: { storeId: input.storeId },
+    select: {
+      productHandle: true,
+      currentPrice: true,
+      recommendedPrice: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: READ_CAPS.products,
+  });
+
+  // Latest row per product only — older rows are history, not current state.
+  const latestByHandle = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (!latestByHandle.has(row.productHandle)) latestByHandle.set(row.productHandle, row);
+  }
+
+  const profitRows = await prisma.profitOptimizationData.findMany({
+    where: { storeId: input.storeId },
+    select: {
+      productHandle: true,
+      productCost: true,
+      costSource: true,
+      salesVelocity: true,
+      velocitySource: true,
+      competitorAveragePrice: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: READ_CAPS.products,
+  });
+  const profitByHandle = new Map<string, (typeof profitRows)[number]>();
+  for (const row of profitRows) {
+    if (!profitByHandle.has(row.productHandle)) profitByHandle.set(row.productHandle, row);
+  }
+
+  const candidates: Array<{ id: string; rankValue: number | null; insight: ExplainableInsight }> = [];
+
+  for (const [handle, row] of latestByHandle) {
+    const profit = profitByHandle.get(handle) ?? null;
+    // Real provenance, never a null check on a possibly-persisted fallback.
+    const provenance = profitRowProvenance(profit);
+
+    const evidence = classifyPricingEvidence({
+      competitorReady: profit?.competitorAveragePrice != null,
+      competitorAveragePrice: profit?.competitorAveragePrice ?? null,
+      profitReady: provenance.costObserved,
+      salesVelocityObserved: provenance.velocityObserved,
+    });
+
+    if (
+      !qualifiesAsPricingAction({
+        showExactTarget: evidence.showExactTarget,
+        currentPrice: row.currentPrice,
+        recommendedPrice: row.recommendedPrice,
+      })
+    ) {
+      continue;
+    }
+
+    const direction = row.recommendedPrice > row.currentPrice ? "increase" : "reduction";
+    const insight = buildInsight({
+      storeId: input.storeId,
+      module: "pricing",
+      id: "pricing_opportunity:" + handle + ":" + analysisWindowUTC(nowIso),
+      title: "Pricing opportunity on " + handle,
+      reasons: [
+        "A price " + direction + " is supported by " + evidence.label.toLowerCase() + " evidence.",
+        evidence.whatWouldHelp || "The recommended price is derived from observed inputs only.",
+      ],
+      evidence: [
+        { label: "Current price", value: row.currentPrice.toFixed(2) },
+        { label: "Recommended price", value: row.recommendedPrice.toFixed(2) },
+        { label: "Evidence basis", value: evidence.label },
+      ],
+      // A monetary projection needs OBSERVED velocity. Without it the gain
+      // would be delta x an assumption, so no figure is claimed.
+      financialImpact: evidence.showProjectedGain
+        ? {
+            status: "quantified",
+            min: 0,
+            max: Math.abs(row.recommendedPrice - row.currentPrice),
+            currency: "USD",
+            period: "per_order",
+            basis: "Per-unit price difference only; not multiplied by any assumed volume.",
+            isEstimate: true,
+          }
+        : {
+            status: "impact_not_quantifiable",
+            reason:
+              "VedaSuite cannot size this in money yet because it does not know how many units this product sells.",
+          },
+      confidence: evidence.basis === "profit_informed" ? "high" : "medium",
+      urgency: "medium",
+      recommendedAction:
+        "Review the recommended price in the Pricing Workspace before applying it in Shopify. No automatic action was taken.",
+      route: "/app/ai-pricing-engine",
+      methodology: {
+        summary: "Evidence basis: " + evidence.basis + ". Only observed inputs contribute.",
+        assumptions: ["No assumed cost or velocity contributes to this recommendation."],
+        caps: ["A price move below 1% is treated as noise and is not raised."],
+      },
+      dataQuality: "ok",
+      nowIso,
+      storeImpactCap: IMPACT_CAP_FALLBACK,
+    });
+
+    candidates.push({
+      id: handle,
+      rankValue: Math.abs(row.recommendedPrice - row.currentPrice),
+      insight,
+    });
+  }
+
+  const split = splitForActionCenter("pricing", candidates);
+  for (const candidate of split.individual) {
+    insights.push(candidate.insight);
+    await recordFinding({
+      storeId: input.storeId,
+      module: "pricing",
+      findingType: PRICING_FINDING_TYPE,
+      subjectKey: candidate.id,
+      snapshot: candidate.insight,
+      sourceInsightId: candidate.insight.id,
+    });
+  }
+  if (split.needsAggregate) {
+    const aggregate = buildAggregateInsight({
+      storeId: input.storeId,
+      module: "pricing",
+      id: "pricing_opportunity_group:" + analysisWindowUTC(nowIso),
+      count: split.aggregated.length,
+      shownIndividually: split.individual.length,
+      limit: INDIVIDUAL_FINDING_LIMIT.pricing,
+      title: split.aggregated.length + " more products have a supported pricing opportunity",
+      firstReason: split.aggregated.length + " further products qualify on the same evidence rules.",
+      secondReason: "They are listed in the Pricing Workspace, ranked by price difference.",
+      countLabel: "Additional products",
+      notQuantifiableReason:
+        "Per-product price differences are reported individually; summing them here would not describe a real total.",
+      recommendedAction:
+        "Review the remaining products in the Pricing Workspace. No automatic action was taken.",
+      route: "/app/ai-pricing-engine",
+      orderingNote: "Ordering is by absolute price difference, then product handle.",
+      nowIso,
+    });
+    insights.push(aggregate);
+    await recordFinding({
+      storeId: input.storeId,
+      module: "pricing",
+      findingType: PRICING_GROUP_FINDING_TYPE,
+      subjectKey: "pricing_opportunity_group",
+      snapshot: aggregate,
+      sourceInsightId: aggregate.id,
+    });
+  }
+
+  logEvent("info", "intelligence.pricing_opportunities_detected", {
+    storeId: input.storeId,
+    productsEvaluated: latestByHandle.size,
+    qualified: candidates.length,
+    findings: insights.length,
+  });
+
+  return insights;
+}
+
+// ---------------------------------------------------------------------------
+// E. Market Signals — material, CURRENT competitor gaps only
+// ---------------------------------------------------------------------------
+
+/**
+ * Competitor price gaps worth acting on.
+ *
+ * Requires CURRENT evidence: a gap computed from data that failed to refresh is
+ * history, not a market signal. With unreachable competitor domains this
+ * correctly yields ZERO findings.
+ *
+ * CURRENT-STATE family: a gap that closes is auto-closed.
+ */
+export async function detectMarketSignals(input: {
+  storeId: string;
+  nowIso?: string;
+}): Promise<ExplainableInsight[]> {
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const insights: ExplainableInsight[] = [];
+
+  const domains = await prisma.competitorDomain.findMany({
+    where: { storeId: input.storeId },
+    select: { domain: true, lastAttemptStatus: true },
+  });
+  // Only domains whose LAST attempt actually succeeded contribute current
+  // evidence. Persisted status, not inference.
+  const currentDomains = new Set(
+    domains.filter((d) => isCurrentEvidence(d.lastAttemptStatus)).map((d) => d.domain)
+  );
+
+  const rows = await prisma.competitorData.findMany({
+    where: { storeId: input.storeId },
+    select: {
+      productHandle: true,
+      competitorName: true,
+      competitorUrl: true,
+      price: true,
+      collectedAt: true,
+    },
+    orderBy: { collectedAt: "desc" },
+    take: READ_CAPS.products,
+  });
+
+  const ourPrices = await prisma.priceHistory.findMany({
+    where: { storeId: input.storeId },
+    select: { productHandle: true, currentPrice: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: READ_CAPS.products,
+  });
+  const ourPriceByHandle = new Map<string, number>();
+  for (const row of ourPrices) {
+    if (!ourPriceByHandle.has(row.productHandle)) {
+      ourPriceByHandle.set(row.productHandle, row.currentPrice);
+    }
+  }
+
+  const seen = new Set<string>();
+  const candidates: Array<{ id: string; rankValue: number | null; insight: ExplainableInsight }> = [];
+
+  for (const row of rows) {
+    if (seen.has(row.productHandle)) continue;
+    const ourPrice = ourPriceByHandle.get(row.productHandle) ?? null;
+    const domain = (() => {
+      try {
+        return new URL(row.competitorUrl).host;
+      } catch {
+        return null;
+      }
+    })();
+
+    if (
+      !qualifiesAsCompetitorAction({
+        competitorPrice: row.price,
+        ourPrice,
+        evidenceIsCurrent: domain != null && currentDomains.has(domain),
+      })
+    ) {
+      continue;
+    }
+    seen.add(row.productHandle);
+
+    const gap = (row.price as number) - (ourPrice as number);
+    const cheaper = gap < 0;
+    const insight = buildInsight({
+      storeId: input.storeId,
+      module: "competitor",
+      id: "market_signal:" + row.productHandle + ":" + analysisWindowUTC(nowIso),
+      title:
+        "A competitor is priced " +
+        (cheaper ? "below" : "above") +
+        " you on " +
+        row.productHandle,
+      reasons: [
+        row.competitorName + " is currently priced at " + (row.price as number).toFixed(2) + ".",
+        "Your current price is " + (ourPrice as number).toFixed(2) + ".",
+      ],
+      evidence: [
+        { label: "Competitor price", value: (row.price as number).toFixed(2) },
+        { label: "Your price", value: (ourPrice as number).toFixed(2) },
+        { label: "Difference", value: gap.toFixed(2) },
+      ],
+      // The price DIFFERENCE is observed. Turning it into revenue would need
+      // volume, which is not observable, so no revenue figure is claimed.
+      financialImpact: {
+        status: "quantified",
+        min: 0,
+        max: Math.abs(gap),
+        currency: "USD",
+        period: "per_order",
+        basis: "Observed per-unit price difference. Not multiplied by any assumed volume.",
+        // The gap is measured, but the range is still a bound rather than a
+        // realised figure, so it is flagged as an estimate like every other
+        // quantified impact.
+        isEstimate: true,
+      },
+      confidence: "high",
+      urgency: cheaper ? "high" : "medium",
+      recommendedAction:
+        "Review this product in Market Signals and decide whether to respond. No automatic action was taken.",
+      route: "/app/competitor-intelligence",
+      methodology: {
+        summary: "Compares your latest price against the competitor price collected on the last successful check.",
+        assumptions: ["Only domains whose last collection attempt succeeded contribute."],
+        caps: ["A gap below 1% is treated as noise.", "No revenue figure is derived from the gap."],
+      },
+      dataQuality: "ok",
+      nowIso,
+      storeImpactCap: IMPACT_CAP_FALLBACK,
+    });
+
+    candidates.push({ id: row.productHandle, rankValue: Math.abs(gap), insight });
+  }
+
+  const split = splitForActionCenter("competitor", candidates);
+  for (const candidate of split.individual) {
+    insights.push(candidate.insight);
+    await recordFinding({
+      storeId: input.storeId,
+      module: "competitor",
+      findingType: COMPETITOR_FINDING_TYPE,
+      subjectKey: candidate.id,
+      snapshot: candidate.insight,
+      sourceInsightId: candidate.insight.id,
+    });
+  }
+  if (split.needsAggregate) {
+    const aggregate = buildAggregateInsight({
+      storeId: input.storeId,
+      module: "competitor",
+      id: "market_signal_group:" + analysisWindowUTC(nowIso),
+      count: split.aggregated.length,
+      shownIndividually: split.individual.length,
+      limit: INDIVIDUAL_FINDING_LIMIT.competitor,
+      title: split.aggregated.length + " more products show a competitor price gap",
+      firstReason: split.aggregated.length + " further products have a material current price gap.",
+      secondReason: "They are listed in Market Signals, ranked by difference.",
+      countLabel: "Additional products",
+      notQuantifiableReason:
+        "Per-unit gaps are reported individually; summing them would not describe a real total.",
+      recommendedAction: "Review the remaining products in Market Signals.",
+      route: "/app/competitor-intelligence",
+      orderingNote: "Ordering is by absolute price gap, then product handle.",
+      nowIso,
+    });
+    insights.push(aggregate);
+    await recordFinding({
+      storeId: input.storeId,
+      module: "competitor",
+      findingType: COMPETITOR_GROUP_FINDING_TYPE,
+      subjectKey: "market_signal_group",
+      snapshot: aggregate,
+      sourceInsightId: aggregate.id,
+    });
+  }
+
+  logEvent("info", "intelligence.market_signals_detected", {
+    storeId: input.storeId,
+    competitorRows: rows.length,
+    domainsWithCurrentEvidence: currentDomains.size,
+    qualified: candidates.length,
+    findings: insights.length,
+  });
+
+  return insights;
+}
+
+/**
+ * Closes findings in a CURRENT-STATE family that the detectors no longer report.
+ *
+ * Only for families whose findings describe the state of the store right now:
+ * operational, pricing and competitor. Customer-loss and product-profit
+ * findings describe HISTORICAL events — a refund that happened stays having
+ * happened — so they are deliberately excluded and never auto-closed.
+ */
+async function closeHealedFindings(input: {
+  storeId: string;
+  module: string;
+  stillDetected: Set<string>;
+  suppressed: number;
+}): Promise<number> {
+  // "Not reported" after a cooldown suppression means "deliberately silenced",
+  // not "healed".
+  if (input.suppressed > 0) return 0;
+
+  let recovered = 0;
+  try {
+    const open = await prisma.intelligenceFinding.findMany({
+      where: {
+        storeId: input.storeId,
+        module: input.module,
+        status: { in: ["new", "seen", "in_review"] },
+      },
+      select: { id: true, findingType: true },
+    });
+    for (const row of open) {
+      if (input.stillDetected.has(row.findingType)) continue;
+      await transitionFindingStatus({
+        storeId: input.storeId,
+        findingId: row.id,
+        status: "resolved",
+        note: "Automatically closed: VedaSuite re-ran this check and the condition is no longer present.",
+        actor: "system",
+      });
+      recovered += 1;
+    }
+  } catch (error) {
+    logEvent("warn", "intelligence.recovery_failed", {
+      storeId: input.storeId,
+      module: input.module,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return recovered;
+}
+
 export async function runIntelligenceDetectors(input: {
   storeId: string;
   nowIso?: string;
 }) {
-  const [customerLoss, productProfit, operational] = await Promise.all([
+  const [customerLoss, productProfit, operational, pricing, marketSignals] = await Promise.all([
     detectCustomerLoss(input),
     detectProductProfit(input),
     detectOperationalProblems(input),
+    detectPricingOpportunities(input),
+    detectMarketSignals(input),
   ]);
-  return { customerLoss, productProfit, operational };
+
+  // Current-state families heal. Historical families do not.
+  await closeHealedFindings({
+    storeId: input.storeId,
+    module: "pricing",
+    stillDetected: new Set(
+      pricing.length
+        ? [PRICING_FINDING_TYPE, PRICING_GROUP_FINDING_TYPE].filter((t) =>
+            pricing.some((i) => i.id.startsWith(t.includes("group") ? "pricing_opportunity_group" : "pricing_opportunity:"))
+          )
+        : []
+    ),
+    suppressed: 0,
+  });
+  await closeHealedFindings({
+    storeId: input.storeId,
+    module: "competitor",
+    stillDetected: new Set(
+      marketSignals.length
+        ? [COMPETITOR_FINDING_TYPE, COMPETITOR_GROUP_FINDING_TYPE].filter((t) =>
+            marketSignals.some((i) => i.id.startsWith(t.includes("group") ? "market_signal_group" : "market_signal:"))
+          )
+        : []
+    ),
+    suppressed: 0,
+  });
+
+  return { customerLoss, productProfit, operational, pricing, marketSignals };
 }
 
 /**

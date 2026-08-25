@@ -192,12 +192,12 @@ export function classifySuccess(domain: string, partial: boolean): FetchOutcome 
 }
 
 /** Whether a status means VedaSuite currently holds usable CURRENT evidence. */
-export function isCurrentEvidence(status: CompetitorFetchStatus | null | undefined): boolean {
+export function isCurrentEvidence(status: string | null | undefined): boolean {
   return status === "fresh_success" || status === "partial_success";
 }
 
 /** Whether a status represents a collection failure the merchant should see. */
-export function isFailure(status: CompetitorFetchStatus | null | undefined): boolean {
+export function isFailure(status: string | null | undefined): boolean {
   return (
     status === "dns_unresolvable" ||
     status === "timeout" ||
