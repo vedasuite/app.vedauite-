@@ -76,7 +76,10 @@ type Overview = {
     rank: number;
     productHandle: string;
     currentPrice: number;
-    recommendedPrice: number;
+    recommendedPrice: number | null;
+    evidenceBasis?: string;
+    missingInputs?: string[];
+    whatWouldHelp?: string;
     recommendationType: string;
     expectedImpact: string;
     confidence: string;
@@ -607,14 +610,23 @@ export function PricingProfitPage() {
                           <InlineStack align="space-between" blockAlign="start">
                             <BlockStack gap="100">
                               <Text as="p" variant="headingSm">{`${item.rank}. ${item.productHandle}`}</Text>
-                              <Text as="p" tone="subdued">{`$${item.currentPrice.toFixed(2)} -> $${item.recommendedPrice.toFixed(2)}`}</Text>
+                              <Text as="p" tone="subdued">
+                                {item.recommendedPrice === null
+                                  ? `Current price $${item.currentPrice.toFixed(2)}`
+                                  : `$${item.currentPrice.toFixed(2)} -> $${item.recommendedPrice.toFixed(2)}`}
+                              </Text>
                             </BlockStack>
                             <InlineStack gap="200">
-                              <Badge tone="info">{item.recommendationType}</Badge>
+                              <Badge tone={item.recommendedPrice === null ? "attention" : "info"}>{item.recommendationType}</Badge>
                               <Badge tone={item.confidence === "High" ? "success" : item.confidence === "Medium" ? "attention" : "info"}>{item.confidence}</Badge>
                             </InlineStack>
                           </InlineStack>
                           <Text as="p">{item.expectedImpact}</Text>
+                          {item.recommendedPrice === null && item.whatWouldHelp ? (
+                            <Banner tone="info">
+                              <Text as="p" variant="bodySm">{item.whatWouldHelp}</Text>
+                            </Banner>
+                          ) : null}
                           <Text as="p" tone="subdued">{item.why}</Text>
                           <Text as="p" variant="bodySm" tone="subdued">{item.support}</Text>
                           <InlineStack gap="200">

@@ -50,6 +50,7 @@ import {
   computeFindingFingerprint,
   getFindingByFingerprint,
   recordFinding,
+  transitionFindingStatus,
 } from "./intelligenceFindingService";
 
 /** Bounded reads so a large store cannot pull an unbounded row set. */
@@ -569,11 +570,14 @@ export async function detectOperationalProblems(input: {
 
   const insights: ExplainableInsight[] = [];
   let suppressed = 0;
+  /** Finding types raised by THIS run — the basis for closing the rest. */
+  const detectedFindingTypes = new Set<string>();
 
   for (const problem of problems) {
     if (!problem) continue;
 
     const findingType = `${OPERATIONAL_FINDING_TYPE_PREFIX}${problem.detector}`;
+    detectedFindingTypes.add(findingType);
     const fingerprint = computeFindingFingerprint({
       storeId: input.storeId,
       module: OPERATIONAL_MODULE,
@@ -635,10 +639,63 @@ export async function detectOperationalProblems(input: {
     });
   }
 
+  // -----------------------------------------------------------------------
+  // RECOVERY. Close operational findings the detectors no longer report.
+  //
+  // Without this, a store-health alert lives forever: recordFinding is only
+  // ever called for a problem that IS detected, so once the underlying problem
+  // clears — or once a detector bug that raised it is fixed — the merchant is
+  // left staring at a stale critical alert with no way for it to heal itself.
+  //
+  // Scoped deliberately:
+  //   - operational findings only. These describe the CURRENT state of the
+  //     connection, so "no longer detected" genuinely means "no longer true".
+  //     Customer-loss and product-profit findings describe historical events
+  //     and must NOT be auto-closed.
+  //   - open findings only. A merchant's own resolve/dismiss is never
+  //     overwritten.
+  //   - skipped entirely when a detector was suppressed by cooldown, because
+  //     "not reported" then means "deliberately silenced", not "recovered".
+  //   - never throws: recovery is a courtesy, and failing it must not fail the
+  //     detection run.
+  // -----------------------------------------------------------------------
+  let recovered = 0;
+  if (suppressed === 0) {
+    try {
+      const stillDetected = detectedFindingTypes;
+      const openOperational = await prisma.intelligenceFinding.findMany({
+        where: {
+          storeId: input.storeId,
+          module: OPERATIONAL_MODULE,
+          status: { in: ["new", "seen", "in_review"] },
+        },
+        select: { id: true, findingType: true },
+      });
+
+      for (const row of openOperational) {
+        if (stillDetected.has(row.findingType)) continue;
+        await transitionFindingStatus({
+          storeId: input.storeId,
+          findingId: row.id,
+          status: "resolved",
+          note: "Automatically closed: VedaSuite re-ran this check and the problem is no longer present.",
+          actor: "system",
+        });
+        recovered += 1;
+      }
+    } catch (error) {
+      logEvent("warn", "intelligence.operational_recovery_failed", {
+        storeId: input.storeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   logEvent("info", "intelligence.operational_problems_detected", {
     storeId: input.storeId,
     findings: insights.length,
     suppressedByCooldown: suppressed,
+    autoRecovered: recovered,
     ordersEvaluated: orders.length,
   });
 

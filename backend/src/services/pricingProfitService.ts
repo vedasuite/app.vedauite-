@@ -6,6 +6,7 @@ import { derivePricingEngineViewState } from "./pricingEngineStateService";
 import { getPricingRecommendations, simulatePricingChange } from "./pricingService";
 import { getProfitOpportunities } from "./profitService";
 import { getCurrentSubscription } from "./subscriptionService";
+import { classifyPricingEvidence, directionalHint } from "./pricingEvidenceCalc";
 import {
   deriveModuleReadiness,
   deriveSyncStatus,
@@ -715,11 +716,38 @@ export async function getPricingProfitOverview(shopDomain: string) {
         item.currentPrice,
         item.recommendedPrice
       );
-      const confidence = derivePricingConfidence({
-        approvalConfidence: item.approvalConfidence,
+      // What this specific recommendation is actually based on. Decides what
+      // may honestly be shown; see services/pricingEvidenceCalc.ts for why the
+      // underlying formula cannot support an exact target on its own.
+      //
+      // salesVelocityObserved is read ONLY from stored data. The engine's
+      // `?? 8` fallback is deliberately NOT consulted here: an assumed velocity
+      // is not evidence, and it must never license a monetary projection.
+      // demandScore is the stored, observed demand signal for this product and
+      // is null when nothing was measured. It is the only real velocity
+      // evidence available here; the engine's `?? 8` fallback is not consulted.
+      const salesVelocityObserved =
+        typeof item.demandScore === "number" && Number.isFinite(item.demandScore);
+      const evidence = classifyPricingEvidence({
         competitorReady,
+        competitorAveragePrice: null,
+        // Store-wide competitor readiness is not enough: this product must
+        // actually have a competitor match.
+        hasProductCompetitorSignal:
+          competitorReady && item.competitorPressure !== "not_available",
         profitReady,
+        salesVelocityObserved,
+        isCatalogExample: exampleCatalogProduct,
       });
+      const evidenceBacked = evidence.basis !== "insufficient_evidence";
+
+      const confidence = evidenceBacked
+        ? derivePricingConfidence({
+            approvalConfidence: item.approvalConfidence,
+            competitorReady,
+            profitReady,
+          })
+        : evidence.label;
       const inputsUsed = [
         "store baseline",
         item.demandTrend !== "insufficient history" ? "demand posture" : null,
@@ -728,51 +756,56 @@ export async function getPricingProfitOverview(shopDomain: string) {
           : null,
         fraudDependencyStatus === "ready" ? "return pressure" : null,
       ].filter((value): value is string => value !== null);
-      const expectedImpact =
-        exampleCatalogProduct
-          ? "Example recommendation based on the current catalog - review before applying."
-          : item.expectedProfitGain != null && item.expectedProfitGain > 0
-          ? projectedGainStatus === "available"
-            ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
-            : `Baseline estimated gain of $${Math.round(item.expectedProfitGain)}`
-          : `Expected margin change of ${item.expectedMarginDelta.toFixed(1)}%`;
+      // A monetary projection requires OBSERVED velocity. expectedProfitGain is
+      // computed as delta x salesVelocity x 6, so with an assumed velocity the
+      // figure is fiction and must not be shown.
+      const expectedImpact = !evidence.showProjectedGain
+        ? directionalHint(item.currentPrice, item.recommendedPrice)
+        : item.expectedProfitGain != null && item.expectedProfitGain > 0
+        ? projectedGainStatus === "available"
+          ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
+          : `Baseline estimated gain of $${Math.round(item.expectedProfitGain)}`
+        : `Expected margin change of ${item.expectedMarginDelta.toFixed(1)}%`;
 
       return {
         id: item.id,
         rank: index + 1,
         productHandle: item.productHandle,
         currentPrice: item.currentPrice,
-        recommendedPrice: item.recommendedPrice,
-        recommendationType: actionLabel,
+        // NULL when nothing product-specific supports a figure. An exact target
+        // to two decimal places reads as a finding; without evidence there is
+        // no finding, only arithmetic on a store-wide slider.
+        recommendedPrice: evidence.showExactTarget ? item.recommendedPrice : null,
+        recommendationType: evidence.showExactTarget ? actionLabel : "Needs more data",
         expectedImpact,
         confidence,
-        confidenceScore: item.approvalConfidence,
-        dataBasis: exampleCatalogProduct
-          ? "Baseline recommendation based on current catalog"
-          : competitorReady
-          ? "competitor-informed"
-          : "Baseline estimate - review before applying",
-        why:
-          exampleCatalogProduct
-            ? "This recommendation is generated from the current catalog and available store activity."
-            : item.demandSignals[0] ??
-          "Recommendation is based on synced pricing rows and current merchant pricing settings.",
-        support:
-          exampleCatalogProduct
-            ? "Review the product, margin, and merchant strategy before applying any price change."
-            : item.demandSignals[1] ??
-          "Baseline estimate - review before applying in Shopify.",
+        confidenceScore: evidenceBacked ? item.approvalConfidence : 0,
+        // Honest provenance. Never claims AI for deterministic arithmetic.
+        evidenceBasis: evidence.basis,
+        dataBasis: evidence.label,
+        missingInputs: evidence.missingInputs,
+        whatWouldHelp: evidence.whatWouldHelp,
+        why: evidenceBacked
+          ? item.demandSignals[0] ??
+            "Recommendation is based on synced pricing rows and current merchant pricing settings."
+          : "VedaSuite calculated a direction from your store-wide pricing settings, but has no data specific to this product yet.",
+        support: evidenceBacked
+          ? item.demandSignals[1] ?? "Review before applying in Shopify."
+          : evidence.whatWouldHelp,
         inputsUsed,
-        merchantActionNote:
-          item.autoApprovalCandidate
-            ? "Ready for merchant review."
-            : exampleCatalogProduct
-            ? "Baseline recommendation - review before applying in Shopify."
-            : "Baseline estimate - review before applying in Shopify.",
+        merchantActionNote: !evidenceBacked
+          ? "Not actionable yet - more data needed before a price is suggested."
+          : item.autoApprovalCandidate
+          ? "Ready for merchant review."
+          : "Review before applying in Shopify.",
       };
     })
     .sort((a, b) => b.confidenceScore - a.confidenceScore)
     .slice(0, 8);
+  /** Recommendations with real product-specific evidence behind them. */
+  const actionableRecommendationCount = prioritizedRecommendations.filter(
+    (r) => r.evidenceBasis !== "insufficient_evidence"
+  ).length;
   const diagnosticSummary = [
     {
       title: "Demand posture",
@@ -867,7 +900,12 @@ export async function getPricingProfitOverview(shopDomain: string) {
       competitorDependency: competitorReady ? "ready" : "missing",
       profitModelStatus: profitReady ? "ready" : canUseFullProfitEngine ? "partial" : "missing",
       recommendationCount,
-      prioritizedRecommendationCount: recommendationCount,
+      // "Recommendations ready" must mean ACTIONABLE. Counting every priced
+      // product implied 42 ready recommendations while none had product-
+      // specific evidence and Profit opportunities read 0.
+      prioritizedRecommendationCount: actionableRecommendationCount,
+      /** Rows that exist but cannot yet justify a price. Surfaced, not hidden. */
+      needsMoreDataCount: prioritizedRecommendations.length - actionableRecommendationCount,
       projectedGainStatus,
       projectedGainValue,
       responseMode,

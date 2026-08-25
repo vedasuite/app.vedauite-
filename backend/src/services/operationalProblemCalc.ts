@@ -362,14 +362,44 @@ export function detectSyncHealth(input: {
     );
   const webhooksFailed = input.lastWebhookRegistrationStatus === "FAILED";
 
+  const stale = daysSinceSuccess !== null && daysSinceSuccess > t.staleSyncDays;
+  const streaking = failureStreak >= t.failureStreak;
+
+  // ---------------------------------------------------------------------
+  // EVIDENCE PRECEDENCE
+  //
+  // These signals are not equal, and treating them as equal produced a
+  // critical "VedaSuite is not receiving reliable Shopify data" alert on a
+  // store whose sync had just completed successfully.
+  //
+  //   1. Live sync outcome   — STRONGEST. A sync that succeeded recently is
+  //                            direct proof the connection authenticated and
+  //                            returned data.
+  //   2. lastConnectionStatus— set when Shopify actually rejected a call.
+  //   3. webhook registration— a real registration outcome.
+  //   4. accessTokenExpiresAt— WEAKEST. A prediction, not an observation. This
+  //                            app uses expiring offline tokens WITH a refresh
+  //                            token (tokenAcquisitionMode "offline_expiring"),
+  //                            so an approaching expiry is routine and handled
+  //                            automatically, not a fault.
+  //
+  // Token metadata may therefore never, on its own, raise a critical alert or
+  // contradict a sync that demonstrably just worked.
+  // ---------------------------------------------------------------------
   const tokenDaysLeft = input.accessTokenExpiresAtIso
     ? Math.floor(-daysBetween(input.nowIso, input.accessTokenExpiresAtIso))
     : null;
-  const tokenExpiringSoon =
+  const tokenExpired = tokenDaysLeft !== null && tokenDaysLeft < 0;
+  const tokenNearExpiry =
     tokenDaysLeft !== null && tokenDaysLeft >= 0 && tokenDaysLeft <= t.tokenExpiryWarningDays;
 
-  const stale = daysSinceSuccess !== null && daysSinceSuccess > t.staleSyncDays;
-  const streaking = failureStreak >= t.failureStreak;
+  // Direct, current proof the connection works. Deliberately time-bounded by
+  // the same staleness threshold, so an OLD success can never mask a genuine
+  // break: once the last success is stale, this is false again.
+  const connectionProvenWorking = !stale && daysSinceSuccess !== null && !connectionBroken;
+
+  // Token metadata only speaks when we have no live proof to the contrary.
+  const tokenConcern = (tokenExpired || tokenNearExpiry) && !connectionProvenWorking;
 
   // New-store protection: with NO sync history at all there is nothing to
   // degrade. A store that has never synced is an onboarding state, not a fault.
@@ -379,22 +409,33 @@ export function detectSyncHealth(input: {
   // the lookback window as never-synced, and silently swallow a genuinely stale
   // store — the exact case this detector exists to catch.
   const neverSynced = jobs.length === 0 && !lastSuccessIso;
-  if (neverSynced && !connectionBroken && !webhooksFailed && !tokenExpiringSoon) {
+  if (neverSynced && !connectionBroken && !webhooksFailed && !tokenConcern) {
     return null;
   }
-  if (!streaking && !stale && !connectionBroken && !webhooksFailed && !tokenExpiringSoon) {
+  if (!streaking && !stale && !connectionBroken && !webhooksFailed && !tokenConcern) {
     return null;
   }
 
   const problems: string[] = [];
   if (connectionBroken) problems.push("the Shopify connection needs reauthorisation");
-  if (tokenExpiringSoon) problems.push(`the access token expires in ${tokenDaysLeft} day(s)`);
   if (streaking) problems.push(`${failureStreak} consecutive sync failures`);
   if (stale) problems.push(`no successful sync for ${daysSinceSuccess} days`);
   if (webhooksFailed) problems.push("webhook registration failed");
+  if (tokenConcern) {
+    problems.push(
+      tokenExpired
+        ? `the stored access token expired ${Math.abs(tokenDaysLeft as number)} day(s) ago and no sync has succeeded since`
+        : `the access token expires in ${tokenDaysLeft} day(s) and no recent sync confirms the connection`
+    );
+  }
 
-  const severity: Urgency =
-    connectionBroken || tokenExpiringSoon ? "critical" : streaking ? "high" : "medium";
+  // Only an observed failure can be critical. Token metadata is a prediction,
+  // so it caps at medium however close the expiry is.
+  const severity: Urgency = connectionBroken
+    ? "critical"
+    : streaking
+    ? "high"
+    : "medium";
 
   return {
     detector: "sync_health_degraded",
