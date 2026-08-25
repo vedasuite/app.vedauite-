@@ -289,7 +289,7 @@ async function handleSyncHealth(req: Request, res: Response) {
       rawCounts:
         "Persisted raw Shopify records currently stored in VedaSuite.",
       processedCounts:
-        "Derived engine output rows currently stored for dashboard and module readiness.",
+        "Derived engine output rows currently stored for Store Overview and workspace readiness.",
     },
     rawCounts: {
       products: operational.counts.products,

@@ -145,14 +145,46 @@ export const PERIOD_LABEL: Record<ImpactPeriod, string> = {
   monthly_estimate: "monthly estimate",
 };
 
+/**
+ * The five merchant-facing intelligence families.
+ *
+ * VedaSuite has SEVEN internal insight modules but presents FIVE workspaces:
+ * fraud, trust and return_abuse are all ways money leaves through a customer,
+ * and pricing and profit are two halves of product economics. Coverage rows
+ * used to be labelled with the internal module names — "Fraud", "Competitor",
+ * "Pricing" — which put the old product vocabulary back in front of the
+ * merchant on the very page that is meant to summarise the new one.
+ *
+ * The KEYS are internal identifiers and are deliberately unchanged; they key
+ * entitlements, the capability map and every stored finding. Only what the
+ * merchant reads is mapped here.
+ */
+export const MODULE_FAMILY: Record<InsightModule, string> = {
+  fraud: "Customer Loss",
+  trust: "Customer Loss",
+  return_abuse: "Customer Loss",
+  competitor: "Market Signals",
+  pricing: "Pricing & Product Profit",
+  profit: "Pricing & Product Profit",
+  operational: "Store Health",
+};
+
+/**
+ * Row label for a single module.
+ *
+ * Leads with the family, then names the evidence that module contributes —
+ * three Customer Loss rows all reading "Customer Loss" would be worse than the
+ * old labels, not better, because a merchant could not tell which one is short
+ * of data.
+ */
 export const MODULE_LABEL: Record<InsightModule, string> = {
-  fraud: "Fraud",
-  trust: "Shopper trust",
-  return_abuse: "Return abuse",
-  competitor: "Competitor",
-  pricing: "Pricing",
-  profit: "Profit",
-  operational: "Store health",
+  fraud: "Customer Loss — order risk",
+  trust: "Customer Loss — shopper trust",
+  return_abuse: "Customer Loss — returns",
+  competitor: "Market Signals",
+  pricing: "Pricing & Product Profit — pricing",
+  profit: "Pricing & Product Profit — product economics",
+  operational: "Store Health",
 };
 
 export function impactRangeText(fi: FinancialImpact): string {

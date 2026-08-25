@@ -91,11 +91,11 @@ publicRouter.get("/legal/terms", (_req, res) => {
         <h1>Terms of Service</h1>
         <p class="meta">Last updated: 2026-03-24</p>
         <div class="card">
-          <p>VedaSuite AI is a Shopify app that provides merchant decision-support tooling for fraud intelligence, competitor analysis, pricing guidance, shopper trust scoring, and profit optimization.</p>
+          <p>VedaSuite AI is a Shopify app that provides merchant decision-support tooling across four areas: customer loss (refunds, returns and order risk), market signals from competitor pages, product pricing and profit, and store health. Fraud detection, competitor monitoring and pricing calculation are the underlying engines that supply the evidence.</p>
           <h2>Acceptance and Eligibility</h2>
           <p>By installing or using VedaSuite AI, the merchant agrees to these terms and represents that they have authority to bind the relevant business or store.</p>
           <h2>Merchant Responsibilities</h2>
-          <p>Merchants are responsible for reviewing AI-generated guidance before acting on it and for ensuring their own legal and commercial compliance.</p>
+          <p>VedaSuite&rsquo;s findings, prices and monetary figures are produced by deterministic calculation, not by an AI model. AI is used only to reword findings VedaSuite has already computed and verified, and never to detect, calculate or rank anything. Merchants remain responsible for reviewing all guidance before acting on it and for their own legal and commercial compliance.</p>
           <h2>Acceptable Use</h2>
           <p>Merchants may not use the service in a way that violates law, infringes rights, interferes with platform integrity, or attempts to reverse engineer, disrupt, or abuse the service.</p>
           <h2>Merchant Review Obligations</h2>

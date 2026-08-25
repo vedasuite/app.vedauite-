@@ -1210,3 +1210,44 @@ test("I7d: a failed findings read is never rendered as 'nothing is wrong'", () =
   assert.match(panel, /Findings could not be loaded/);
   assert.match(panel, /not a statement about your store/);
 });
+
+test("I6b: the lifecycle-blind endpoint feeds coverage and nothing else", () => {
+  // /api/insights/dashboard recomputes on every read and has no lifecycle. It
+  // is still used, deliberately, for ONE thing: how many rows VedaSuite
+  // analysed. That makes no claim about problems, money, confidence or status,
+  // so it cannot contradict a finding.
+  //
+  // This asserts the containment structurally: if a future change starts
+  // rendering data.opportunities, data.criticalAttention, data.revenueLeak or
+  // data.executiveSummary again, a second store-level narrative is back and
+  // this fails.
+  const fs = require("node:fs");
+  const FRONTEND = path.resolve(__dirname, "../../frontend/src");
+
+  for (const rel of [
+    "modules/Dashboard/components/InsightsDashboardSections.tsx",
+    "modules/Dashboard/components/ModuleInsights.tsx",
+  ]) {
+    const src = fs
+      .readFileSync(path.resolve(FRONTEND, rel), "utf8")
+      .split(/\r?\n/)
+      .filter((line) => {
+        const t = line.trim();
+        return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+      })
+      .join("\n");
+
+    for (const forbidden of [
+      "executiveSummary",
+      "opportunities",
+      "criticalAttention",
+      "revenueLeak",
+    ]) {
+      assert.doesNotMatch(
+        src,
+        new RegExp(`\b(?:data|coverageData)\??\.${forbidden}\b`),
+        `${rel} must not render ${forbidden} from the lifecycle-blind endpoint`
+      );
+    }
+  }
+});

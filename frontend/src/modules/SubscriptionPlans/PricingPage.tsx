@@ -133,15 +133,15 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   STARTER: {
     planName: "STARTER",
     priceLabel: "$19/month",
-    summary: "Fraud & Return Protection for small stores.",
+    summary: "One focused workspace for small stores.",
     featureBullets: [
       "Refund abuse detection",
       "Customer risk scoring",
-      "Basic order intelligence",
+      "Order-level risk evidence",
       "Manual competitor tracking",
     ],
     includedFeatureBullets: [
-      "Choose Fraud & Return Protection",
+      "Choose Customer Loss",
       "Or choose Market Signals",
     ],
     idealFor: "Small stores that want one focused workflow first.",
@@ -149,20 +149,20 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   GROWTH: {
     planName: "GROWTH",
     priceLabel: "$49/month",
-    summary: "Advanced competitor and pricing intelligence.",
+    summary: "Market signals and pricing, with deeper customer loss analysis.",
     featureBullets: [
       "Pricing recommendations (limited — full Product Profit is Pro-only)",
       "Automated competitor monitoring",
       "Product match detection",
       "Pricing change alerts",
-      "Enhanced fraud analysis",
+      "Deeper customer loss analysis",
     ],
     includedFeatureBullets: [
-      "Trust & Abuse",
+      "Customer Loss",
       "Market Signals",
-      "Pricing & Profit (limited)",
+      "Pricing & Product Profit (limited)",
     ],
-    idealFor: "Stores that want competitor, pricing, and risk insights together.",
+    idealFor: "Stores that want market, pricing and customer loss findings together.",
     recommended: true,
   },
   PRO: {
@@ -177,9 +177,9 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
       "Priority processing",
     ],
     includedFeatureBullets: [
-      "Trust & Abuse",
+      "Customer Loss",
       "Market Signals",
-      "Pricing & Profit (complete)",
+      "Pricing & Product Profit (complete)",
       "Advanced Pro features",
     ],
     idealFor: "Stores that need pricing, risk, competitor, and profit insights in one app.",

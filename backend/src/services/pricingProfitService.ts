@@ -41,17 +41,44 @@ function deriveRecommendationAction(currentPrice: number, recommendedPrice: numb
   return "Needs review";
 }
 
+/**
+ * The merchant-facing confidence on a pricing card.
+ *
+ * ONE CARD, ONE VERDICT.
+ *
+ * This used to be a second, independent confidence vocabulary
+ * ("Baseline estimate" / "Medium" / "High") derived from `approvalConfidence`
+ * plus its own readiness flags, sitting on the same card as the evidence label
+ * from classifyPricingEvidence. The two used overlapping but different inputs,
+ * so they could disagree in front of the merchant: a product with observed cost
+ * and observed velocity but no competitor match rendered as "Profit-informed"
+ * and "Baseline estimate" at the same time — one badge saying the recommendation
+ * rests on real margin data, the other saying it rests on nothing in particular.
+ *
+ * Confidence is now DERIVED FROM the same evidence classification the rest of
+ * the card uses, so the two can no longer contradict each other. The numeric
+ * `approvalConfidence` only ever separates high from medium WITHIN an
+ * evidence-backed basis; it can never promote a recommendation past what its
+ * evidence supports.
+ */
 function derivePricingConfidence(args: {
   approvalConfidence: number;
-  competitorReady: boolean;
-  profitReady: boolean;
+  evidenceBasis: string;
 }) {
-  if (!args.competitorReady || !args.profitReady) {
-    return "Baseline estimate";
+  // Competitor-informed means a matched competitor price, but no observed
+  // margin behind it. That is real evidence and worth stating — it is simply
+  // not the strongest kind, so it never reads as "High".
+  if (args.evidenceBasis === "competitor_informed") {
+    return "Market-informed";
   }
-  if (args.approvalConfidence >= 70) return "High";
-  if (args.approvalConfidence >= 52) return "Medium";
-  return "Baseline estimate";
+
+  if (args.evidenceBasis === "profit_informed") {
+    return args.approvalConfidence >= 70 ? "High" : "Medium";
+  }
+
+  // Anything else has no product-specific evidence; the evidence label itself
+  // is the honest answer and the caller uses it directly.
+  return "Not enough evidence";
 }
 
 async function safelyResolve<T>(work: Promise<T>, fallback: T) {
@@ -744,8 +771,7 @@ export async function getPricingProfitOverview(shopDomain: string) {
       const confidence = evidenceBacked
         ? derivePricingConfidence({
             approvalConfidence: item.approvalConfidence,
-            competitorReady,
-            profitReady,
+            evidenceBasis: evidence.basis,
           })
         : evidence.label;
       const inputsUsed = [
@@ -759,12 +785,22 @@ export async function getPricingProfitOverview(shopDomain: string) {
       // A monetary projection requires OBSERVED velocity. expectedProfitGain is
       // computed as delta x salesVelocity x 6, so with an assumed velocity the
       // figure is fiction and must not be shown.
+      //
+      // ONE WORDING FOR ONE EVIDENCE STATE. This previously chose between
+      // "Projected monthly gain" and "Baseline estimated gain" using
+      // `projectedGainStatus`, which is a STORE-level flag (does the store's
+      // top opportunity have a gain?) applied to a PER-ITEM figure. So an item
+      // with observed cost and observed velocity — everything the gate above
+      // requires — could still be hedged as a "baseline estimate" because some
+      // other product elsewhere in the catalog had none. The hedge described
+      // the store, not the number beside it.
+      //
+      // `showProjectedGain` is the gate and is unchanged: it is still the only
+      // thing that decides whether a monetary figure may appear at all.
       const expectedImpact = !evidence.showProjectedGain
         ? directionalHint(item.currentPrice, item.recommendedPrice)
         : item.expectedProfitGain != null && item.expectedProfitGain > 0
-        ? projectedGainStatus === "available"
-          ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
-          : `Baseline estimated gain of $${Math.round(item.expectedProfitGain)}`
+        ? `Projected monthly gain of $${Math.round(item.expectedProfitGain)}`
         : `Expected margin change of ${item.expectedMarginDelta.toFixed(1)}%`;
 
       return {

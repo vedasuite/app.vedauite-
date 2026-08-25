@@ -17,7 +17,7 @@ function deriveAutomationPosture(expectedProfitGain: number, expectedMarginDelta
   if (expectedProfitGain >= 100) {
     return "Merchant review recommended";
   }
-  return "Baseline estimate only";
+  return "Not enough evidence for a monetary case";
 }
 
 export async function getPricingRecommendations(shopDomain: string) {
@@ -43,7 +43,7 @@ export async function getPricingRecommendations(shopDomain: string) {
     const demandSignals = Array.isArray(rationale.demandSignals)
       ? rationale.demandSignals
       : [
-          "This recommendation is currently a baseline estimate built from synced catalog pricing and merchant pricing settings.",
+          "This recommendation is built from synced catalog pricing and your pricing settings only - no product cost or observed sales volume is behind it.",
           "Product-level demand history is still limited, so margin impact should be reviewed manually.",
           "Use merchant approval before publishing price changes to Shopify.",
         ];

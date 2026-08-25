@@ -858,7 +858,7 @@ export function DashboardPage() {
         setError(
           nextError instanceof Error
             ? nextError.message
-            : "Unable to load the dashboard."
+            : "Unable to load Store Overview."
         );
         setLoading(false);
       });
@@ -1032,7 +1032,7 @@ export function DashboardPage() {
             },
             lastRefreshedAt: dashboardLastRefreshedAt,
           },
-        summary: "Refresh failed. Retry the sync to update dashboard signals.",
+        summary: "Refresh failed. Retry the sync to update Store Overview.",
       });
     } finally {
       setSyncing(false);
@@ -1119,11 +1119,11 @@ export function DashboardPage() {
   );
   const currentRefreshSummary =
     syncing
-      ? "Refreshing dashboard data and checking for updated metrics."
+      ? "Refreshing Store Overview and checking for updated findings."
       : refreshResult?.summary ??
     (dashboardLastRefreshedAt
       ? `Refreshed at ${formatRelativeTimestamp(dashboardLastRefreshedAt)}.`
-      : "Refresh the dashboard to pull the latest Shopify data.");
+      : "Refresh Store Overview to pull the latest Shopify data.");
 
   const syncHealthLabel =
     dashboardSyncHealth?.status
@@ -1146,7 +1146,7 @@ export function DashboardPage() {
       <Page title="Store Overview" subtitle="Loading store metrics and findings.">
         <Card>
           <InlineStack align="center">
-            <Spinner accessibilityLabel="Loading dashboard" size="large" />
+            <Spinner accessibilityLabel="Loading Store Overview" size="large" />
           </InlineStack>
         </Card>
       </Page>
@@ -1199,7 +1199,7 @@ export function DashboardPage() {
 
         {error ? (
           <Layout.Section>
-            <Banner title="Dashboard action failed" tone="critical">
+            <Banner title="Store Overview action failed" tone="critical">
               <p>{error}</p>
             </Banner>
           </Layout.Section>
@@ -1207,7 +1207,7 @@ export function DashboardPage() {
 
         {onboarding && !onboarding.canAccessDashboard ? (
           <Layout.Section>
-            <Banner title="Dashboard available after onboarding" tone="info">
+            <Banner title="Store Overview available after onboarding" tone="info">
               <BlockStack gap="200">
                 <p>
                   VedaSuite is still preparing this store. The view below stays simple until connection, billing, and the first workflow are ready.
@@ -1268,7 +1268,7 @@ export function DashboardPage() {
               title={
                 dashboardSyncHealth?.title ??
                 metrics.summaryTitle ??
-                "Dashboard insights are still settling"
+                "Store Overview is still settling"
               }
               tone={toneForReadiness(dashboardSyncHealth?.status ?? metrics.dataState)}
             >
@@ -1382,7 +1382,7 @@ export function DashboardPage() {
                       </List.Item>
                       <List.Item>
                         {refreshResult.visibleDataChanged
-                          ? "New dashboard insights are ready."
+                          ? "New findings are ready."
                           : "Everything looks healthy right now."}
                       </List.Item>
                     </List>

@@ -272,7 +272,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "EMPTY_STORE_DATA",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
       failureReason: null,
-      reason: "More store activity is needed before insights appear.",
+      reason: "Your Shopify store synced successfully but contains no orders, products or customers yet, so there is nothing to analyse.",
     };
   }
 
@@ -283,7 +283,7 @@ export function deriveModuleReadiness(input: {
       readinessState: "SYNC_COMPLETED_PROCESSING_PENDING",
       lastUpdatedAt: input.lastUpdatedAt?.toISOString() ?? null,
       failureReason: null,
-      reason: "More store activity is needed before this workflow has enough insight.",
+      reason: "Store data synced, but not enough of it has been processed into evidence yet for this workspace to report a finding.",
     };
   }
 

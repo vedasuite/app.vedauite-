@@ -205,7 +205,7 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
 
   if (!dashboard) {
     logEvent("warn", "app_state.dashboard_missing", { shop: shopDomain });
-    throw new Error("Store dashboard state is unavailable.");
+    throw new Error("Store Overview state is unavailable.");
   }
 
   const install = deriveInstallState(health);

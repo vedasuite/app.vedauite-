@@ -57,7 +57,7 @@ type Overview = {
 
 type QueueAction = "allow" | "flag" | "block" | "manual_review";
 
-function createEmptyOverview(readinessState = "SYNC_REQUIRED", reason = "Run the first live sync to populate trust and abuse outputs."): Overview {
+function createEmptyOverview(readinessState = "SYNC_REQUIRED", reason = "Run the first live sync so VedaSuite can analyse orders, refunds and customers."): Overview {
   return {
     subscription: { featureAccess: { supportCopilot: false, evidencePackExport: false } },
     readiness: { readinessState, reason, processingState: "NOT_STARTED", lastUpdatedAt: null },
@@ -180,7 +180,7 @@ export function TrustAbusePage() {
         return;
       }
       const message =
-        err instanceof Error ? err.message : "VedaSuite could not load persisted trust and abuse outputs.";
+        err instanceof Error ? err.message : "VedaSuite could not load this store’s customer loss analysis.";
       setOverview(createEmptyOverview("FAILED", message));
       setSyncIssue(true);
       if (showToast) setToast(message);
@@ -217,8 +217,8 @@ export function TrustAbusePage() {
     () =>
       actionQueue.length === 0
         ? [
-            "No urgent fraud reviews are open right now.",
-            "Use the evidence section below to monitor return abuse, network overlap, and chargeback pressure.",
+            "No orders are currently waiting for your review.",
+            "The evidence below covers return abuse, repeat-customer overlap and chargeback pressure as they accumulate.",
           ]
         : [
             `${overview.summary.manualReviewCount} orders currently need manual review.`,
@@ -255,7 +255,7 @@ export function TrustAbusePage() {
       { label: "Low score band", value: overview.scoreBands.low },
       { label: "Medium score band", value: overview.scoreBands.medium },
       { label: "High score band", value: overview.scoreBands.high },
-      { label: "Shared fraud network", value: overview.summary.sharedFraudNetworkEnabled ? "Ready" : "Informational" },
+      { label: "Repeat-customer network", value: overview.summary.sharedFraudNetworkEnabled ? "Ready" : "Informational" },
     ],
     [overview.scoreBands, overview.summary.sharedFraudNetworkEnabled]
   );
@@ -309,7 +309,7 @@ export function TrustAbusePage() {
 
   if (!allowed || planLocked) {
     return (
-      <Page title="Customer Loss" subtitle="Refund abuse, risky customers, and order-risk review in one operational workspace.">
+      <Page title="Customer Loss" subtitle="Where money leaves through refunds, returns, chargebacks and repeat customer behaviour - with the evidence behind each one.">
         <Layout>
           <Layout.Section>
             <Banner title="Upgrade required: Starter, Growth, or Pro" tone="info">
@@ -321,9 +321,9 @@ export function TrustAbusePage() {
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">What this workflow includes</Text>
                 <List type="bullet">
-                  <List.Item>Fraud review queue and order-level guidance</List.Item>
-                  <List.Item>Return abuse and wardrobing evidence</List.Item>
-                  <List.Item>Chargeback pressure and shared-network checks</List.Item>
+                  <List.Item>Order review queue with the risk evidence behind each one</List.Item>
+                  <List.Item>Return abuse and wardrobing patterns</List.Item>
+                  <List.Item>Chargeback pressure and repeat-customer network checks</List.Item>
                   <List.Item>Policy actions, support guidance, and evidence packs</List.Item>
                 </List>
                 <Button variant="primary" onClick={() => navigateEmbedded("/app/billing")}>Manage subscription plans</Button>
@@ -414,8 +414,13 @@ export function TrustAbusePage() {
                   <Badge tone="attention">{actionQueue.length > 0 ? `${actionQueue.length} open` : "Queue clear"}</Badge>
                 </InlineStack>
                 {actionQueue.length === 0 ? (
-                  <Banner title="No urgent fraud reviews are open" tone="success">
-                    <p>No high-risk orders detected right now.</p>
+                  <Banner title="No orders need your review" tone="success">
+                    <p>
+                      VedaSuite checked your synced orders for refund, return and
+                      risk signals and found none currently needing a decision.
+                      Repeat loss patterns, when they build up, appear in the open
+                      findings above.
+                    </p>
                   </Banner>
                 ) : (
                   <BlockStack gap="200">
@@ -471,7 +476,7 @@ export function TrustAbusePage() {
                 <Text as="p" tone="subdued">Focus on the small set of policy actions VedaSuite considers most useful right now.</Text>
               </BlockStack>
               {topPolicyActions.length === 0 ? (
-                <EmptyState text="Policy recommendations will appear after enough trust and abuse signals are synced." />
+                <EmptyState text="No policy recommendations yet. VedaSuite suggests a policy change only once refund and return behaviour repeats across enough customers to show a pattern worth writing a rule for." />
               ) : (
                 <InlineGrid columns={{ xs: 1, md: 2, lg: 3 }} gap="300">
                   {topPolicyActions.map((action) => (
@@ -516,7 +521,7 @@ export function TrustAbusePage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Return abuse profiles</Text>
-                          {overview.returnAbuseSignals.length === 0 ? <EmptyState text="Return abuse indicators will appear after enough refund behavior is collected." /> : overview.returnAbuseSignals.map((signal) => (
+                          {overview.returnAbuseSignals.length === 0 ? <EmptyState text="No return abuse profiles. VedaSuite reviewed each customer’s refunded orders and found none whose refund share and repeat count both clear the evidence bar. Missing: more refunded order history per customer." /> : overview.returnAbuseSignals.map((signal) => (
                             <div key={signal.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
@@ -532,7 +537,7 @@ export function TrustAbusePage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Wardrobing patterns</Text>
-                          {overview.wardrobingSignals.length === 0 ? <EmptyState text="Wardrobing indicators will appear after enough return behavior is collected." /> : overview.wardrobingSignals.map((signal) => (
+                          {overview.wardrobingSignals.length === 0 ? <EmptyState text="No wardrobing patterns. This needs repeated buy-then-return behaviour on the same customer over time; a small number of returns cannot distinguish wardrobing from ordinary dissatisfaction." /> : overview.wardrobingSignals.map((signal) => (
                             <div key={signal.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
@@ -554,7 +559,7 @@ export function TrustAbusePage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Shared-network matches</Text>
-                          {overview.networkMatches.length === 0 ? <EmptyState text="Shared-network matches will appear after more order-risk data is available." /> : overview.networkMatches.map((match) => (
+                          {overview.networkMatches.length === 0 ? <EmptyState text="No repeat-customer network matches. VedaSuite compares order-risk signals across customers to spot the same actor behind several accounts, which requires several risk-flagged orders before any overlap is meaningful." /> : overview.networkMatches.map((match) => (
                             <div key={match.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
@@ -571,7 +576,7 @@ export function TrustAbusePage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Chargeback pressure</Text>
-                          {overview.chargebackCandidates.length === 0 ? <EmptyState text="Chargeback pressure candidates will appear when order-risk and post-purchase signals overlap." /> : overview.chargebackCandidates.map((candidate) => (
+                          {overview.chargebackCandidates.length === 0 ? <EmptyState text="No chargeback pressure candidates. Shopify does not send VedaSuite chargeback records, so this is inferred only where an order’s risk signals and its post-purchase behaviour overlap - and no order currently does both." /> : overview.chargebackCandidates.map((candidate) => (
                             <div key={candidate.id} className="vs-action-card">
                               <BlockStack gap="100">
                                 <InlineStack align="space-between" blockAlign="center">
@@ -591,7 +596,7 @@ export function TrustAbusePage() {
                     <Card>
                       <BlockStack gap="200">
                         <Text as="h3" variant="headingMd">Customer behavior timeline</Text>
-                        {overview.behaviorTimeline.length === 0 ? <EmptyState text="Customer behavior events will appear here after enough order and refund history is available." /> : overview.behaviorTimeline.map((item) => (
+                        {overview.behaviorTimeline.length === 0 ? <EmptyState text="No customer behaviour events recorded yet. This timeline fills as orders, refunds and trust scores are computed from your synced Shopify history." /> : overview.behaviorTimeline.map((item) => (
                           <div key={item.id} className="vs-action-card">
                             <InlineStack align="space-between" blockAlign="start" gap="300">
                               <BlockStack gap="100">
@@ -623,7 +628,7 @@ export function TrustAbusePage() {
                       <Card>
                         <BlockStack gap="200">
                           <Text as="h3" variant="headingMd">Evidence templates</Text>
-                          {(overview.evidencePack.templates ?? []).length === 0 ? <EmptyState text="Evidence templates will appear when export-ready review items exist." /> : (overview.evidencePack.templates ?? []).map((item) => (
+                          {(overview.evidencePack.templates ?? []).length === 0 ? <EmptyState text="No evidence templates yet. A template is generated per reviewable item, so one appears as soon as there is an order or customer with evidence worth exporting." /> : (overview.evidencePack.templates ?? []).map((item) => (
                             <div key={item.title} className="vs-action-card">
                               <BlockStack gap="100">
                                 <Text as="p" variant="headingSm">{item.title}</Text>
@@ -654,7 +659,7 @@ export function TrustAbusePage() {
                   <p>{overview.summary.automationReadiness}</p>
                 </Banner>
                 <BlockStack gap="200">
-                  {(overview.automationRules ?? []).length === 0 ? <EmptyState text="Automation rules will populate once enough repeat trust patterns exist." /> : overview.automationRules.map((rule) => (
+                  {(overview.automationRules ?? []).length === 0 ? <EmptyState text="No automation rules yet. VedaSuite proposes a rule only once the same customer behaviour repeats often enough that a rule would act on evidence rather than on a single case." /> : overview.automationRules.map((rule) => (
                     <div key={rule.id} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="start" gap="300">
                         <BlockStack gap="100">
@@ -682,7 +687,7 @@ export function TrustAbusePage() {
                   ))}
                 </InlineGrid>
                 <BlockStack gap="200">
-                  {overview.trustTierSummary.length === 0 ? <EmptyState text="Trust tiers will populate after enough shopper history has been synced." /> : overview.trustTierSummary.map((tier) => (
+                  {overview.trustTierSummary.length === 0 ? <EmptyState text="No trust tiers yet. A shopper is only placed in a tier once they have order or refund activity behind them - VedaSuite does not assign a tier to a customer it has never seen buy or return." /> : overview.trustTierSummary.map((tier) => (
                     <div key={tier.tier} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="start" gap="300">
                         <BlockStack gap="100">
@@ -714,7 +719,7 @@ export function TrustAbusePage() {
                   <div className="vs-signal-stat"><Text as="p" variant="bodySm" tone="subdued">Guidance</Text><Text as="p" variant="headingMd">{overview.refundOutcomeSimulator?.recoveryRate ?? "Syncing"}</Text></div>
                 </InlineGrid>
                 <BlockStack gap="200">
-                  {(overview.refundOutcomeSimulator?.options ?? []).length === 0 ? <EmptyState text="Simulation comparisons will appear once live trust signals are ready." /> : (overview.refundOutcomeSimulator?.options ?? []).map((option) => (
+                  {(overview.refundOutcomeSimulator?.options ?? []).length === 0 ? <EmptyState text="No refund outcome comparison yet. Comparing instant refund, store credit and exchange needs real trust and refund history to say which recovers more for your store." /> : (overview.refundOutcomeSimulator?.options ?? []).map((option) => (
                     <div key={option.channel} className="vs-action-card">
                       <BlockStack gap="100">
                         <InlineStack align="space-between" blockAlign="center">
@@ -741,7 +746,7 @@ export function TrustAbusePage() {
                 </List>
                 <Text as="p" variant="headingSm">Suggested cases</Text>
                 <BlockStack gap="200">
-                  {(overview.supportCopilot.cases ?? []).length === 0 ? <EmptyState text="Suggested support cases will appear once order risk and customer history overlap." /> : (overview.supportCopilot.cases ?? []).map((item) => (
+                  {(overview.supportCopilot.cases ?? []).length === 0 ? <EmptyState text="No suggested support cases. A case is suggested where a risky order meets a customer with refund history, so both sides need enough activity before one appears." /> : (overview.supportCopilot.cases ?? []).map((item) => (
                     <div key={item.title} className="vs-action-card">
                       <BlockStack gap="100">
                         <Text as="p" variant="headingSm">{item.title}</Text>

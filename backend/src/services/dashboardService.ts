@@ -60,7 +60,7 @@ function buildDashboardSummaryTitle(status: string) {
   }
 
   if (status === "EMPTY_STORE_DATA") {
-    return "More store activity is needed for insights";
+    return "No store activity to analyse yet";
   }
 
   if (status === "FAILED") {

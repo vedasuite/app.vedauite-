@@ -33,14 +33,14 @@ function DataCoverageCard({ coverage }: { coverage: DataCoverage[] }) {
             <Icon source={ChartVerticalIcon} tone="subdued" />
           </Box>
           <Text as="h2" variant="headingMd">
-            Data coverage &amp; sync status
+            What VedaSuite has analysed
           </Text>
         </InlineStack>
 
         {coverage.length === 0 ? (
           <Text as="p" tone="subdued">
-            Coverage details appear once the modules on your plan begin
-            receiving data.
+            VedaSuite has not received store data for any workspace on your
+            plan yet. Coverage appears after the first successful sync.
           </Text>
         ) : (
           <BlockStack gap="400">
@@ -48,11 +48,11 @@ function DataCoverageCard({ coverage }: { coverage: DataCoverage[] }) {
               total={coverage.length}
               filled={ready}
               tone={ready === coverage.length ? "success" : "warning"}
-              label="Modules with enough data"
+              label="Workspaces with enough data to report"
               caption={
                 ready === coverage.length
-                  ? "Every module on your plan has enough history to produce insights."
-                  : "Modules below the threshold need more synced history before they report."
+                  ? "Every workspace on your plan has enough history to produce findings."
+                  : "Workspaces below the threshold need more synced history before they can report a finding."
               }
             />
 
@@ -70,7 +70,7 @@ function DataCoverageCard({ coverage }: { coverage: DataCoverage[] }) {
                           <Icon source={severity.icon} tone={severity.iconTone} />
                         </Box>
                         <Text as="span" variant="bodyMd" fontWeight="medium">
-                          {entry.module === "all" ? "All modules" : MODULE_LABEL[entry.module]}
+                          {entry.module === "all" ? "All workspaces" : MODULE_LABEL[entry.module]}
                         </Text>
                         <Badge tone={entry.sufficient ? "success" : "attention"}>
                           {entry.sufficient ? "Ready" : "Needs more data"}
@@ -160,7 +160,7 @@ export function InsightsDashboardSections() {
   if ((unavailable || error) && !data) {
     return (
       <Layout.Section>
-        <Banner tone="warning" title="Data coverage is temporarily unavailable">
+        <Banner tone="warning" title="Coverage details are temporarily unavailable">
           <BlockStack gap="300">
             <p>
               {error ??

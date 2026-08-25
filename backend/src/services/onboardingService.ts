@@ -317,7 +317,7 @@ export async function getOnboardingState(shopDomain: string) {
         !dataSyncComplete
           ? "Finish syncing Shopify data first, then pick a feature below."
           : !selectedModule
-          ? "Pick any feature to start with — you can switch later from the dashboard."
+          ? "Pick any feature to start with — you can switch later from the navigation."
           : selectedModuleAvailable && selectedModuleReadiness?.ready
           ? `${moduleTitle(selectedModule)} is selected and ready to open.`
           : selectedModuleAvailable && selectedModuleReadiness
@@ -353,7 +353,7 @@ export async function getOnboardingState(shopDomain: string) {
       label: "Step 4: Confirm Plan",
       complete: planConfirmationComplete,
       description:
-        "Confirm the current plan so VedaSuite can unlock the right modules and take you to the dashboard.",
+        "Confirm the current plan so VedaSuite can unlock the right modules and take you to Store Overview.",
       helper: planConfirmationComplete
         ? `Plan confirmed: ${billing.planName}.`
         : readiness.billing.description,
@@ -423,7 +423,7 @@ export async function getOnboardingState(shopDomain: string) {
           }
       : {
           key: "OPEN_DASHBOARD" as const,
-          label: "Open Dashboard",
+          label: "Open Store Overview",
           route: "/app/dashboard",
         };
 
@@ -566,7 +566,7 @@ export async function getOnboardingState(shopDomain: string) {
       syncState.status === "EMPTY_STORE_DATA"
         ? "Shopify synced successfully, but the store currently has limited order or customer history."
         : !hasAnyProcessedData && hasAnyRawData
-        ? "VedaSuite is still turning synced store data into dashboard-ready outputs."
+        ? "VedaSuite is still turning synced store data into findings."
         : null,
     readiness,
   };
@@ -666,7 +666,7 @@ export async function confirmOnboardingPlan(shopDomain: string) {
 export async function markOnboardingComplete(shopDomain: string) {
   const onboarding = await getOnboardingState(shopDomain);
   if (!onboarding.canAccessDashboard) {
-    throw new HttpError(400, "Complete the onboarding flow before entering the dashboard.");
+    throw new HttpError(400, "Complete the onboarding flow before opening Store Overview.");
   }
 
   await prisma.store.update({

@@ -169,7 +169,7 @@ function createEmptyOverview(): CompetitorOverview {
       coverageStatus: "Add domains",
       title: "Add competitor websites to begin analysis",
       description:
-        "Add competitor websites to begin tracking pricing and product trends.",
+        "No competitor domains added. VedaSuite can only read prices from sites you name, so add at least one domain to begin.",
       confidenceExplanation:
         "Comparable products appear after VedaSuite finds strong live product evidence on the selected competitor websites.",
       actionPanel: {
@@ -213,7 +213,7 @@ function createEmptyResponseEngine(): CompetitorResponseEngine {
     summary: {
       responseMode: "No response needed",
       automationReadiness:
-        "Response recommendations appear after VedaSuite finds comparable competitor products.",
+        "No response guidance: no competitor product has been matched to yours, so there is nothing to respond to.",
     },
     responsePlans: [],
   };
@@ -277,7 +277,7 @@ function getPageSubtitle(state: CompetitorPrimaryState) {
     case "AWAITING_FIRST_RUN":
       return "Competitor websites are ready. Run the first analysis to begin.";
     case "NO_MATCHES":
-      return "Competitor analysis completed. No matching products were identified yet.";
+      return "VedaSuite reached your competitor pages but could not match any of their products to yours. Matching needs comparable titles or handles on both sides.";
     case "LOW_CONFIDENCE":
       return "Possible product matches were found, but they need stronger evidence before they are shown as recommendations.";
     case "NO_CHANGES":
@@ -301,27 +301,27 @@ function getPrimaryActionLabel(state: CompetitorPrimaryState) {
 function getEmptyMessage(state: CompetitorPrimaryState, tab: "tracked" | "feed" | "strategy") {
   if (tab === "tracked") {
     if (state === "SETUP_INCOMPLETE") return "Add competitor websites to begin tracking pricing and product trends.";
-    if (state === "AWAITING_FIRST_RUN") return "Run the first analysis to build the tracked products table.";
+    if (state === "AWAITING_FIRST_RUN") return "Domains added, but never collected. Run an analysis so VedaSuite can fetch each competitor page and try to match it to your products.";
     if (state === "NO_MATCHES") return "Competitor analysis completed. No matching products were identified yet.";
-    if (state === "LOW_CONFIDENCE") return "Possible competitor pages were found, but more evidence is needed before they appear here.";
-    return "Tracked products will appear here after competitor data becomes available.";
+    if (state === "LOW_CONFIDENCE") return "Possible matches were found, but their match confidence is too low to compare prices against. A weak match produces a wrong gap, so they are held back rather than shown.";
+    return "No competitor rows collected yet. Each row needs a domain that VedaSuite could reach and read on its last attempt.";
   }
   if (tab === "feed") {
-    if (state === "NO_MATCHES") return "No competitor actions are available yet because no matching products were identified.";
-    if (state === "LOW_CONFIDENCE") return "No competitor actions are available yet because more evidence is needed.";
-    if (state === "NO_CHANGES") return "Competitor analysis is active. No price, stock, or promotion changes were found.";
-    return "The move feed will populate as competitor changes are detected.";
+    if (state === "NO_MATCHES") return "No actions yet: none of the collected competitor products matched anything in your catalog, so there is no price to compare.";
+    if (state === "LOW_CONFIDENCE") return "No actions yet: the matches found are below the confidence VedaSuite requires before it will state a price gap.";
+    if (state === "NO_CHANGES") return "Collection is working and matches are current. Nothing has changed on your competitors since the last successful check.";
+    return "No competitor changes recorded yet. This feed fills when a matched competitor price, stock state or promotion actually moves.";
   }
   if (state === "LOW_CONFIDENCE") {
-    return "Response recommendations appear after VedaSuite confirms stronger comparable matches.";
+    return "No response guidance: current matches are too low-confidence to base a pricing response on.";
   }
   if (state === "NO_MATCHES") {
     return "Response recommendations appear after VedaSuite finds comparable competitor products.";
   }
   if (state === "NO_CHANGES") {
-    return "Matched products are active, but no response action is needed right now.";
+    return "Matches are current and no competitor has moved, so no response is needed right now.";
   }
-  return "Response guidance will appear here when competitor pressure increases.";
+  return "No response guidance yet. It appears when a matched competitor is priced below you on evidence that is current.";
 }
 
 export function CompetitorPage() {

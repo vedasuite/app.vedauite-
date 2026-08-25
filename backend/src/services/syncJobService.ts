@@ -43,7 +43,7 @@ function buildSyncActivitySummary(params: {
     updatedInsightsCount: 0,
     errorsCount: 0,
     noChangeReasons: [
-      "no new fraud signals were triggered",
+      "no new order-risk signals were produced",
       competitorRows > 0
         ? "competitor analysis is managed separately"
         : "no competitor analysis ran during this update",
@@ -58,8 +58,8 @@ function buildSyncActivitySummary(params: {
             : "processed_no_changes",
         reason:
           (params.recomputeResult.fraudSignalsGenerated ?? 0) > 0
-            ? "Fraud checks ran and generated updated fraud signals."
-            : "Fraud checks ran, but no new fraud signals were triggered.",
+            ? "Customer loss analysis ran and produced new order-risk signals."
+            : "Customer loss analysis ran; no new order-risk signals were produced.",
       },
       competitor: {
         processed: false,

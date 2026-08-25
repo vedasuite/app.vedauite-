@@ -233,7 +233,7 @@ function buildSetupSummary(input: {
       ? { label: "Review billing", route: "/app/billing" }
       : input.selectedModuleState !== "ready"
       ? { label: "Choose workflow", route: "/app/onboarding" }
-      : { label: "Open dashboard", route: "/app/dashboard" };
+      : { label: "Open Store Overview", route: "/app/dashboard" };
 
   const allCoreModulesReady =
     input.fraud.ready && input.competitor.ready && input.pricing.ready;
@@ -475,7 +475,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     description: billing.merchantDescription,
     nextAction:
       billingState === "ready"
-        ? "Open dashboard"
+        ? "Open Store Overview"
         : billingState === "collecting_data"
         ? "Wait for Shopify confirmation"
         : "Open billing",
@@ -503,19 +503,19 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.fraud
         ? "Customer Loss is locked"
         : operational.counts.timelineEvents > 0
-        ? "Fraud protection enabled"
+        ? "Customer loss analysis active"
         : syncStatus.status === "SYNC_IN_PROGRESS" ||
           syncStatus.status === "SYNC_COMPLETED_PROCESSING_PENDING"
-        ? "Fraud protection is analyzing new orders"
-        : "Sync orders to enable fraud protection",
+        ? "Customer loss analysis is running"
+        : "Sync orders so refunds and returns can be analysed",
     description:
       !subscription.enabledModules.fraud
         ? "Upgrade the current plan to unlock Customer Loss."
       : operational.counts.timelineEvents > 0
-        ? "Risk checks and refund-abuse signals are available from recent store activity."
+        ? "Refund, return and order-risk signals are available from recent store activity."
       : syncStatus.status === "FAILED"
-        ? "Store data needs attention before fraud checks can finish."
-        : "More order and customer activity is needed before advanced fraud insights appear.",
+        ? "Store data needs attention before customer loss analysis can finish."
+        : "Not enough order and refund history yet to tell a repeated loss pattern from a one-off return.",
     nextAction:
       !subscription.enabledModules.fraud
         ? "Open billing"
@@ -622,8 +622,8 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
           ? "ready"
           : "missing",
     },
-    title: "Pricing insights",
-    description: "Pricing insights are based on available store activity.",
+    title: "Pricing & Product Profit",
+    description: "Pricing and margin recommendations are based on available store activity.",
   });
   const pricingViewState = derivePricingEngineViewState({
     syncStatus: syncStatus.status,
@@ -659,7 +659,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         ? "Pricing & Product Profit needs attention"
         : pricingViewState.status === "syncing"
         ? "Pricing analysis is updating"
-        : "More store activity is needed before pricing analysis is ready",
+        : "Not enough product and order data for pricing analysis",
     description: pricingViewState.description,
     nextAction:
       !subscription.enabledModules.pricing

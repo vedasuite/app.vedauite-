@@ -422,12 +422,12 @@ export async function getDashboardInsights(
       module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5,
       note: returnAbuseTruncated
         ? "Order volume exceeds the analysis bound for this period; return-abuse exposure not quantified."
-        : orderTotalCount < 5 ? "More order history needed." : undefined,
+        : orderTotalCount < 5 ? "Needs at least 5 synced orders before refund and return behaviour can be compared to a store baseline." : undefined,
     });
   if (allowedCaps.has("competitor"))
-    dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "Add competitor domains to enable pressure estimates." : undefined });
+    dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "No competitor rows collected. Add a competitor domain in Market Signals, then run a sync." : undefined });
   if (allowedCaps.has("pricing") || allowedCaps.has("profit"))
-    dataCoverage.push({ module: "pricing", rowsAvailable: priceHistoryCount + profitDataCount, lastSyncAt, sufficient: priceHistoryCount + profitDataCount > 0, note: store.profitData.every((p) => !p.productCost) ? "Add product cost to quantify margin." : undefined });
+    dataCoverage.push({ module: "pricing", rowsAvailable: priceHistoryCount + profitDataCount, lastSyncAt, sufficient: priceHistoryCount + profitDataCount > 0, note: store.profitData.every((p) => !p.productCost) ? "No product cost recorded. Shopify does not send cost to VedaSuite, so margin cannot be quantified until you supply it." : undefined });
 
   const executiveSummary = calc.buildExecutiveSummary({ nowIso, dataReady, opportunities, criticalAttention, revenueLeak });
 
