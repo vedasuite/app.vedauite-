@@ -5,14 +5,24 @@
 // holds a valid offline token for the installed store, so the operator only
 // ever clicks.
 //
-// SECURE BY DEFAULT — FOUR INDEPENDENT GUARDS
+// SECURE BY DEFAULT — FIVE INDEPENDENT GUARDS
 // -------------------------------------------
-// 1. STAGING_SEED_TOKEN unset  -> every route here returns 404. Production does
-//    not set it, so on production this console does not exist. This is the same
-//    pattern supportAdminRoutes already uses.
+// 0. PRODUCTION REFUSES UNCONDITIONALLY. Checked first, before the credential,
+//    and not overridable by any environment variable, header, query or body.
+//    An unidentifiable environment counts as production — it fails closed.
+//
+//    This exists because guard 3 does not do what it looks like it does: a real
+//    merchant's store IS a *.myshopify.com store and would pass it. Before this
+//    guard, the only thing between a live merchant and 64 fabricated orders was
+//    STAGING_SEED_TOKEN never being set on production — one variable, one
+//    mistake away.
+//
+// 1. STAGING_SEED_TOKEN unset  -> every route here returns 404. Same pattern
+//    supportAdminRoutes already uses.
 // 2. The token must match exactly, or 404 again. Never "unauthorized", so the
 //    console's existence is not discoverable by probing.
-// 3. The resolved shop must be a *.myshopify.com DEVELOPMENT store.
+// 3. The resolved shop must be a *.myshopify.com store. Necessary, but on its
+//    own insufficient — see guard 0.
 // 4. Seeding requires a typed confirmation phrase in the request body, so an
 //    accidental page load, a bookmark or a browser prefetch cannot create data.
 //
@@ -30,8 +40,10 @@
 import { type Request, type Response, Router } from "express";
 import { prisma } from "../db/prismaClient";
 import { logEvent } from "../services/observabilityService";
+import { env } from "../config/env";
 import {
   buildStagingSeedPlan,
+  isProductionRuntime,
   isSeedableShopDomain,
   STAGING_TEST_TAG,
   summariseStagingSeedPlan,
@@ -43,6 +55,18 @@ export const stagingSeedRouter = Router();
 const CONFIRM_PHRASE = "SEED STAGING";
 
 function authorize(req: Request, res: Response): boolean {
+  // GUARD 0 — the environment itself, checked before anything else and
+  // unconditional. Not overridable by any header, body, query or environment
+  // variable: on production this console does not exist, full stop, even if
+  // STAGING_SEED_TOKEN were set there by mistake.
+  //
+  // Deliberately first. The token check below is a credential, and credentials
+  // can be leaked, copied or set in the wrong place. This one cannot.
+  if (isProductionRuntime(env.shopifyAppUrl)) {
+    res.status(404).send("Not found");
+    return false;
+  }
+
   const expected = process.env.STAGING_SEED_TOKEN;
   if (!expected) {
     res.status(404).send("Not found");

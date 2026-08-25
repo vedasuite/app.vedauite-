@@ -166,11 +166,51 @@ export function summariseStagingSeedPlan(plan: StagingSeedOrder[]) {
 }
 
 /**
+ * Whether THIS DEPLOYMENT is production.
+ *
+ * WHY THIS IS THE PRIMARY GUARD, NOT THE THIRD ONE
+ * ------------------------------------------------
+ * The other guards protect against misuse. This one protects against a mistake
+ * nobody would notice: the shop-domain check below refuses anything that is not
+ * a *.myshopify.com store, but a REAL MERCHANT'S STORE IS a *.myshopify.com
+ * store. It would pass. So before this existed, the single thing standing
+ * between a live merchant and 64 fabricated orders was STAGING_SEED_TOKEN never
+ * being set on the production service — one environment variable, one mistake
+ * away.
+ *
+ * FAILS CLOSED. An absent, blank or unparseable SHOPIFY_APP_URL is treated as
+ * production. An environment we cannot identify is one we must not seed: the
+ * cost of being wrong in that direction is a wasted staging trip, and in the
+ * other direction it is fake orders in a merchant's real store.
+ *
+ * Matching the whole vedasuite.in zone rather than one exact host means a new
+ * production or customer-facing subdomain is covered the day it appears,
+ * without anyone remembering to update this list.
+ */
+export function isProductionRuntime(appUrl: string | null | undefined): boolean {
+  if (!appUrl || !appUrl.trim()) return true;
+
+  let host: string;
+  try {
+    host = new URL(appUrl.trim()).hostname.toLowerCase();
+  } catch {
+    return true;
+  }
+
+  if (!host) return true;
+  return host === "vedasuite.in" || host.endsWith(".vedasuite.in");
+}
+
+/**
  * Whether a shop domain may be seeded.
  *
  * Development stores only. A production storefront is never a valid target,
  * and the VedaSuite app domain is not a store at all — an operator pasting the
  * wrong value should hit a wall, not a confusing 404 from Shopify.
+ *
+ * NOTE: this does NOT distinguish a development store from a live merchant's
+ * store — both are *.myshopify.com. isProductionRuntime above is what makes
+ * that distinction, and it is why this check alone was never sufficient.
  */
 export function isSeedableShopDomain(shop: string | null | undefined): boolean {
   if (!shop) return false;

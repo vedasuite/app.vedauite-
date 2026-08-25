@@ -283,3 +283,166 @@ test("SAFETY: the plan has exactly one definition", () => {
   );
   assert.match(routerSrc, /from "\.\.\/services\/stagingSeedPlan"/);
 });
+
+// ===========================================================================
+// GUARD 0 — production refuses unconditionally
+// ===========================================================================
+
+test("SAFETY: production is identified, and an unknown environment counts as production", () => {
+  // Fails CLOSED. The cost of being wrong here is a wasted staging trip; the
+  // cost of being wrong the other way is fabricated orders in a real store.
+  for (const productionish of [
+    "https://app.vedasuite.in",
+    "https://app.vedasuite.in/",
+    "https://vedasuite.in",
+    "https://VEDASUITE.IN",
+    "https://api.vedasuite.in",
+    "https://anything.vedasuite.in/some/path",
+    // Unidentifiable: absent, blank, or not a URL at all.
+    "",
+    "   ",
+    null,
+    undefined,
+    "not-a-url",
+    "://broken",
+  ]) {
+    assert.equal(
+      seedPlan.isProductionRuntime(productionish),
+      true,
+      `${JSON.stringify(productionish)} must be treated as production`
+    );
+  }
+});
+
+test("staging is still correctly identified as NOT production", () => {
+  for (const staging of [
+    "https://vedasuite-staging.onrender.com",
+    "https://vedasuite-staging.onrender.com/",
+    "http://localhost:3000",
+    "https://some-preview.onrender.com",
+  ]) {
+    assert.equal(
+      seedPlan.isProductionRuntime(staging),
+      false,
+      `${staging} must remain seedable`
+    );
+  }
+});
+
+test("SAFETY: a lookalike domain does not slip past the production check", () => {
+  // Suffix matching must be on a dot boundary, or "notvedasuite.in" and
+  // "vedasuite.in.evil.com" would be judged wrongly in one direction or other.
+  assert.equal(seedPlan.isProductionRuntime("https://notvedasuite.in"), false);
+  assert.equal(seedPlan.isProductionRuntime("https://vedasuite.in.evil.com"), false);
+  assert.equal(seedPlan.isProductionRuntime("https://sub.vedasuite.in"), true);
+});
+
+test("REGRESSION: guard 0 runs BEFORE the credential check", () => {
+  // Order matters. A credential can be leaked, copied, or set on the wrong
+  // service; the environment cannot. If the token check came first, a token
+  // accidentally set in production would reach the seeding code.
+  const src = routerSrc;
+  const guardIndex = src.indexOf("isProductionRuntime(env.shopifyAppUrl)");
+  const tokenIndex = src.indexOf("const expected = process.env.STAGING_SEED_TOKEN");
+  assert.ok(guardIndex > 0, "the production guard must exist");
+  assert.ok(tokenIndex > 0, "the token guard must still exist");
+  assert.ok(
+    guardIndex < tokenIndex,
+    "the production guard must be evaluated before the token"
+  );
+});
+
+// ===========================================================================
+// GUARD 0, end to end over HTTP
+// ===========================================================================
+
+/**
+ * Drives the REAL router over a real HTTP server, varying ONLY the environment.
+ *
+ * Every other input is deliberately VALID — correct token, a genuine
+ * *.myshopify.com store, the exact confirmation phrase — so the only thing that
+ * can account for a 404 is the environment guard itself.
+ */
+async function probeConsole(appUrl) {
+  for (const key of Object.keys(require.cache)) {
+    if (key.includes(`${path.sep}dist${path.sep}`)) delete require.cache[key];
+  }
+  process.env.SHOPIFY_API_KEY = "k";
+  process.env.SHOPIFY_API_SECRET = "s";
+  process.env.DATABASE_URL = "postgresql://e:e@localhost:5432/e";
+  process.env.SHOPIFY_APP_URL = appUrl;
+  process.env.STAGING_SEED_TOKEN = "valid-token";
+
+  // Stubbed so the staging path can be observed without a live database, and
+  // so a 404 can never be mistaken for a connection failure.
+  const prismaPath = require.resolve(d("db/prismaClient.js"));
+  require.cache[prismaPath] = {
+    id: prismaPath,
+    filename: prismaPath,
+    loaded: true,
+    exports: {
+      prisma: {
+        store: {
+          findMany: async () => [{ shop: "veda-dev.myshopify.com", lastSyncAt: null }],
+        },
+      },
+    },
+  };
+
+  const express = require("express");
+  const { stagingSeedRouter } = require(d("routes/stagingSeedRoutes.js"));
+  const app = express();
+  app.use(express.json());
+  app.use("/staging-seed", stagingSeedRouter);
+
+  return new Promise((resolve) => {
+    const server = app.listen(0, async () => {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const body = JSON.stringify({
+        shop: "veda-dev.myshopify.com",
+        confirm: "SEED STAGING",
+        token: "valid-token",
+      });
+      const post = (p) =>
+        fetch(`${base}${p}?token=valid-token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+
+      const page = await fetch(`${base}/staging-seed/?token=valid-token`);
+      const run = await post("/staging-seed/run");
+      const state = await post("/staging-seed/state");
+      const result = { page: page.status, run: run.status, state: state.status };
+      server.close(() => resolve(result));
+    });
+  });
+}
+
+test("SAFETY: production refuses even with a VALID token and a VALID dev store", async () => {
+  // The exact scenario the audit flagged: STAGING_SEED_TOKEN set on production
+  // by mistake, pointed at a legitimate *.myshopify.com store. Before guard 0
+  // this would have seeded fabricated orders.
+  for (const productionUrl of ["https://app.vedasuite.in", "https://vedasuite.in"]) {
+    const r = await probeConsole(productionUrl);
+    assert.deepEqual(
+      r,
+      { page: 404, run: 404, state: 404 },
+      `${productionUrl} must refuse every route unconditionally`
+    );
+  }
+});
+
+test("SAFETY: an unidentifiable environment refuses too", async () => {
+  const r = await probeConsole("");
+  assert.deepEqual(r, { page: 404, run: 404, state: 404 });
+});
+
+test("staging remains fully usable — the guard changed nothing there", async () => {
+  const r = await probeConsole("https://vedasuite-staging.onrender.com");
+  assert.equal(r.page, 200, "the console must still render on staging");
+  assert.equal(r.state, 200, "and its read-only endpoint must still work");
+  // `run` reaches Shopify, which is unreachable here; what matters is that it
+  // was NOT refused by a guard.
+  assert.notEqual(r.run, 404, "staging must not be blocked");
+});
