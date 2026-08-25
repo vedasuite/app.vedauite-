@@ -134,6 +134,40 @@ async function shopifyRest(shop, token, method, resource, body) {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * Creates one order.
+ *
+ * A custom line item (title + price, no variant_id) is how Shopify allows an
+ * order without a product record — which matters because this app has no
+ * write_products scope. Setting `customer` by email associates or creates the
+ * shopper without needing write_customers.
+ *
+ * `created_at` is set explicitly so orders land inside the detector's 365-day
+ * observation window rather than all on today.
+ */
+async function createOrder(shop, token, item) {
+  return shopifyRest(shop, token, "POST", "orders.json", {
+    order: {
+      line_items: [
+        {
+          title: `VedaSuite test item (${item.label})`,
+          price: item.amount.toFixed(2),
+          quantity: 1,
+        },
+      ],
+      customer: customerFor(item.customerIndex),
+      financial_status: "paid",
+      created_at: item.createdAt,
+      tags: TEST_TAG,
+      // No email to the fake addresses, and no inventory side effects.
+      send_receipt: false,
+      send_fulfillment_receipt: false,
+      inventory_behaviour: "bypass",
+      test: true,
+    },
+  });
+}
+
 /** One customer's identity. Stable so re-running does not fan out new shoppers. */
 function customerFor(index) {
   return {
@@ -245,36 +279,41 @@ async function main() {
     return;
   }
 
+  // PREFLIGHT.
+  //
+  // Shopify has been moving the Admin API toward GraphQL, and which REST
+  // endpoints remain available varies by API version and by how the app was
+  // created. Rather than assume, this creates ONE order and checks the response
+  // shape before committing to the other 63 — so a wrong API version fails on
+  // order 1 with a readable message instead of leaving a store half-seeded.
+  console.log(`Preflight: creating one order on ${shop} ...`);
+  let preflight;
+  try {
+    preflight = await createOrder(shop, token, plan[0]);
+  } catch (error) {
+    console.error(`\n[BLOCKED] Shopify rejected the first order.\n  ${error.message}`);
+    console.error(
+      "\n  If this is a 404 or 'not found', REST order creation is unavailable for\n" +
+        `  API version ${API_VERSION}. Re-run with a supported version, e.g.\n` +
+        "    SHOPIFY_ADMIN_API_VERSION=2024-10 ... node scripts/seed-staging-test-data.js\n" +
+        "  If this is a 401/403, the token lacks write_orders."
+    );
+    process.exit(1);
+  }
+
+  if (!preflight?.order?.id) {
+    console.error("\n[BLOCKED] Shopify accepted the request but returned no order id.");
+    process.exit(1);
+  }
+  console.log(`Preflight OK (order ${preflight.order.name ?? preflight.order.id}).`);
+
   console.log(`Seeding ${shop} ...`);
   let created = 0;
   let refunded = 0;
 
-  for (const item of plan) {
-    const customer = customerFor(item.customerIndex);
-
-    // A custom line item (title + price, no variant_id) is how Shopify allows
-    // an order without a product record — which matters because this app has
-    // no write_products scope.
-    const order = await shopifyRest(shop, token, "POST", "orders.json", {
-      order: {
-        line_items: [
-          {
-            title: `VedaSuite test item (${item.label})`,
-            price: item.amount.toFixed(2),
-            quantity: 1,
-          },
-        ],
-        customer,
-        financial_status: "paid",
-        created_at: item.createdAt,
-        tags: TEST_TAG,
-        // Suppresses order confirmation email to the fake address.
-        send_receipt: false,
-        send_fulfillment_receipt: false,
-        inventory_behaviour: "bypass",
-        test: true,
-      },
-    });
+  for (const [index, item] of plan.entries()) {
+    // The preflight already created plan[0]; reuse it rather than duplicating.
+    const order = index === 0 ? preflight : await createOrder(shop, token, item);
 
     created += 1;
     const orderId = order?.order?.id;
