@@ -94,12 +94,15 @@ export async function getTrustAbuseOverview(shopDomain: string) {
               typeof metadata.customerEmail === "string"
                 ? maskIdentity(metadata.customerEmail, "Customer profile")
                 : "Customer profile",
+            // NULL rather than an invented 60. Showing a trust score of 60 for
+            // a shopper who has no recorded score is a fabricated claim, and
+            // the 60 + scoreImpact baseline is the same constant in disguise.
             trustScore:
               typeof metadata.score === "number"
                 ? metadata.score
                 : typeof event.scoreImpact === "number"
                 ? Math.max(0, Math.min(100, 60 + event.scoreImpact))
-                : 60,
+                : null,
             tier:
               typeof metadata.category === "string"
                 ? metadata.category
@@ -255,8 +258,12 @@ export async function getTrustAbuseOverview(shopDomain: string) {
       ? {
           title: `Coach support on ${behaviorTimeline[0].shopper}`,
           reason: behaviorTimeline[0].eventSummary,
+          // trustScore may now be null (unknown). An unknown score must not be
+          // silently treated as mid-range — say so instead.
           recommendedHandling:
-            behaviorTimeline[0].trustScore >= 80
+            behaviorTimeline[0].trustScore == null
+              ? "No trust score recorded for this shopper yet. Review the order history before making an exception."
+              : behaviorTimeline[0].trustScore >= 80
               ? "Use low-friction handling and preserve the trusted buyer experience."
               : behaviorTimeline[0].trustScore < 50
               ? "Move into manual review and request more context before exceptions."

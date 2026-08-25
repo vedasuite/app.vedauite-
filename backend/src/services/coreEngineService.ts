@@ -257,7 +257,13 @@ function baselinePriceRecommendation(args: {
       ? args.competitorAveragePrice - args.currentPrice
       : 0;
   const returnPenalty = (args.returnRate ?? 0) * args.currentPrice * 0.12;
-  const salesLift = Math.min(4, (args.salesVelocity ?? 8) / 6);
+  // No observed velocity means no velocity term at all. Substituting 8 added a
+  // constant ~1.33 to every recommended price for no measured reason, and that
+  // constant was visible in the merchant-facing target.
+  const salesLift =
+    args.salesVelocity != null && Number.isFinite(args.salesVelocity)
+      ? Math.min(4, args.salesVelocity / 6)
+      : 0;
   const biasLift = (args.pricingBias - 50) / 180;
   const recommendedPrice = roundMoney(
     Math.max(
@@ -481,77 +487,18 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
       store.profitData.find((row) => row.productHandle === productHandle) ?? null;
     const competitorRows = store.competitorData.filter((row) => row.productHandle === productHandle);
 
-    const currentPrice =
+    // A product with no real price of its own cannot be priced. The previous
+    // `?? 49` invented a base price out of nothing and then built an entire
+    // recommendation, margin delta and profit projection on top of it.
+    const observedCurrentPrice =
       latestPrice?.currentPrice ??
       latestProfit?.sellingPrice ??
-      roundMoney(
-        competitorRows.find((row) => row.price != null)?.price ?? 49
-      );
-    const competitorAveragePrice =
-      competitorRows.filter((row) => row.price != null).length > 0
-        ? roundMoney(
-            competitorRows
-              .filter((row) => row.price != null)
-              .reduce((sum, row) => sum + (row.price ?? 0), 0) /
-              competitorRows.filter((row) => row.price != null).length
-          )
-        : latestProfit?.competitorAveragePrice ?? null;
-
-    const recommendedPrice = baselinePriceRecommendation({
-      currentPrice,
-      pricingBias: store.pricingBias,
-      competitorAveragePrice,
-      returnRate: latestProfit?.returnRate ?? storeReturnRate,
-      salesVelocity: latestProfit?.salesVelocity ?? 8,
-    });
-    const expectedMarginDelta = roundMoney(((recommendedPrice - currentPrice) / currentPrice) * 100);
-    const expectedProfitGain = roundMoney(
-      Math.max(0, recommendedPrice - currentPrice) * (latestProfit?.salesVelocity ?? 8) * 6
-    );
-
-    if (!latestPrice || Math.abs(latestPrice.recommendedPrice - recommendedPrice) > 0.01) {
-      pricingCreates.push(
-        prisma.priceHistory.create({
-          data: {
-            storeId: store.id,
-            productHandle,
-            currentPrice,
-            recommendedPrice,
-            expectedMarginDelta,
-            expectedProfitGain,
-            rationaleJson: JSON.stringify({
-              source: "core_engine",
-              syncedAt: new Date().toISOString(),
-              fallbackUsed: competitorAveragePrice == null,
-              demandScore: clamp(
-                Math.round((latestProfit?.salesVelocity ?? 8) * 5 + (100 - store.profitGuardrail)),
-                25,
-                95
-              ),
-              demandTrend:
-                (latestProfit?.salesVelocity ?? 8) >= 14
-                  ? "strong"
-                  : (latestProfit?.salesVelocity ?? 8) >= 8
-                  ? "stable"
-                  : "softening",
-              demandSignals: [
-                competitorAveragePrice != null
-                  ? `Competitor average price is ${competitorAveragePrice.toFixed(2)}.`
-                  : "No competitor price data yet, so VedaSuite used a store-level baseline.",
-                `Pricing bias is ${store.pricingBias}/100.`,
-                `Return rate pressure applied at ${Math.round((latestProfit?.returnRate ?? storeReturnRate) * 100)}%.`,
-              ],
-              competitorPressure:
-                competitorAveragePrice != null && competitorAveragePrice < currentPrice
-                  ? "high"
-                  : competitorAveragePrice != null
-                  ? "medium"
-                  : "baseline_only",
-            }),
-          },
-        })
-      );
+      competitorRows.find((row) => row.price != null)?.price ??
+      null;
+    if (observedCurrentPrice == null) {
+      continue;
     }
+    const currentPrice = roundMoney(observedCurrentPrice);
 
     // PROVENANCE. Assumptions are still used for INTERNAL ranking, but they are
     // no longer persisted as if they were observations.
@@ -574,6 +521,94 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
 
     const productCost = observedProductCost ?? assumedProductCost;
     const salesVelocity = observedSalesVelocity ?? assumedSalesVelocity;
+    const competitorAveragePrice =
+      competitorRows.filter((row) => row.price != null).length > 0
+        ? roundMoney(
+            competitorRows
+              .filter((row) => row.price != null)
+              .reduce((sum, row) => sum + (row.price ?? 0), 0) /
+              competitorRows.filter((row) => row.price != null).length
+          )
+        : latestProfit?.competitorAveragePrice ?? null;
+
+    const recommendedPrice = baselinePriceRecommendation({
+      currentPrice,
+      pricingBias: store.pricingBias,
+      competitorAveragePrice,
+      returnRate: latestProfit?.returnRate ?? storeReturnRate,
+      // NULL when unobserved. baselinePriceRecommendation omits its velocity
+      // term entirely rather than substituting 8, so a displayed target is
+      // never partly an assumption.
+      salesVelocity: observedSalesVelocity,
+    });
+    const expectedMarginDelta = roundMoney(((recommendedPrice - currentPrice) / currentPrice) * 100);
+    // NULL unless velocity was observed. This figure is delta x velocity x 6;
+    // with an assumed velocity it is fiction, and it must not be persisted for
+    // a later reader to present as money.
+    const expectedProfitGain = velocityObserved
+      ? roundMoney(
+          Math.max(0, recommendedPrice - currentPrice) *
+            (observedSalesVelocity as number) *
+            6
+        )
+      : null;
+
+    if (!latestPrice || Math.abs(latestPrice.recommendedPrice - recommendedPrice) > 0.01) {
+      pricingCreates.push(
+        prisma.priceHistory.create({
+          data: {
+            storeId: store.id,
+            productHandle,
+            currentPrice,
+            recommendedPrice,
+            expectedMarginDelta,
+            expectedProfitGain,
+            rationaleJson: JSON.stringify({
+              source: "core_engine",
+              syncedAt: new Date().toISOString(),
+              fallbackUsed: competitorAveragePrice == null,
+              // demandScore is NULL when velocity was never observed.
+              //
+              // It used to be clamp(round((salesVelocity ?? 8) * 5 + ...), 25, 95),
+              // which was always non-null and always partly the assumption. Downstream
+              // code treats a non-null demandScore as evidence of observed demand, so
+              // that made an assumption look measured — the same laundering this
+              // programme exists to remove.
+              demandScore: velocityObserved
+                ? clamp(
+                    Math.round(
+                      (observedSalesVelocity as number) * 5 + (100 - store.profitGuardrail)
+                    ),
+                    25,
+                    95
+                  )
+                : null,
+              demandTrend: !velocityObserved
+                ? "insufficient history"
+                : (observedSalesVelocity as number) >= 14
+                ? "strong"
+                : (observedSalesVelocity as number) >= 8
+                ? "stable"
+                : "softening",
+              demandSignals: [
+                competitorAveragePrice != null
+                  ? `Competitor average price is ${competitorAveragePrice.toFixed(2)}.`
+                  : "No competitor price data yet, so VedaSuite used a store-level baseline.",
+                `Pricing bias is ${store.pricingBias}/100.`,
+                `Return rate pressure applied at ${Math.round((latestProfit?.returnRate ?? storeReturnRate) * 100)}%.`,
+              ],
+              competitorPressure:
+                competitorAveragePrice != null && competitorAveragePrice < currentPrice
+                  ? "high"
+                  : competitorAveragePrice != null
+                  ? "medium"
+                  : "baseline_only",
+            }),
+          },
+        })
+      );
+    }
+
     const optimalPrice = roundMoney(
       Math.max(
         currentPrice,

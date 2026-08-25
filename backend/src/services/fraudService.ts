@@ -385,7 +385,9 @@ export async function getFraudIntelligenceOverview(shopDomain: string) {
         totalRefunds: customer.totalRefunds,
         totalOrders: customer.totalOrders,
         likely,
-        confidence: Math.max(48, Math.min(95, score - 4 + reasons.length * 5)),
+        // Derived from the evidence actually present, with no floor. The previous
+          // Math.max(48, ...) reported at least 48% confidence even with no reasons.
+          confidence: reasons.length === 0 ? 0 : Math.max(0, Math.min(95, score - 4 + reasons.length * 5)),
         recommendedAction: likely
           ? "Tighten refund exceptions"
           : "Monitor repeat return behavior",

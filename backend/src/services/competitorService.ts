@@ -1764,7 +1764,9 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
                     : "in_stock",
                 source: "website_catalog",
                 adCopy: null,
-                confidenceScore: Math.max(62, Math.min(88, bestCatalogMatch.score)),
+                // The real match score, not a floor. A floor of 62 reported a weak match
+                  // as 62% confident, which is a merchant-facing claim built from a constant.
+                  confidenceScore: Math.max(0, Math.min(100, bestCatalogMatch.score)),
                 confidenceLabel:
                   bestCatalogMatch.score >= 72
                     ? ("high" as const)
@@ -1956,7 +1958,9 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
           Number(mover.promotionSignals > 0) +
           Number(mover.stockSignals > 0) +
           Number(mover.priceDelta !== 0),
-        confidence: Math.max(35, Math.min(80, pressureScore)),
+        // The real pressure score. The previous floor of 35 meant "no pressure"
+          // still surfaced as 35% confident.
+          confidence: Math.max(0, Math.min(100, pressureScore)),
         reasons: [
           mover.priceDelta !== 0
             ? `Observed price delta: ${mover.priceDelta >= 0 ? "+" : "-"}$${Math.abs(mover.priceDelta).toFixed(2)}`

@@ -75,7 +75,9 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       severity: highRiskOrder.fraudScore >= 71 ? "High" : "Medium",
       rationale: `Fraud score is ${highRiskOrder.fraudScore} with status ${highRiskOrder.status}.`,
       route: "/trust-abuse?focus=high-risk",
-      confidence: Math.max(52, Math.min(97, highRiskOrder.fraudScore)),
+      // The order's real fraud score. A floor of 52 invented confidence for a
+      // low-scoring order.
+      confidence: Math.max(0, Math.min(100, highRiskOrder.fraudScore)),
       recommendedAction:
         highRiskOrder.fraudScore >= 85 ? "Block or send to review" : "Manual review",
       explanationPoints: [
@@ -98,10 +100,12 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
       severity: riskyCustomer.creditScore < 50 ? "High" : "Medium",
       rationale: `Credit score is ${riskyCustomer.creditScore} with ${(riskyCustomer.refundRate * 100).toFixed(1)}% refund rate.`,
       route: "/trust-abuse?focus=timeline",
+      // No floor. The previous Math.max(48, ...) asserted 48% confidence for a
+      // shopper with a perfect record and no refunds.
       confidence: Math.max(
-        48,
+        0,
         Math.min(
-          94,
+          100,
           100 - riskyCustomer.creditScore + Math.round(riskyCustomer.refundRate * 35)
         )
       ),
@@ -131,7 +135,9 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
         ? `Promotion detected from ${competitorSignal.competitorName}.`
         : `Recent competitor movement detected for ${competitorSignal.productHandle}.`,
       route: "/competitor?focus=strategy",
-      confidence: competitorSignal.promotion ? 82 : 68,
+      // Presence of a promotion is a fact; 82 and 68 were invented percentages.
+      // Confidence is only asserted when a real price delta backs it.
+      confidence: competitorSignal.price != null ? 100 : 0,
       recommendedAction: competitorSignal.promotion
         ? "Run a competitor response play"
         : "Hold current pricing",
