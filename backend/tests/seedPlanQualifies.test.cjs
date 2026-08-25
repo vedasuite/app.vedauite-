@@ -228,9 +228,11 @@ test("SAFETY: creating data requires a typed confirmation, not just a page load"
   // An accidental visit, a bookmark or a browser prefetch must not seed.
   assert.match(routerSrc, /CONFIRM_PHRASE/);
   assert.match(routerSrc, /requireConfirm && req\.body\?\.confirm !== CONFIRM_PHRASE/);
-  // And the two data-creating endpoints must both demand it.
-  assert.match(routerSrc, /"\/preflight"[\s\S]{0,400}?resolveAction\(req, res, true\)/);
+  // The data-creating endpoint demands it...
   assert.match(routerSrc, /"\/run"[\s\S]{0,400}?resolveAction\(req, res, true\)/);
+  // ...and the read-only one correctly does not, so an operator can always
+  // check what exists without being able to create anything by accident.
+  assert.match(routerSrc, /"\/state"[\s\S]{0,400}?resolveAction\(req, res, false\)/);
 });
 
 test("SAFETY: the seed writes no findings and no VedaSuite database rows", () => {
@@ -246,16 +248,29 @@ test("SAFETY: the seed writes no findings and no VedaSuite database rows", () =>
 
   assert.doesNotMatch(code, /intelligenceFinding/i);
   assert.doesNotMatch(code, /prisma\./);
-  // It reaches Shopify through the app's own client, so it inherits the stored
-  // offline token and no operator ever handles a credential.
-  assert.match(code, /shopifyGraphQL/);
+  // It reaches Shopify through the app's OWN stored offline token, so no
+  // operator ever handles a credential. It deliberately uses a local client
+  // rather than the shared shopifyGraphQL, because that one discards response
+  // headers and Retry-After would be unreachable through it — and because it is
+  // the production sync path, which this work must not touch.
+  assert.match(code, /resolveOfflineInstallation/);
+  assert.match(code, /X-Shopify-Access-Token/);
+  assert.doesNotMatch(code, /from "\.\/shopifyAdminService"/);
 });
 
-test("SAFETY: every seeded order carries the removable test tag", () => {
+test("SAFETY: every seeded order carries the removable group tag AND an identity tag", () => {
   assert.equal(seedPlan.STAGING_TEST_TAG, "vedasuite-test-data");
-  assert.match(serviceSrc, /tags: \[STAGING_TEST_TAG\]/);
-  // And the count query filters on that same tag, so cleanup is verifiable.
+  // TWO tags. The group tag makes the whole seed findable and removable; the
+  // identity tag is what makes a re-run resumable and duplicate-proof.
+  assert.match(serviceSrc, /tags: \[STAGING_TEST_TAG, seedLabelTag\(order\.label\)\]/);
+  // And the readback filters on the group tag, so cleanup is verifiable.
   assert.match(serviceSrc, /tag:'\$\{STAGING_TEST_TAG\}'/);
+
+  // The identity tag must round-trip, or resume silently recreates everything.
+  const tag = seedPlan.seedLabelTag("baseline-7");
+  assert.equal(seedPlan.labelFromSeedTag(tag), "baseline-7");
+  assert.equal(seedPlan.labelFromSeedTag(seedPlan.STAGING_TEST_TAG), null);
+  assert.equal(seedPlan.labelFromSeedTag("unrelated-tag"), null);
 });
 
 test("SAFETY: the plan has exactly one definition", () => {

@@ -24,6 +24,29 @@
 /** Every order this plan creates carries this tag, so it is findable and removable. */
 export const STAGING_TEST_TAG = "vedasuite-test-data";
 
+/**
+ * Prefix for the PER-ORDER identity tag.
+ *
+ * The group tag above answers "did this tool create it". This one answers
+ * "which planned order is it", and that is what makes a seed run resumable and
+ * duplicate-proof: identity lives in Shopify rather than in the process that
+ * created it, so it survives a throttle, a crash, a redeploy, a closed browser
+ * tab and any number of repeated clicks.
+ */
+export const STAGING_SEED_LABEL_PREFIX = "vedasuite-seed-";
+
+/** The identity tag for one planned order. */
+export function seedLabelTag(label: string): string {
+  return `${STAGING_SEED_LABEL_PREFIX}${label}`;
+}
+
+/** Recovers a plan label from a tag, or null if it is not an identity tag. */
+export function labelFromSeedTag(tag: string): string | null {
+  if (!tag.startsWith(STAGING_SEED_LABEL_PREFIX)) return null;
+  const label = tag.slice(STAGING_SEED_LABEL_PREFIX.length);
+  return label.length > 0 ? label : null;
+}
+
 export const STAGING_SEED_TARGET = {
   baselineOrders: 60,
   baselineRefunds: 3,
