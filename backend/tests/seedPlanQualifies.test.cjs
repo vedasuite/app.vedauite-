@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const fs = require("node:fs");
 
 process.env.SHOPIFY_API_KEY ||= "test-key";
 process.env.SHOPIFY_API_SECRET ||= "test-secret";
@@ -10,15 +11,15 @@ process.env.DATABASE_URL ||= "postgresql://example:example@localhost:5432/exampl
 /**
  * THE STAGING SEED PLAN, PROVEN BEFORE IT IS USED.
  *
- * scripts/seed-staging-test-data.js creates orders in a Shopify development
- * store so the lifecycle smoke test has something to act on. But a fixture
- * nobody has verified is just a hope: if the plan does not actually clear the
- * documented thresholds, the operator runs it, syncs, sees an empty Action
- * Center, and cannot tell whether the FIXTURE is wrong or the PRODUCT is.
+ * The staging console creates orders in a Shopify development store so the
+ * lifecycle smoke test has something real to act on. But a fixture nobody has
+ * verified is just a hope: if the plan does not actually clear the documented
+ * thresholds, the operator seeds, syncs, sees an empty Action Center, and
+ * cannot tell whether the FIXTURE is wrong or the PRODUCT is.
  *
- * So this takes the script's real plan — the same exported function the CLI
- * uses, not a copy — maps it to the rows the sync would persist, and runs the
- * real detector over it.
+ * So this takes the real exported plan — the same function the console uses,
+ * not a copy — maps it to the rows the sync would persist, and runs the real
+ * detector over it.
  *
  * If a threshold in customerLossCalc.ts is ever raised past this fixture, this
  * test fails and the correct response is a BIGGER FIXTURE. Never a smaller
@@ -28,52 +29,52 @@ process.env.DATABASE_URL ||= "postgresql://example:example@localhost:5432/exampl
 const d = (p) => path.resolve(__dirname, `../dist/${p}`);
 const resetModule = (p) => delete require.cache[require.resolve(p)];
 
-const seed = require(path.resolve(__dirname, "../scripts/seed-staging-test-data.js"));
+const seedPlan = require(d("services/stagingSeedPlan.js"));
 const { CUSTOMER_LOSS } = require(d("services/customerLossCalc.js"));
 
 const STORE = "store-1";
+/** Fixed clock so the plan is identical on every run. */
+const NOW_MS = Date.UTC(2026, 7, 25);
 
 /**
- * Maps the seed plan to the rows the sync would write.
+ * Maps the plan to the rows the sync would write.
  *
- * Deliberately mirrors shopifyAdminService's own mapping: `refunded` comes from
- * displayFinancialStatus being REFUNDED, and `status` is "paid", which is one
- * of ELIGIBLE_ORDER_STATUSES.
+ * Mirrors shopifyAdminService's own mapping: `refunded` comes from
+ * displayFinancialStatus being REFUNDED, and `status` is "paid", one of
+ * ELIGIBLE_ORDER_STATUSES.
  */
 function rowsFromPlan() {
-  const plan = seed.buildPlan();
+  const plan = seedPlan.buildStagingSeedPlan(NOW_MS);
   const orders = plan.map((item, i) => ({
     id: `order-${i}`,
     storeId: STORE,
-    customerId: `cust-${item.customerIndex}`,
+    customerId: `cust-${item.shopperIndex}`,
     status: "paid",
-    refunded: item.refund,
+    refunded: item.refunded,
     totalAmount: item.amount,
     currency: "USD",
     fraudRiskLevel: "Low",
-    createdAt: new Date(item.createdAt),
+    createdAt: new Date(item.processedAt),
   }));
 
-  const customerIndexes = [...new Set(plan.map((p) => p.customerIndex))];
-  const customers = customerIndexes.map((index) => ({
+  const customers = [...new Set(plan.map((p) => p.shopperIndex))].map((index) => ({
     id: `cust-${index}`,
     storeId: STORE,
     fraudSignalsCount: 0,
-    updatedAt: new Date(),
+    updatedAt: new Date(NOW_MS),
   }));
 
   return { orders, customers, plan };
 }
 
 function buildWorld({ orders, customers }) {
-  const PATHS = [
+  [
     d("config/env.js"),
     d("db/prismaClient.js"),
     d("services/observabilityService.js"),
     d("services/intelligenceFindingService.js"),
     d("services/intelligenceDetectorService.js"),
-  ];
-  PATHS.forEach((p) => {
+  ].forEach((p) => {
     try {
       resetModule(p);
     } catch {
@@ -101,7 +102,7 @@ function buildWorld({ orders, customers }) {
     findMany: async ({ where }) => customers.filter((c) => c.storeId === where.storeId),
   };
   prisma.syncJob = { findMany: async () => [] };
-  prisma.store = { findUnique: async () => ({ id: STORE, lastSyncAt: new Date() }) };
+  prisma.store = { findUnique: async () => ({ id: STORE, lastSyncAt: new Date(NOW_MS) }) };
   prisma.productSnapshot = { findMany: async () => [] };
   prisma.profitOptimizationData = { findMany: async () => [] };
   prisma.priceHistory = { findMany: async () => [] };
@@ -135,58 +136,44 @@ test("the seed plan clears the store-baseline threshold with room to spare", () 
   assert.ok(orders.length >= 50, "the brief asked for at least 50 orders");
 });
 
-test("the seed plan contains a customer that qualifies on merit", () => {
-  const { plan } = rowsFromPlan();
-
-  const byCustomer = new Map();
-  for (const item of plan) {
-    const e = byCustomer.get(item.customerIndex) ?? { orders: 0, refunds: 0, value: 0, refunded: 0 };
-    e.orders += 1;
-    e.value += item.amount;
-    if (item.refund) {
-      e.refunds += 1;
-      e.refunded += item.amount;
-    }
-    byCustomer.set(item.customerIndex, e);
-  }
-
-  const qualifying = [...byCustomer.values()].filter(
-    (e) =>
-      e.orders >= CUSTOMER_LOSS.minEligibleOrders &&
-      e.refunds >= CUSTOMER_LOSS.minRefundedOrders &&
-      e.refunded / e.value >= CUSTOMER_LOSS.minObservedLossRatio
+test("the seed plan contains a shopper that qualifies on merit", () => {
+  const summary = seedPlan.summariseStagingSeedPlan(
+    seedPlan.buildStagingSeedPlan(NOW_MS)
   );
 
-  assert.equal(qualifying.length, 1, "exactly one shopper should qualify — a clean signal");
-  const [target] = qualifying;
-  assert.ok(target.orders >= 3, "at least 3 orders, as the brief requires");
-  assert.ok(target.refunds >= 2, "at least 2 refunds, as the brief requires");
+  assert.equal(summary.qualifyingShoppers, 1, "exactly one shopper — a clean signal");
+  const target = summary.shoppers.find((s) => s.shouldQualify);
+  assert.ok(target.orders >= CUSTOMER_LOSS.minEligibleOrders, "at least 3 orders");
+  assert.ok(target.refunds >= CUSTOMER_LOSS.minRefundedOrders, "at least 2 refunds");
+  assert.ok(target.refundedShare >= CUSTOMER_LOSS.minObservedLossRatio);
 
-  // Multiple customers, so the baseline is a distribution and not one shopper.
-  assert.ok(byCustomer.size >= 5, "the store baseline must span several customers");
+  // Several shoppers, so the baseline is a distribution and not one customer.
+  assert.ok(summary.shoppers.length >= 5, "the baseline must span several shoppers");
 
-  // The STORE's own refund rate must stay low, otherwise the lossy customer is
-  // not standing out against a healthy baseline but against a broken one.
-  const storeRefundRate = plan.filter((p) => p.refund).length / plan.length;
-  assert.ok(storeRefundRate < 0.2, `store refund rate ${storeRefundRate} is too high to be a baseline`);
+  // The STORE's own refund rate must stay low, otherwise the lossy shopper is
+  // standing out against a broken baseline rather than a healthy one.
+  assert.ok(
+    summary.storeRefundRate < 0.2,
+    `store refund rate ${summary.storeRefundRate} is too high to be a baseline`
+  );
 });
 
 test("PROOF: running the real detector over the seed plan produces a Customer Loss finding", async () => {
-  // The whole point. No threshold is relaxed, no evidence is fabricated: this
-  // is the shipped detector, over the rows the shipped sync would write, from
-  // the plan the shipped script creates.
+  // The whole point. No threshold is relaxed and no evidence is fabricated:
+  // this is the shipped detector, over the rows the shipped sync would write,
+  // from the plan the shipped console creates.
   const { orders, customers } = rowsFromPlan();
   const w = buildWorld({ orders, customers });
 
   const insights = await w.detectors.detectCustomerLoss({
     storeId: STORE,
-    nowIso: new Date().toISOString(),
+    nowIso: new Date(NOW_MS).toISOString(),
   });
 
   assert.ok(
     insights.length > 0,
-    "the seed plan must produce at least one Customer Loss insight, or the " +
-      "staging smoke test cannot possibly pass"
+    "the seed plan must produce a Customer Loss insight, or the staging smoke " +
+      "test cannot possibly pass"
   );
   assert.ok(w.rows.length > 0, "and it must be persisted as a finding");
   for (const row of w.rows) {
@@ -196,26 +183,60 @@ test("PROOF: running the real detector over the seed plan produces a Customer Lo
   }
 });
 
-test("SAFETY: the seed script cannot run without its explicit gate", () => {
-  const fs = require("node:fs");
-  const src = fs.readFileSync(
-    path.resolve(__dirname, "../scripts/seed-staging-test-data.js"),
-    "utf8"
-  );
-  // A data-creating script that can execute as a side effect of a build is a
-  // production incident waiting for the wrong environment variable.
-  assert.match(src, /SEED_CONFIRM !== REQUIRED_CONFIRMATION/);
-  assert.match(src, /myshopify\\\.com/, "it must refuse any non-development-store domain");
-  assert.match(src, /require\.main === module/, "importing it must not seed anything");
+// ===========================================================================
+// The console's guards
+// ===========================================================================
+
+const routerSrc = fs.readFileSync(
+  path.resolve(__dirname, "../src/routes/stagingSeedRoutes.ts"),
+  "utf8"
+);
+const serviceSrc = fs.readFileSync(
+  path.resolve(__dirname, "../src/services/stagingSeedService.ts"),
+  "utf8"
+);
+
+test("SAFETY: only development stores can be seeded", () => {
+  for (const bad of [
+    "app.vedasuite.in",
+    "vedasuite.in",
+    "example.com",
+    "shop.myshopify.com.evil.net",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(
+      seedPlan.isSeedableShopDomain(bad),
+      false,
+      `${bad} must not be seedable`
+    );
+  }
+  assert.equal(seedPlan.isSeedableShopDomain("veda-dev.myshopify.com"), true);
 });
 
-test("SAFETY: the seed script writes no findings and no VedaSuite database rows", () => {
-  const fs = require("node:fs");
-  // CODE only. The header documents that the script creates no
-  // IntelligenceFinding rows, and a whole-file regex cannot tell that promise
-  // apart from a violation of it.
-  const code = fs
-    .readFileSync(path.resolve(__dirname, "../scripts/seed-staging-test-data.js"), "utf8")
+test("SAFETY: the console does not exist unless STAGING_SEED_TOKEN is set", () => {
+  // Secure by default: production never sets it, so on production every route
+  // here 404s. Same pattern supportAdminRoutes already uses.
+  assert.match(routerSrc, /const expected = process\.env\.STAGING_SEED_TOKEN;/);
+  assert.match(routerSrc, /if \(!expected\) \{[\s\S]{0,120}?404/);
+  // Wrong token is also 404, never 401 — the console must not be discoverable.
+  assert.match(routerSrc, /provided !== expected[\s\S]{0,120}?404/);
+});
+
+test("SAFETY: creating data requires a typed confirmation, not just a page load", () => {
+  // An accidental visit, a bookmark or a browser prefetch must not seed.
+  assert.match(routerSrc, /CONFIRM_PHRASE/);
+  assert.match(routerSrc, /requireConfirm && req\.body\?\.confirm !== CONFIRM_PHRASE/);
+  // And the two data-creating endpoints must both demand it.
+  assert.match(routerSrc, /"\/preflight"[\s\S]{0,400}?resolveAction\(req, res, true\)/);
+  assert.match(routerSrc, /"\/run"[\s\S]{0,400}?resolveAction\(req, res, true\)/);
+});
+
+test("SAFETY: the seed writes no findings and no VedaSuite database rows", () => {
+  // Findings must come from the real sync -> detection pipeline. A seeder that
+  // inserts them directly would make the whole smoke test prove nothing.
+  const code = serviceSrc
     .split(/\r?\n/)
     .filter((line) => {
       const t = line.trim();
@@ -223,12 +244,27 @@ test("SAFETY: the seed script writes no findings and no VedaSuite database rows"
     })
     .join("\n");
 
-  // Findings must be produced by the real sync -> detection pipeline. A script
-  // that inserts them directly would make the smoke test prove nothing.
   assert.doesNotMatch(code, /intelligenceFinding/i);
-  assert.doesNotMatch(code, /prisma/i);
-  assert.doesNotMatch(code, /DATABASE_URL/);
-  // And it must reach Shopify's Admin API only — the shop domain is
-  // interpolated, so the literal host never appears in the source.
-  assert.match(code, /https:\/\/\$\{shop\}\/admin\/api\//);
+  assert.doesNotMatch(code, /prisma\./);
+  // It reaches Shopify through the app's own client, so it inherits the stored
+  // offline token and no operator ever handles a credential.
+  assert.match(code, /shopifyGraphQL/);
+});
+
+test("SAFETY: every seeded order carries the removable test tag", () => {
+  assert.equal(seedPlan.STAGING_TEST_TAG, "vedasuite-test-data");
+  assert.match(serviceSrc, /tags: \[STAGING_TEST_TAG\]/);
+  // And the count query filters on that same tag, so cleanup is verifiable.
+  assert.match(serviceSrc, /tag:'\$\{STAGING_TEST_TAG\}'/);
+});
+
+test("SAFETY: the plan has exactly one definition", () => {
+  // The CLI script that used to duplicate this was removed precisely so the
+  // console and the fixture cannot drift apart.
+  assert.equal(
+    fs.existsSync(path.resolve(__dirname, "../scripts/seed-staging-test-data.js")),
+    false,
+    "the duplicate CLI seeder must not come back"
+  );
+  assert.match(routerSrc, /from "\.\.\/services\/stagingSeedPlan"/);
 });
