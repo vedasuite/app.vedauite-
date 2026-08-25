@@ -781,7 +781,7 @@ export function PricingPage() {
                     : management.billing.lifecycle === "pending_approval"
                     ? "warning"
                     : management.billing.lifecycle === "cancelled"
-                    ? "attention"
+                    ? "warning"
                     : management.billing.lifecycle === "frozen" ||
                       management.billing.lifecycle === "unknown_error" ||
                       management.billing.lifecycle === "uninstalled"

@@ -172,11 +172,14 @@ function toneForPrimaryState(value: PricingPrimaryState) {
   return "info" as const;
 }
 
-function toneForDiagnostic(value: string) {
+// Badge has no "subdued" tone. Returning it silently produced an untoned
+// badge, so the neutral case is now `undefined` - which renders the same
+// default badge, but says so.
+function toneForDiagnostic(value: string): "success" | "attention" | "info" | undefined {
   if (value === "ready") return "success";
   if (value === "partial") return "attention";
   if (value === "empty") return "info";
-  return "subdued";
+  return undefined;
 }
 
 function gainLabel(overview: Overview) {
@@ -631,7 +634,7 @@ export function PricingProfitPage() {
                           <Text as="p" variant="bodySm" tone="subdued">{item.support}</Text>
                           <InlineStack gap="200">
                             <Badge tone="info">{item.dataBasis}</Badge>
-                            {item.inputsUsed.map((input) => <Badge key={`${item.id}-${input}`} tone="subdued">{input}</Badge>)}
+                            {item.inputsUsed.map((input) => <Badge key={`${item.id}-${input}`}>{input}</Badge>)}
                           </InlineStack>
                           <Text as="p" variant="bodySm">{item.merchantActionNote}</Text>
                         </BlockStack>

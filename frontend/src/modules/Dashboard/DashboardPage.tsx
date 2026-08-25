@@ -194,9 +194,9 @@ type SyncJobResponse = {
         errorsCount: number;
         noChangeReasons?: string[];
         moduleProcessing?: {
-          fraud?: { processed: boolean; status: string; reason: string };
-          competitor?: { processed: boolean; status: string; reason: string };
-          pricing?: { processed: boolean; status: string; reason: string };
+          fraud?: ModuleProcessingResult;
+          competitor?: ModuleProcessingResult;
+          pricing?: ModuleProcessingResult;
         };
       } | null;
     } | null;
@@ -209,6 +209,27 @@ type SyncJobResponse = {
 type SyncActivitySummary = NonNullable<
   NonNullable<NonNullable<SyncJobResponse["result"]>["summary"]>["activitySummary"]
 >;
+
+/**
+ * One module's processing outcome from a sync.
+ *
+ * Named explicitly because the obvious indexed access silently produced
+ * `never`: `moduleProcessing` is an OPTIONAL property, so
+ * `SyncActivitySummary["moduleProcessing"]` includes `undefined`, and
+ * `keyof (T | undefined)` is `never` — which collapses
+ * `...[keyof ...]` to `never` too.
+ *
+ * The consequence was not a crash, it was silence: `deriveQuickAccessDisplay`
+ * took a parameter of type `never | null`, so TypeScript checked nothing about
+ * the object it actually receives, on the path that decides what each Quick
+ * Access card tells the merchant. A shape change upstream would have been
+ * caught by nobody.
+ */
+type ModuleProcessingResult = {
+  processed: boolean;
+  status: string;
+  reason: string;
+};
 
 type DashboardPayload = {
   metrics: Metrics;
@@ -270,6 +291,25 @@ function toneForReadiness(value?: string | null) {
     default:
       return "info";
   }
+}
+
+/**
+ * The same readiness state, expressed as a tone a Banner actually accepts.
+ *
+ * Polaris Badge and Banner have DIFFERENT tone unions: Badge allows
+ * "attention", Banner allows only success | info | warning | critical. One tone
+ * function was feeding both, so every Banner rendered for a syncing store
+ * passed tone="attention" — a value Polaris does not recognise, which silently
+ * falls back to the default. The banner meant to stand out looked ordinary.
+ *
+ * "warning" is Banner's equivalent of Badge's "attention": something in
+ * progress that the merchant should notice, but not a failure.
+ */
+function bannerToneForReadiness(
+  value?: string | null
+): "success" | "info" | "warning" | "critical" {
+  const tone = toneForReadiness(value);
+  return tone === "attention" ? "warning" : tone;
 }
 
 function labelForReadiness(value?: string | null) {
@@ -374,7 +414,7 @@ function deriveQuickAccessDisplay(args: {
   baseStatus?: DashboardQuickAccessStatus | string | null;
   baseReason?: string | null;
   baseFreshnessAt?: string | null;
-  processing?: SyncActivitySummary["moduleProcessing"][keyof SyncActivitySummary["moduleProcessing"]] | null;
+  processing?: ModuleProcessingResult | null;
 }) {
   if (!args.processing) {
     return {
@@ -1264,18 +1304,30 @@ export function DashboardPage() {
 
         {showSyncHealthBanner ? (
           <Layout.Section>
+            {/*
+              `metrics?.` throughout, not `metrics.`.
+              This block is reached whenever showSyncHealthBanner is true, and
+              that flag is true when metrics is NULL: it falls through to
+              `metrics?.dataState !== "READY_WITH_DATA"`, and undefined is not
+              READY_WITH_DATA. The only early return on this page is for
+              `loading`, so a failed metrics fetch left metrics null, loading
+              false, and this banner rendering — where `metrics.summaryTitle`
+              threw and white-screened the page into the route error boundary.
+              The page already has an honest error banner above; it never got
+              the chance to show it.
+            */}
             <Banner
               title={
                 dashboardSyncHealth?.title ??
-                metrics.summaryTitle ??
+                metrics?.summaryTitle ??
                 "Store Overview is still settling"
               }
-              tone={toneForReadiness(dashboardSyncHealth?.status ?? metrics.dataState)}
+              tone={bannerToneForReadiness(dashboardSyncHealth?.status ?? metrics?.dataState)}
             >
               <BlockStack gap="200">
                 <p>
                   {dashboardSyncHealth?.reason ??
-                    metrics.summaryDetail ??
+                    metrics?.summaryDetail ??
                     "VedaSuite is still preparing this store."}
                 </p>
                 <InlineStack gap="300">
@@ -1351,7 +1403,7 @@ export function DashboardPage() {
                 refreshResult.refreshStatus === "success"
                   ? "success"
                   : refreshResult.refreshStatus === "partial"
-                  ? "attention"
+                  ? "warning"
                   : "critical"
               }
             >

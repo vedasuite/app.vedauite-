@@ -631,7 +631,7 @@ export function OnboardingPage() {
                 <Text as="p" tone="subdued">
                   Three features, each on its own page. Pick one to open first.
                 </Text>
-                <BlockStack gap="250">
+                <BlockStack gap="200">
                   {onboarding.moduleOverview.map((module) => (
                     <div key={module.key} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="start" gap="300">
@@ -818,7 +818,7 @@ export function OnboardingPage() {
                   </Button>
                   {onboarding.selectedModuleRoute ? (
                     <Button onClick={() => navigateEmbedded(onboarding.selectedModuleRoute!)}>
-                      Open {onboarding.selectedModuleTitle}
+                      Open {onboarding.selectedModuleTitle ?? "your workspace"}
                     </Button>
                   ) : null}
                 </InlineStack>

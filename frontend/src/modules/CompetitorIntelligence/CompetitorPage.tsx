@@ -747,7 +747,7 @@ export function CompetitorPage() {
           <Layout.Section>
             <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
               <Card>
-                <BlockStack gap="250">
+                <BlockStack gap="200">
                   <Text as="h3" variant="headingMd">
                     Match quality and catalog coverage
                   </Text>
@@ -782,7 +782,7 @@ export function CompetitorPage() {
               </Card>
 
               <Card>
-                <BlockStack gap="250">
+                <BlockStack gap="200">
                   <Text as="h3" variant="headingMd">
                     Why products did or did not match
                   </Text>
@@ -1062,7 +1062,7 @@ export function CompetitorPage() {
                                 ? "info"
                                 : connector.readiness === "Beta"
                                 ? "attention"
-                                : "subdued"
+                                : undefined
                             }
                           >
                             {connector.readiness ?? "Not enabled"}

@@ -536,55 +536,92 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
   };
 }
 
-type SyncQueryResponse = {
-  shop: {
-    name: string;
-    products: {
-      edges: Array<{
-        node: {
-          id: string;
-          handle: string;
-          title: string;
-          status: string;
-          variants: {
-            edges: Array<{
-              node: {
-                id: string;
-                title: string;
-                price: string;
-              };
-            }>;
-          };
-        };
-      }>;
-    };
-    orders: {
-      edges: Array<{
-        node: {
-          id: string;
-          legacyResourceId: string;
-          name: string;
-          createdAt: string;
-          displayFinancialStatus: string;
-          displayFulfillmentStatus?: string | null;
-          currentTotalPriceSet: {
-            shopMoney: {
-              amount: string;
-              currencyCode: string;
-            };
-          };
-          customer?: {
-            id: string;
-            legacyResourceId: string;
-            email?: string | null;
-            numberOfOrders: string | number;
-          } | null;
-          tags: string[];
-        };
-      }>;
-    };
+/**
+ * SYNC PAGINATION BOUNDS.
+ *
+ * THE DEFECT THESE REPLACE
+ * ------------------------
+ * The sync query was `products(first: 20)` and `orders(first: 20)` with no
+ * pagination anywhere. Twenty orders was the entire dataset VedaSuite ever had
+ * about a store, no matter how large that store was.
+ *
+ * That is not a tuning problem, it is a structural one. CUSTOMER_LOSS requires
+ * `storeEligibleOrderCount >= 50` before it will compute a baseline at all —
+ * deliberately, so a refund rate is never compared against too little history.
+ * With a hard ceiling of 20 synced orders that gate could never open, which
+ * made the entire Customer Loss family unreachable for every merchant on every
+ * plan. Product Profit had the same problem at 20 products, and
+ * explainabilityService reads with READ_CAPS.orders = 5000 — a cap written for
+ * a dataset the sync could never deliver.
+ *
+ * The engines were correct. They were being starved.
+ *
+ * WHY THESE NUMBERS
+ * -----------------
+ * 250 is Shopify's maximum page size, so this is the fewest round trips for a
+ * given volume. The page ceilings bound worst-case time, memory and API cost
+ * for a very large store: 20 order pages = 5000 orders, which is exactly
+ * READ_CAPS.orders, so the sync now delivers precisely what the analysis layer
+ * is already bounded to consume. Products are capped lower because pricing and
+ * profit work per product and 2000 is far beyond any threshold in the codebase.
+ *
+ * Reaching a ceiling is reported, never silent — see `truncated` in the sync
+ * counts. A store that exceeds it has more history than VedaSuite analysed, and
+ * saying so is the difference between a bound and a lie.
+ */
+export const SYNC_PAGE_SIZE = 250;
+export const MAX_ORDER_PAGES = 20;
+export const MAX_PRODUCT_PAGES = 8;
+
+type PageInfo = { hasNextPage: boolean; endCursor: string | null };
+
+type ProductNode = {
+  id: string;
+  handle: string;
+  title: string;
+  status: string;
+  variants: {
+    edges: Array<{
+      node: {
+        id: string;
+        title: string;
+        price: string;
+      };
+    }>;
   };
 };
+
+type OrderNode = {
+  id: string;
+  legacyResourceId: string;
+  name: string;
+  createdAt: string;
+  displayFinancialStatus: string;
+  displayFulfillmentStatus?: string | null;
+  currentTotalPriceSet: {
+    shopMoney: {
+      amount: string;
+      currencyCode: string;
+    };
+  };
+  customer?: {
+    id: string;
+    legacyResourceId: string;
+    email?: string | null;
+    numberOfOrders: string | number;
+  } | null;
+  tags: string[];
+};
+
+type ProductPageResponse = {
+  shop: { name: string };
+  products: { pageInfo: PageInfo; edges: Array<{ node: ProductNode }> };
+};
+
+type OrderPageResponse = {
+  orders: { pageInfo: PageInfo; edges: Array<{ node: OrderNode }> };
+};
+
 
 function computeRecommendedPrice(currentPrice: number, pricingBias: number) {
   const lift = Math.max(0.01, (pricingBias - 45) / 250);
@@ -767,13 +804,26 @@ export async function syncShopifyStoreData(shopDomain: string) {
   });
 
   const store = await getStoreAccess(normalizedShop);
-  const data = await shopifyGraphQL<SyncQueryResponse>(
-    normalizedShop,
-    `
-      query SyncStoreData {
-        shop {
-          name
-          products(first: 20, sortKey: UPDATED_AT, reverse: true) {
+
+  // ---- PAGINATED FETCH ----------------------------------------------------
+  // Products and orders are pulled page by page up to their documented
+  // ceilings, instead of the single 20-row page this used to take. See the
+  // SYNC_PAGE_SIZE block above for why a 20-row ceiling made whole engine
+  // families unreachable.
+  const products: ProductNode[] = [];
+  let productCursor: string | null = null;
+  let productPages = 0;
+  let productsTruncated = false;
+  let shopName = "";
+
+  for (;;) {
+    const page: ProductPageResponse = await shopifyGraphQL<ProductPageResponse>(
+      normalizedShop,
+      `
+        query SyncStoreProducts($first: Int!, $after: String) {
+          shop { name }
+          products(first: $first, after: $after, sortKey: UPDATED_AT, reverse: true) {
+            pageInfo { hasNextPage endCursor }
             edges {
               node {
                 id
@@ -792,7 +842,38 @@ export async function syncShopifyStoreData(shopDomain: string) {
               }
             }
           }
-          orders(first: 20, sortKey: CREATED_AT, reverse: true) {
+        }
+      `,
+      { first: SYNC_PAGE_SIZE, after: productCursor },
+      { timeoutMs: 60000 }
+    );
+
+    shopName = page.shop.name;
+    for (const edge of page.products.edges) products.push(edge.node);
+    productPages += 1;
+
+    if (!page.products.pageInfo.hasNextPage) break;
+    if (productPages >= MAX_PRODUCT_PAGES) {
+      // The store has more products than this sync analysed. Recorded, never
+      // silent: a bound the merchant is not told about reads as completeness.
+      productsTruncated = true;
+      break;
+    }
+    productCursor = page.products.pageInfo.endCursor;
+  }
+
+  const orders: OrderNode[] = [];
+  let orderCursor: string | null = null;
+  let orderPages = 0;
+  let ordersTruncated = false;
+
+  for (;;) {
+    const page: OrderPageResponse = await shopifyGraphQL<OrderPageResponse>(
+      normalizedShop,
+      `
+        query SyncStoreOrders($first: Int!, $after: String) {
+          orders(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
+            pageInfo { hasNextPage endCursor }
             edges {
               node {
                 id
@@ -818,14 +899,33 @@ export async function syncShopifyStoreData(shopDomain: string) {
             }
           }
         }
-      }
-    `,
-    undefined,
-    { timeoutMs: 60000 }
-  );
+      `,
+      { first: SYNC_PAGE_SIZE, after: orderCursor },
+      { timeoutMs: 60000 }
+    );
 
-  const products = data.shop.products.edges.map((edge) => edge.node);
-  const orders = data.shop.orders.edges.map((edge) => edge.node);
+    for (const edge of page.orders.edges) orders.push(edge.node);
+    orderPages += 1;
+
+    if (!page.orders.pageInfo.hasNextPage) break;
+    if (orderPages >= MAX_ORDER_PAGES) {
+      ordersTruncated = true;
+      break;
+    }
+    orderCursor = page.orders.pageInfo.endCursor;
+  }
+
+  logEvent("info", "shopify.sync.fetched", {
+    shop: normalizedShop,
+    products: products.length,
+    productPages,
+    productsTruncated,
+    orders: orders.length,
+    orderPages,
+    ordersTruncated,
+  });
+
+  const data = { shop: { name: shopName } };
   const syncCounts = {
     fetched: {
       products: products.length,
@@ -835,6 +935,11 @@ export async function syncShopifyStoreData(shopDomain: string) {
         (sum, product) => sum + product.variants.edges.length,
         0
       ),
+      /** True when the store has more history than this sync read. */
+      productsTruncated,
+      ordersTruncated,
+      productPages,
+      orderPages,
     },
     saved: {
       productsCreated: 0,

@@ -659,7 +659,7 @@ export function TrustAbusePage() {
                   <p>{overview.summary.automationReadiness}</p>
                 </Banner>
                 <BlockStack gap="200">
-                  {(overview.automationRules ?? []).length === 0 ? <EmptyState text="No automation rules yet. VedaSuite proposes a rule only once the same customer behaviour repeats often enough that a rule would act on evidence rather than on a single case." /> : overview.automationRules.map((rule) => (
+                  {(overview.automationRules ?? []).length === 0 ? <EmptyState text="No automation rules yet. VedaSuite proposes a rule only once the same customer behaviour repeats often enough that a rule would act on evidence rather than on a single case." /> : (overview.automationRules ?? []).map((rule) => (
                     <div key={rule.id} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="start" gap="300">
                         <BlockStack gap="100">
@@ -694,7 +694,7 @@ export function TrustAbusePage() {
                           <Text as="p" variant="headingSm">{tier.tier}</Text>
                           <Text as="p" tone="subdued">{tier.policy}</Text>
                         </BlockStack>
-                        <Badge tone="info">{tier.count}</Badge>
+                        <Badge tone="info">{String(tier.count)}</Badge>
                       </InlineStack>
                     </div>
                   ))}

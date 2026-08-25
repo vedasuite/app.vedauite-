@@ -173,7 +173,19 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (appState?.onboarding) {
-      setOnboarding(appState.onboarding as OnboardingState);
+      // SAFE, and here is why it needs a cast at all.
+      //
+      // appStateService spreads the COMPLETE onboarding state into this field
+      // (`onboarding: { ...onboarding, nextRoute }`), so at runtime every
+      // OnboardingState property is present. AppStateProvider's local type,
+      // however, declares only the six fields that file happens to use — it is
+      // a deliberate subset, not the real shape.
+      //
+      // So the narrowing is in the TYPE DECLARATION, not in the data, and a
+      // direct cast between the two is rejected for non-overlap. Going through
+      // `unknown` says exactly that: the declared source type is incomplete,
+      // and the runtime value is not.
+      setOnboarding(appState.onboarding as unknown as OnboardingState);
     }
   }, [appState?.onboarding]);
 
