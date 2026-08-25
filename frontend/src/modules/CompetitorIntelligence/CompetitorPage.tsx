@@ -618,7 +618,7 @@ export function CompetitorPage() {
           <Layout.Section>
             <ModuleInsights
               modules={["competitor"]}
-              title="Competitor intelligence"
+              title="Open market signal findings"
               pressureLabel="Market pressure"
               pressureCaption="Weighted from the urgency of current competitor price and promotion findings."
               emptyWhy="Competitor findings only appear once VedaSuite has fresh, confidently matched competitor prices to compare against your own — stale or low-confidence matches are deliberately excluded rather than guessed at."

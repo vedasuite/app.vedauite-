@@ -1155,3 +1155,58 @@ test("I17: sync -> detectors -> findings -> Action Center -> Dashboard -> resolv
     "the resolved finding must never reach the model"
   );
 });
+
+// ===========================================================================
+// I7c — the specialist workspaces read the same source
+// ===========================================================================
+
+test("I7c: workspace panels read open findings, not a parallel computation", () => {
+  // THE LAST CONTRADICTION. The workspace panels drew their cards from
+  // /api/insights/dashboard, which recomputes on every read and knows nothing
+  // about IntelligenceFinding. A merchant could resolve a finding, watch it
+  // leave the Action Center and the Store Overview, then open the matching
+  // workspace and still see it — with a "Critical" badge and a monetary impact
+  // beside it. Phase F fixed the Store Overview; this is the same fix applied
+  // to the three workspaces.
+  const fs = require("node:fs");
+  const FRONTEND = path.resolve(__dirname, "../../frontend/src");
+
+  const panel = fs.readFileSync(
+    path.resolve(FRONTEND, "modules/Dashboard/components/ModuleInsights.tsx"),
+    "utf8"
+  );
+  assert.match(panel, /useModuleFindings/, "cards must come from the findings hook");
+
+  const hook = fs.readFileSync(
+    path.resolve(FRONTEND, "hooks/useModuleFindings.ts"),
+    "utf8"
+  );
+  assert.match(hook, /\/api\/action-center/, "which reads the Action Center feed");
+  // Open findings only, using the same three statuses the server calls open.
+  assert.match(hook, /OPEN_STATUSES/);
+  assert.match(hook, /"new", "seen", "in_review"/);
+
+  // Coverage may still come from the lifecycle-blind endpoint: it reports how
+  // many rows were analysed and makes no claim about problems, money,
+  // confidence or status, so it cannot contradict a finding.
+  assert.match(panel, /useInsightsDashboard/);
+  assert.match(panel, /Coverage only/i);
+});
+
+test("I7d: a failed findings read is never rendered as 'nothing is wrong'", () => {
+  const fs = require("node:fs");
+  const FRONTEND = path.resolve(__dirname, "../../frontend/src");
+  const hook = fs.readFileSync(path.resolve(FRONTEND, "hooks/useModuleFindings.ts"), "utf8");
+  const panel = fs.readFileSync(
+    path.resolve(FRONTEND, "modules/Dashboard/components/ModuleInsights.tsx"),
+    "utf8"
+  );
+  // The hook must distinguish "empty" from "could not read"...
+  assert.match(hook, /unavailable/);
+  // ...and must not leave a stale list behind after a failure, which would be
+  // its own quiet contradiction.
+  assert.match(hook, /setFindings\(\[\]\);/);
+  // ...and the panel must say so rather than showing an empty state.
+  assert.match(panel, /Findings could not be loaded/);
+  assert.match(panel, /not a statement about your store/);
+});

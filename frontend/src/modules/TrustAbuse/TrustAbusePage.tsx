@@ -361,7 +361,7 @@ export function TrustAbusePage() {
         <Layout.Section>
           <ModuleInsights
             modules={["fraud", "trust", "return_abuse"]}
-            title="Customer loss insights"
+            title="Open customer loss findings"
             pressureLabel="Loss pressure"
             pressureCaption="Weighted from the urgency of open refund-abuse and risky-order findings."
             emptyWhy="Customer-loss findings need enough order and refund history to tell a pattern from a coincidence. VedaSuite stays silent rather than calling a single refund a trend."
