@@ -64,7 +64,8 @@ function orderPage(count, { hasNextPage, cursor, startIndex = 0 }) {
             customer: {
               id: `gid://shopify/Customer/${n % 7}`,
               legacyResourceId: String(n % 7),
-              email: `buyer${n % 7}@example.test`,
+              // No email. This app is not approved for that protected field, so
+              // Shopify never returns one — the fixture must not pretend otherwise.
               numberOfOrders: 4,
             },
             tags: [],
@@ -153,10 +154,17 @@ function loadSync({ productPages, orderPages }) {
       return row;
     },
     update: async ({ where, data }) => {
+      // Real Prisma returns the UPDATED RECORD. Returning {} made the sync read
+      // customer.id as undefined for every repeat customer, so 51 of 60 orders
+      // were persisted unattached — a harness bug that would have masked the
+      // very grouping this file is meant to prove.
       for (const row of saved.customers.values()) {
-        if (row.id === where.id) Object.assign(row, data);
+        if (row.id === where.id) {
+          Object.assign(row, data);
+          return { ...row };
+        }
       }
-      return {};
+      return null;
     },
     // The real call is `include: { orders: true, fraudSignals: true }`, so the
     // rows are returned with those relations attached. Without them the post-

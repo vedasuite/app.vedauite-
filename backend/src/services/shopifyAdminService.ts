@@ -36,6 +36,99 @@ function formatBillingPermissionMessage(message: string) {
   return message;
 }
 
+/**
+ * Turns a GraphQL error array into ONE actionable message.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * A forbidden field is reported per NODE, not per query. Asking 250 orders for
+ * `customer { email }` without the field-level approval produced 250 identical
+ * execution errors, which the old code joined with ", " into a single enormous
+ * string — and which tripped Shopify's own ceiling, so the response came back
+ * as "Too many execution errors, max error limit reached. Results truncated".
+ *
+ * The operator saw a wall of duplicate text and a truncation warning. What they
+ * needed was one line naming the field.
+ *
+ * So: deduplicate, cap, say how many were collapsed, and recognise the
+ * protected-field case specifically — it is a permissions problem with a
+ * concrete remedy, not a transient API failure to be retried.
+ */
+export function summarizeGraphQLErrors(
+  errors: Array<{ message: string }>,
+  maxDistinct = 3
+): string {
+  const messages = errors.map((error) => error.message).filter(Boolean);
+
+  // The protected-field case, named precisely. Shopify's wording is
+  // "This app is not approved to use the <field> field".
+  const protectedField = messages
+    .map((m) => m.match(/not approved to use the (\w+) field/i)?.[1])
+    .find(Boolean);
+
+  if (protectedField) {
+    return (
+      `Shopify rejected this request because the app is not approved to read the ` +
+      `"${protectedField}" field on protected customer data. VedaSuite must stop ` +
+      `requesting that field — approval is not required for anything it currently ` +
+      `does. (${errors.length} identical errors collapsed.)`
+    );
+  }
+
+  const distinct = [...new Set(messages)];
+  const shown = distinct.slice(0, maxDistinct).join("; ");
+
+  if (distinct.length === 1 && errors.length > 1) {
+    return `${shown} (repeated ${errors.length} times)`;
+  }
+  if (distinct.length > maxDistinct) {
+    return `${shown} (+${distinct.length - maxDistinct} more distinct errors, ${errors.length} total)`;
+  }
+  return shown || "Shopify returned an unspecified GraphQL error.";
+}
+
+/**
+ * Maps Shopify's `displayFinancialStatus` onto VedaSuite's SALE status.
+ *
+ * WHY THIS IS NOT JUST `.toLowerCase()`
+ * -------------------------------------
+ * Shopify's field conflates two orthogonal facts: whether the order was a
+ * completed sale, and whether money later came back. VedaSuite models them
+ * separately — `Order.status` for the sale, `Order.refunded` for the refund —
+ * and the analysis layer depends on that separation.
+ *
+ * Lowercasing the raw value gave a refunded order `status: "refunded"`, which
+ * is not in ELIGIBLE_ORDER_STATUSES. So every refunded order was excluded from
+ * the eligible set — and `customerLossCalc` counts refunds WITHIN that set.
+ * `minRefundedOrders: 2` could therefore never be satisfied by any real store:
+ * the moment an order was refunded it stopped being countable as a refund.
+ *
+ * Customer Loss was unreachable for a second, independent reason.
+ *
+ * A refunded order WAS a paid sale — that is precisely what makes it a loss —
+ * so it maps to "paid" and `refunded` carries the rest. VOIDED and EXPIRED are
+ * NOT mapped to paid: no money ever changed hands, so they are correctly
+ * ineligible.
+ *
+ * Exported for tests.
+ */
+export function mapFinancialStatusToSaleStatus(displayFinancialStatus: string): string {
+  const raw = (displayFinancialStatus || "").trim().toLowerCase();
+
+  // A completed sale, whether or not money later came back.
+  if (raw === "paid" || raw === "refunded" || raw === "partially_refunded") {
+    return "paid";
+  }
+  // Authorized but not captured — the codebase's existing "approved".
+  if (raw === "authorized") {
+    return "approved";
+  }
+  // pending / partially_paid / voided / expired and anything Shopify adds later
+  // pass through unchanged, and are ineligible — which is correct: no completed
+  // sale means nothing to measure a refund against.
+  return raw;
+}
+
 function extractLegacyId(gid?: string | null) {
   if (!gid) return null;
   const match = gid.match(/\/(\d+)$/);
@@ -116,7 +209,7 @@ export async function shopifyGraphQL<T>(
 
     const payload = (await response.json()) as GraphQLResponse<T>;
     if (payload.errors?.length) {
-      throw new Error(payload.errors.map((error) => error.message).join(", "));
+      throw new Error(summarizeGraphQLErrors(payload.errors));
     }
 
     return payload.data as T;
@@ -606,9 +699,13 @@ type OrderNode = {
   };
   customer?: {
     id: string;
+    /** The stable Shopify customer ID — VedaSuite's only customer identity. */
     legacyResourceId: string;
-    email?: string | null;
     numberOfOrders: string | number;
+    // No `email`, and no name/phone/address. Those are protected fields this
+    // app is not approved for; requesting one fails the whole sync. Removing
+    // it from the TYPE as well as the query is what stops it being quietly
+    // read again by a later change.
   } | null;
   tags: string[];
 };
@@ -862,6 +959,28 @@ export async function syncShopifyStoreData(shopDomain: string) {
     productCursor = page.products.pageInfo.endCursor;
   }
 
+  // ---- PROTECTED CUSTOMER DATA ------------------------------------------
+  //
+  // The order query below requests NO protected customer field, and must not
+  // start doing so. Shopify gates email, name, phone and address behind a
+  // field-level approval this app does not hold and does not need.
+  //
+  // What happened when it did: `customer { email }` is validated per NODE, so
+  // one page of 250 orders produced 250 identical execution errors. That tripped
+  // Shopify's own error ceiling and the response came back as "Too many
+  // execution errors, max error limit reached. Results truncated". A single
+  // unapproved field did not degrade the sync — it destroyed it, and the real
+  // cause was buried under a wall of duplicate messages.
+  //
+  // Nothing downstream needs email. Customer identity throughout VedaSuite is
+  // `legacyResourceId`, the stable Shopify customer ID stored as
+  // `Customer.shopifyCustomerId`, and that is what every repeat-customer
+  // analysis groups by — including Customer Loss. Email only ever fed display
+  // labels, all of which already mask identities and already have a non-PII
+  // fallback.
+  //
+  // If a future feature genuinely needs a protected field, it needs Shopify's
+  // approval first. It does not get to be added here speculatively.
   const orders: OrderNode[] = [];
   let orderCursor: string | null = null;
   let orderPages = 0;
@@ -887,10 +1006,11 @@ export async function syncShopifyStoreData(shopDomain: string) {
                     currencyCode
                   }
                 }
+                # No email/name/phone/address here — see PROTECTED CUSTOMER
+                # DATA above this query. Do not add one.
                 customer {
                   id
                   legacyResourceId
-                  email
                   numberOfOrders
                 }
                 tags
@@ -970,19 +1090,24 @@ export async function syncShopifyStoreData(shopDomain: string) {
         },
       });
 
+      // `email` is deliberately absent from both branches — see the query.
+      // The update does not null out an email an existing row already has:
+      // that value may have arrived through a GDPR webhook, which is a
+      // separate and legitimately approved path, and the sync has no business
+      // erasing it. It simply stops being something the sync supplies.
       const customer = existingCustomer
         ? await prisma.customer.update({
             where: { id: existingCustomer.id },
             data: {
-              email: orderNode.customer.email ?? existingCustomer.email,
               totalOrders: shopifyInt(orderNode.customer.numberOfOrders),
             },
           })
         : await prisma.customer.create({
             data: {
               storeId: store.id,
+              // The stable Shopify customer ID. This, not email, is how every
+              // repeat-customer analysis in VedaSuite identifies a shopper.
               shopifyCustomerId: orderNode.customer.legacyResourceId,
-              email: orderNode.customer.email,
               totalOrders: shopifyInt(orderNode.customer.numberOfOrders),
             },
           });
@@ -996,10 +1121,14 @@ export async function syncShopifyStoreData(shopDomain: string) {
       customerId = customer.id;
     }
 
-    const normalizedStatus = orderNode.displayFinancialStatus.toLowerCase();
+    // Two orthogonal facts, kept separate — see mapFinancialStatusToSaleStatus.
+    // `refunded` is still derived from the RAW Shopify value, because that is
+    // the only place the refund fact lives.
+    const rawFinancialStatus = orderNode.displayFinancialStatus.toLowerCase();
+    const normalizedStatus = mapFinancialStatusToSaleStatus(orderNode.displayFinancialStatus);
     const refunded =
-      normalizedStatus.includes("refunded") ||
-      normalizedStatus.includes("partially_refunded");
+      rawFinancialStatus.includes("refunded") ||
+      rawFinancialStatus.includes("partially_refunded");
     const refundRequested = refunded || orderNode.tags.some((tag) => /refund/i.test(tag));
 
     const displayOrderId = orderNode.name || orderNode.legacyResourceId || orderNode.id;
