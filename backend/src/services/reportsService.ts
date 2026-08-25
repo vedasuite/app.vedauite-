@@ -255,7 +255,7 @@ export async function getWeeklyReport(shopDomain: string) {
 
   if (profitOpportunities > 0) {
     recommendations.push(
-      "Use the Pricing & Profit engine on top-selling SKUs to capture the identified margin lift."
+      "Use Pricing & Product Profit on top-selling SKUs to capture the identified margin lift."
     );
   } else if (pricingSuggestions > 0) {
     recommendations.push(

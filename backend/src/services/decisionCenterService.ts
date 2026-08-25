@@ -158,7 +158,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "pricing_move",
       title: `Approve pricing on ${pricingMove.productHandle}`,
-      module: "Pricing & Profit",
+      module: "Pricing & Product Profit",
       // Severity and confidence must not be driven by expectedProfitGain,
       // which is delta x salesVelocity(?? 8) x 6 - two assumptions and a
       // magic constant.
@@ -209,7 +209,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "profit_move",
       title: `Protect margin on ${profitMove.productHandle}`,
-      module: "Pricing & Profit",
+      module: "Pricing & Product Profit",
       // Severity must not be driven by a fabricated figure either.
       severity: PROFIT_CLAIM.allowed
         ? (profitMove.projectedMonthlyProfit ?? 0) >= 1000

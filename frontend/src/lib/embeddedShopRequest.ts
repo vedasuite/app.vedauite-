@@ -165,6 +165,50 @@ function isRetriableError(error: unknown) {
   );
 }
 
+/**
+ * How many times token ACQUISITION may be attempted before a protected request
+ * is allowed to fail.
+ *
+ * This is not the HTTP retry — that stays at exactly one. This is the earlier
+ * question of whether we have anything to send at all.
+ *
+ * WHY IT EXISTS. `acquireSessionToken` returns null when App Bridge has not
+ * finished initialising, and the request was sent anyway with NO Authorization
+ * header — a guaranteed 401. On a cold embedded load that produced exactly the
+ * reported symptom: the first screen a merchant opened showed "Invalid Shopify
+ * session token", and navigating away and back worked because App Bridge had
+ * become ready in the meantime.
+ *
+ * Sending a request we KNOW will fail, and then treating the failure as an
+ * authorization problem, was the defect. A missing token is a not-ready
+ * condition, not a rejection, and it is handled before the request goes out.
+ */
+const TOKEN_ACQUIRE_ATTEMPTS = 3;
+const TOKEN_ACQUIRE_BACKOFF_MS = 300;
+
+/**
+ * Obtains a session token for a protected request, waiting briefly if App
+ * Bridge is still coming up.
+ *
+ * Bounded and short: roughly 900ms worst case, which covers a cold start
+ * without stalling a page the merchant is looking at.
+ */
+async function acquireTokenForProtectedRequest(
+  bust: boolean,
+  sleep: (ms: number) => Promise<void>
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= TOKEN_ACQUIRE_ATTEMPTS; attempt += 1) {
+    // Only the FIRST attempt honours a cache bust. Later attempts are waiting
+    // for readiness, not working around a rejected token.
+    const token = await acquireSessionToken(bust && attempt === 1);
+    if (token) return token;
+    if (attempt < TOKEN_ACQUIRE_ATTEMPTS) {
+      await sleep(TOKEN_ACQUIRE_BACKOFF_MS * attempt);
+    }
+  }
+  return null;
+}
+
 async function acquireSessionToken(bust = false): Promise<string | null> {
   // On 401 retry, the cached token was just rejected — force a fresh idToken()
   // call. `forceFresh` also drops this shop's cache entry inside the token
@@ -197,6 +241,11 @@ export async function embeddedShopRequest<T = unknown>(
 ) {
   const { method = "GET", body, timeoutMs = 30000, retries = 0, signal } = options;
   const url = buildUrl(path);
+  // Protected routes require a session token; public ones (auth, billing
+  // redirects) legitimately do not.
+  const isProtectedApiPath = path.startsWith("/api/");
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
   const requestBody = buildRequestBody(path, method, body);
   let attempt = 0;
 
@@ -211,7 +260,28 @@ export async function embeddedShopRequest<T = unknown>(
     try {
       // Fetch a session token. Cached (30 s) normally; the cache is busted on
       // an auth retry so a rejected token is never sent twice.
-      const sessionToken = await acquireSessionToken(authAttempt > 0);
+      const sessionToken = isProtectedApiPath
+        ? await acquireTokenForProtectedRequest(authAttempt > 0, sleep)
+        : await acquireSessionToken(authAttempt > 0);
+
+      // A protected route with no token is a request we KNOW will 401. Sending
+      // it anyway is what put "Invalid Shopify session token" in front of the
+      // merchant on a cold load: the failure was then indistinguishable from a
+      // real rejection, and one HTTP retry was not enough time for App Bridge
+      // to finish starting.
+      //
+      // The wait above is bounded, so this is reached only when App Bridge is
+      // genuinely unavailable — which IS worth telling the merchant about, in
+      // words that name the actual problem.
+      if (isProtectedApiPath && !sessionToken) {
+        // eslint-disable-next-line no-console
+        console.warn("[vedasuite.auth] no_session_token_after_wait", { path });
+        throw new Error(
+          "VedaSuite could not reach Shopify to establish this session. " +
+            "Reopen the app from your Shopify admin and try again."
+        );
+      }
+
       const baseHeaders: Record<string, string> = {
         "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest",

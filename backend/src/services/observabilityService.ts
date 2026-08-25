@@ -59,6 +59,18 @@ export async function withRetry<T>(
     operationName: string;
     delayMs?: number;
     context?: Record<string, unknown>;
+    /**
+     * Decides whether a given failure is worth retrying. Optional, so every
+     * existing caller keeps its current behaviour of retrying everything.
+     *
+     * WHY THIS EXISTS. The competitor fetch classified its failures — DNS,
+     * TLS, blocked, timeout — but only in the OUTER catch, after this loop had
+     * already exhausted its attempts. Production logged attempt 1 and attempt 2
+     * for `addidas.com`, then `retriable: false`: the verdict was correct and
+     * arrived too late to act on. A certificate that has expired will still be
+     * expired 400ms later, so the second attempt was guaranteed waste.
+     */
+    shouldRetry?: (error: unknown) => boolean;
   }
 ) {
   let lastError: unknown;
@@ -77,17 +89,26 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
+      // Asked BEFORE the failure is logged as retryable and before any wait,
+      // so a permanent condition costs exactly one attempt.
+      const retryable = options.shouldRetry ? options.shouldRetry(error) : true;
+
       logEvent(
-        attempt === options.attempts ? "error" : "warn",
+        attempt === options.attempts || !retryable ? "error" : "warn",
         "retry.failure",
         {
           operation: options.operationName,
           attempt,
           maxAttempts: options.attempts,
+          retryable,
           error,
           ...(options.context ?? {}),
         }
       );
+
+      if (!retryable) {
+        break;
+      }
 
       if (attempt < options.attempts && options.delayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.delayMs));

@@ -182,7 +182,7 @@ export function SettingsPage() {
       : pricingBias <= 35
       ? "Pricing automation can be more responsive, but still needs merchant guardrails."
       : "Balanced pricing posture is best for controlled approval-led automation."
-    : "Pricing & Product Profit is not active on this plan, so pricing controls stay view-only.";
+    : "Pricing recommendations are not active on this plan, so these controls stay view-only.";
   const activePlanLabel = resolveBackendPlan(appState) ?? subscription?.planName ?? "NONE";
   const activePlanTone =
     activePlanLabel === "PRO"
@@ -267,9 +267,20 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">Competitor controls</Text>
+                <Text as="h3" variant="headingMd">Market Signals controls</Text>
+                {/*
+                  "Requires Growth" was wrong on Starter: Market Signals is one
+                  of the two modules a Starter plan can be pointed at, so a
+                  Starter merchant reaches it by switching their selected
+                  module, not by upgrading. Growth is the answer only when
+                  there is no module to switch.
+                */}
                 <Badge tone={competitorEnabled ? "success" : "info"}>
-                  {competitorEnabled ? "Enabled on current plan" : "Configured only"}
+                  {competitorEnabled
+                    ? "Included on your plan"
+                    : activePlanLabel === "STARTER"
+                    ? "Switch your Starter module, or upgrade to Growth"
+                    : "Requires Growth"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Tracked domains: {connectedDomains}
@@ -278,9 +289,9 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">Pricing controls</Text>
+                <Text as="h3" variant="headingMd">Pricing recommendation controls</Text>
                 <Badge tone={pricingProfitEnabled ? "success" : "info"}>
-                  {pricingProfitEnabled ? "Enabled on current plan" : "Configured only"}
+                  {pricingProfitEnabled ? "Included on your plan" : "Requires Growth"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Bias: {pricingBias}/100
@@ -289,9 +300,9 @@ export function SettingsPage() {
             </Card>
             <Card>
               <BlockStack gap="200">
-                <Text as="h3" variant="headingMd">Profit controls</Text>
+                <Text as="h3" variant="headingMd">Product Profit controls</Text>
                 <Badge tone={fullProfitEngineEnabled ? "success" : "info"}>
-                  {fullProfitEngineEnabled ? "Enabled" : "Available on Pro"}
+                  {fullProfitEngineEnabled ? "Included on your plan" : "Requires Pro"}
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Guardrail: {profitGuardrail}%
@@ -361,9 +372,12 @@ export function SettingsPage() {
           <Card>
             <Tabs
               tabs={[
-                { id: "trust", content: "Trust & Abuse" },
-                { id: "competitors", content: "Competitors" },
-                { id: "pricingProfit", content: "Pricing & Profit" },
+                // The same names the navigation and the plan pages use. These
+                // tabs were the last place still calling the modules by their
+                // pre-VedaSuite names.
+                { id: "trust", content: "Customer Loss" },
+                { id: "competitors", content: "Market Signals" },
+                { id: "pricingProfit", content: "Pricing & Product Profit" },
               ]}
               selected={selectedTab}
               onSelect={setSelectedTab}
@@ -420,7 +434,7 @@ export function SettingsPage() {
                 ) : (
                   <BlockStack gap="400">
                     {!pricingProfitEnabled ? (
-                      <Banner title="Pricing & Profit settings are staged for activation" tone="info">
+                      <Banner title="Pricing & Product Profit settings are staged for activation" tone="info">
                         <p>
                           Settings are always open, but pricing changes and profit guardrails only become live once the matching plan access is active.
                         </p>

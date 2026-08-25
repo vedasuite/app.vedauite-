@@ -215,11 +215,32 @@ test("WIRING: a projected gain requires evidence.showProjectedGain", () => {
   );
 });
 
-test("WIRING: salesVelocityObserved is read from stored data, never the ?? 8 default", () => {
+test("WIRING: salesVelocityObserved comes from PROVENANCE, not from a derived score", () => {
+  // This used to assert `Number.isFinite(item.demandScore)`. That check was the
+  // defect: a non-null demandScore is a guess about where a number came from,
+  // not proof that velocity was observed — and production proved it wrong.
+  // Price-history rows written before the engine was fixed still carry a
+  // demandScore derived from an ASSUMED velocity, so competitor-informed cards
+  // showed "Projected monthly gain of $100" while the page header correctly
+  // said "Projected gain — Not enough data yet".
   const block = serviceSrc.match(/const salesVelocityObserved =[\s\S]{0,200}/);
   assert.ok(block, "the observed-velocity check must exist");
   assert.doesNotMatch(block[0], /\?\?\s*8/, "the assumed default must not leak into evidence");
-  assert.match(block[0], /Number\.isFinite/, "must require a real finite number");
+  assert.doesNotMatch(
+    block[0],
+    /demandScore/,
+    "a derived score must never stand in for provenance"
+  );
+  assert.match(
+    block[0],
+    /velocityObservedByHandle/,
+    "it must read the persisted velocitySource provenance"
+  );
+  // And that map must be built through the shared classifier, so this surface
+  // cannot drift from every other one.
+  assert.match(serviceSrc, /profitRowProvenance\(row\)\.velocityObserved/);
+  // A handle with no provenance recorded must default to NOT observed.
+  assert.match(serviceSrc, /velocityObservedByHandle\.get\([^)]*\) \?\? false/);
 });
 
 test("WIRING: store-wide competitor readiness alone is not product evidence", () => {

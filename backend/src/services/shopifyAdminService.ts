@@ -848,6 +848,18 @@ export async function fetchCompetitorSnapshot(
           domain,
           productHandle,
         },
+        // Classify BEFORE deciding to retry, not after.
+        //
+        // The classifier already knew a certificate error is permanent, but it
+        // only ran in the outer catch — after this loop had spent both attempts.
+        // Production logged attempt 1 and attempt 2 for `addidas.com`, then
+        // `status: "tls_error", retriable: false`: the verdict was right and
+        // arrived too late to act on. An expired certificate is still expired
+        // 200ms later, and so is an unresolvable hostname.
+        //
+        // The SAME classifier decides both, so the log line and the retry
+        // behaviour can no longer disagree.
+        shouldRetry: (error) => classifyFetchError(domain, error).retryable,
       }
     );
   } catch (error) {

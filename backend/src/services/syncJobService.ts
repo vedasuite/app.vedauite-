@@ -22,7 +22,8 @@ export type SyncTriggerSource =
 
 const ACTIVE_SYNC_STATUSES = ["PENDING", "RUNNING", "SYNC_IN_PROGRESS"] as const;
 
-function buildSyncActivitySummary(params: {
+/** Exported so the truthfulness of each reported reason can be tested directly. */
+export function buildSyncActivitySummary(params: {
   syncResult: Awaited<ReturnType<typeof syncShopifyStoreData>>;
   recomputeResult: Awaited<ReturnType<typeof recomputeStoreDerivedData>>;
   operational: Awaited<ReturnType<typeof getStoreOperationalSnapshot>>;
@@ -42,13 +43,22 @@ function buildSyncActivitySummary(params: {
     newInsightsCount: params.recomputeResult.timelineEventsCreated,
     updatedInsightsCount: 0,
     errorsCount: 0,
+    // These are the reasons shown to the merchant when nothing visible changed
+    // ("Everything looks healthy because ..."). They were three fixed strings,
+    // so a refresh that HAD produced fraud signals or HAD rewritten pricing
+    // records still told the merchant those things had remained stable. A
+    // reason is only allowed here when it is actually true of this run.
     noChangeReasons: [
-      "no new order-risk signals were produced",
+      (params.recomputeResult.fraudSignalsGenerated ?? 0) > 0
+        ? null
+        : "no new order-risk signals were produced",
       competitorRows > 0
         ? "competitor analysis is managed separately"
         : "no competitor analysis ran during this update",
-      "pricing signals remained stable",
-    ],
+      params.recomputeResult.productOutputsUpdated > 0
+        ? null
+        : "pricing signals remained stable",
+    ].filter((reason): reason is string => reason !== null),
     moduleProcessing: {
       fraud: {
         processed: true,
