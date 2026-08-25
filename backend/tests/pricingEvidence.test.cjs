@@ -178,3 +178,119 @@ test("SAFETY: a zero or negative current price cannot divide by zero", () => {
   assert.equal(typeof calc.directionalHint(0, 10), "string");
   assert.doesNotThrow(() => calc.directionalHint(0, 0));
 });
+
+// ===========================================================================
+// WIRING — the exact production screenshot case, end to end
+//
+// Screenshot: "Recommendations ready: 42", "Profit opportunities: 0",
+// "Projected gain: Not enough data yet", cards showing
+// "$2629.95 -> $2735.15" labelled "Baseline estimate" under a page banner
+// reading "AI-generated recommendations".
+// ===========================================================================
+
+const fs = require("node:fs");
+
+const SERVICE = path.resolve(__dirname, "../src/services/pricingProfitService.ts");
+const PAGE = path.resolve(
+  __dirname,
+  "../../frontend/src/modules/PricingProfit/PricingProfitPage.tsx"
+);
+const serviceSrc = fs.readFileSync(SERVICE, "utf8");
+const pageSrc = fs.readFileSync(PAGE, "utf8");
+
+test("WIRING: the service classifies every recommendation before shaping a card", () => {
+  assert.match(serviceSrc, /classifyPricingEvidence\(\{/, "the classifier must be called");
+  assert.match(
+    serviceSrc,
+    /recommendedPrice: evidence\.showExactTarget \? item\.recommendedPrice : null/,
+    "an exact target must be gated on evidence"
+  );
+});
+
+test("WIRING: a projected gain requires evidence.showProjectedGain", () => {
+  assert.match(
+    serviceSrc,
+    /!evidence\.showProjectedGain\s*\n?\s*\?\s*directionalHint/,
+    "without a permitted projection the card must fall back to a direction"
+  );
+});
+
+test("WIRING: salesVelocityObserved is read from stored data, never the ?? 8 default", () => {
+  const block = serviceSrc.match(/const salesVelocityObserved =[\s\S]{0,200}/);
+  assert.ok(block, "the observed-velocity check must exist");
+  assert.doesNotMatch(block[0], /\?\?\s*8/, "the assumed default must not leak into evidence");
+  assert.match(block[0], /Number\.isFinite/, "must require a real finite number");
+});
+
+test("WIRING: store-wide competitor readiness alone is not product evidence", () => {
+  assert.match(
+    serviceSrc,
+    /hasProductCompetitorSignal:\s*\n?\s*competitorReady && item\.competitorPressure !== "not_available"/,
+    "the product itself must have a competitor match"
+  );
+});
+
+test("WIRING: 'Recommendations ready' counts only evidence-backed rows", () => {
+  assert.match(
+    serviceSrc,
+    /prioritizedRecommendationCount: actionableRecommendationCount/,
+    "the headline counter must not count evidence-insufficient rows"
+  );
+  assert.match(
+    serviceSrc,
+    /evidenceBasis !== "insufficient_evidence"/,
+    "the counter must filter on the evidence basis"
+  );
+  assert.match(serviceSrc, /needsMoreDataCount/, "the remainder must be surfaced, not hidden");
+});
+
+test("WIRING: the frontend never prints an exact target when there is none", () => {
+  assert.match(
+    pageSrc,
+    /item\.recommendedPrice === null/,
+    "the card must branch on a missing target"
+  );
+  assert.match(
+    pageSrc,
+    /Current price \$\$\{item\.currentPrice\.toFixed\(2\)\}/,
+    "it should show the current price alone instead of a fabricated arrow"
+  );
+});
+
+test("WIRING: the frontend tells the merchant what data is missing", () => {
+  assert.match(pageSrc, /item\.whatWouldHelp/, "guidance must be rendered, not just returned");
+});
+
+test("SCREENSHOT CASE: a $2629.95 product with no competitor and no profit data", () => {
+  // Exactly the production row. It must produce no target and no projection.
+  const e = calc.classifyPricingEvidence({
+    competitorReady: false,
+    competitorAveragePrice: null,
+    hasProductCompetitorSignal: false,
+    profitReady: false,
+    salesVelocityObserved: false,
+  });
+
+  assert.equal(e.basis, "insufficient_evidence");
+  assert.equal(e.showExactTarget, false, "no $2735.15 may be shown");
+  assert.equal(e.showProjectedGain, false, "no projected gain may be shown");
+  assert.doesNotMatch(e.label, /\bAI\b/i, "and it must not be called AI-generated");
+
+  // The merchant still gets something useful and honest.
+  const hint = calc.directionalHint(2629.95, 2735.15);
+  assert.match(hint, /room to increase/i);
+  assert.doesNotMatch(hint, /2735/, "without restating the unfounded figure");
+});
+
+test("SCREENSHOT CASE: a competitor-matched product may show a target but no gain", () => {
+  const e = calc.classifyPricingEvidence({
+    competitorReady: true,
+    competitorAveragePrice: null,
+    hasProductCompetitorSignal: true,
+    profitReady: false,
+    salesVelocityObserved: false,
+  });
+  assert.equal(e.basis, "competitor_informed");
+  assert.equal(e.showExactTarget, true);
+  assert.equal(e.showProjectedGain, false, "no observed velocity means no money claim");
+});

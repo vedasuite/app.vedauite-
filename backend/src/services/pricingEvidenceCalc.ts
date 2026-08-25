@@ -56,9 +56,16 @@ export interface PricingEvidence {
  * inputs is not evidence.
  */
 export function classifyPricingEvidence(input: {
-  /** Competitor rows exist AND this product has usable competitor pricing. */
+  /** Competitor rows exist for the store. Store-wide, not per product. */
   competitorReady: boolean;
+  /** This product's competitor price, when one is known. */
   competitorAveragePrice: number | null | undefined;
+  /**
+   * This product specifically has a competitor signal, where the price itself
+   * is not carried through. Store-wide readiness is NOT enough: a store can
+   * have competitor data while this product has no match at all.
+   */
+  hasProductCompetitorSignal?: boolean;
   /** Profit rows exist for this product. */
   profitReady: boolean;
   /** True when sales velocity was OBSERVED, not defaulted. */
@@ -68,8 +75,9 @@ export function classifyPricingEvidence(input: {
 }): PricingEvidence {
   const hasCompetitor =
     input.competitorReady &&
-    typeof input.competitorAveragePrice === "number" &&
-    Number.isFinite(input.competitorAveragePrice);
+    ((typeof input.competitorAveragePrice === "number" &&
+      Number.isFinite(input.competitorAveragePrice)) ||
+      input.hasProductCompetitorSignal === true);
 
   // Profit evidence is the strongest basis: it means margin is actually known.
   if (!input.isCatalogExample && input.profitReady && input.salesVelocityObserved) {
