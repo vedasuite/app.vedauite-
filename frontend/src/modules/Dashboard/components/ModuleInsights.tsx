@@ -76,7 +76,7 @@ export function ModuleInsights({
   return (
     <div className="veda-band">
       <SectionHeader
-        eyebrow="Explainable AI"
+        eyebrow="Explainable insights"
         title={title}
         icon={MagicIcon}
         iconTone="info"
@@ -99,7 +99,7 @@ export function ModuleInsights({
             title="Activity detected — no recommendations yet"
             why={`VedaSuite analysed ${monitoredRows.toLocaleString()} record${
               monitoredRows === 1 ? "" : "s"
-            } for this module and detected activity, but none of it currently meets the confidence required for an AI recommendation. Recommendations are generated only when there is enough supporting evidence to explain and quantify them.`}
+            } for this module and detected activity, but none of it currently meets the evidence bar for a recommendation. Recommendations appear only when there is enough supporting data to explain and quantify them.`}
             steps={
               emptySteps ?? [
                 "Add product cost and selling price so margin impact can be calculated",

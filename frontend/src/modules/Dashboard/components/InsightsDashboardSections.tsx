@@ -19,10 +19,6 @@ import { SEVERITY } from "../../../components/intelligence/severity";
 import { useInsightsDashboard } from "../../../hooks/useInsightsDashboard";
 import { MODULE_LABEL } from "../../../lib/insightsTypes";
 import type { DataCoverage } from "../../../lib/insightsTypes";
-import { CriticalAttentionLane } from "./CriticalAttentionLane";
-import { ExecutiveHero } from "./ExecutiveHero";
-import { RevenueLeakDetector } from "./RevenueLeakDetector";
-import { WhereToFocusToday } from "./WhereToFocusToday";
 import "../../../components/intelligence/intelligence.css";
 
 /** Per-module readiness, with a segmented "how many modules are ready" gauge. */
@@ -105,20 +101,49 @@ function DataCoverageCard({ coverage }: { coverage: DataCoverage[] }) {
   );
 }
 
+
 /**
- * Phase 1 intelligence sections, in the order a merchant reads them:
- * executive summary → where to focus → critical attention → revenue leak →
- * data coverage.
+ * Store-level data coverage.
  *
- * Handles every state the endpoint can produce — first load, refreshing,
- * auth-required, unavailable, syncing, insufficient data and empty — and never
- * renders sample data as a stand-in for any of them.
+ * PHASE F/G — WHAT THIS COMPONENT USED TO RENDER, AND WHY IT NO LONGER DOES.
+ *
+ * It previously drove five store-level sections on the Dashboard:
+ *
+ *   ExecutiveHero        — a second narrative headline, plus "Potential
+ *                          revenue" and "AI confidence" figures
+ *   WhereToFocusToday    — a second prioritized list of what to do next
+ *   CriticalAttentionLane— a second critical-severity count
+ *   RevenueLeakDetector  — a second money total (upside and revenue at risk)
+ *   DataCoverageCard     — how much data was actually analysed
+ *
+ * All five came from /api/insights/dashboard, which recomputes insights on
+ * every read and knows nothing about IntelligenceFinding. That made the first
+ * four direct contradictions of the Action Center: a merchant could resolve a
+ * finding, watch it leave the Action Center and the Dashboard tiles, and still
+ * see its money inside "Potential revenue" and its text inside the executive
+ * summary — the same class of defect as being told a resolved problem was
+ * still happening.
+ *
+ * So the Dashboard now states NO money and NO confidence of its own. It reports
+ * counts of open findings and links to the Action Center, which owns impact,
+ * confidence, evidence and lifecycle in one place.
+ *
+ * NOTHING WAS TAKEN AWAY. The same explainable insights, with their per-insight
+ * financial impact, still render on each workspace page through ModuleInsights
+ * — scoped to that family, where they are an analysis of one area rather than a
+ * competing store-level headline. The only figure that disappeared is the
+ * cross-module rolled-up total, which is exactly the kind of aggregate this
+ * programme has been removing; the Action Center's quantifiedImpact groups are
+ * its defensible replacement.
+ *
+ * Data coverage survives because it makes no claim about problems, money or
+ * confidence. It reports how much data was analysed, which cannot contradict a
+ * finding.
  */
 export function InsightsDashboardSections() {
-  const { data, loading, refreshing, error, authRequired, unavailable, reload } =
+  const { data, loading, error, authRequired, unavailable, reload } =
     useInsightsDashboard();
 
-  // First load — skeletons matching the real layout, not a blank screen.
   if (loading && !data) {
     return (
       <Layout.Section>
@@ -127,27 +152,20 @@ export function InsightsDashboardSections() {
     );
   }
 
-  if (authRequired) {
-    return (
-      <Layout.Section>
-        <Banner tone="critical" title="Reconnect to load your intelligence">
-          <BlockStack gap="200">
-            <p>
-              Your Shopify session needs to be refreshed before insights can be
-              generated. Reopen VedaSuite from your Shopify Admin to reconnect.
-            </p>
-          </BlockStack>
-        </Banner>
-      </Layout.Section>
-    );
-  }
+  // The host page owns the reconnect experience, and the findings projection
+  // above already tells the merchant its own state. A second auth banner here
+  // was a competing explanation of the same condition.
+  if (authRequired) return null;
 
   if ((unavailable || error) && !data) {
     return (
       <Layout.Section>
-        <Banner tone="warning" title="Intelligence is temporarily unavailable">
+        <Banner tone="warning" title="Data coverage is temporarily unavailable">
           <BlockStack gap="300">
-            <p>{error ?? "The insights service did not respond. Your data is safe."}</p>
+            <p>
+              {error ??
+                "The coverage service did not respond. Your data is safe, and this says nothing about your store."}
+            </p>
             <InlineStack gap="200">
               <Button onClick={reload} icon={RefreshIcon}>
                 Try again
@@ -161,65 +179,9 @@ export function InsightsDashboardSections() {
 
   if (!data) return null;
 
-  const notReady = !data.executiveSummary.dataReady;
-
   return (
-    <>
-      {refreshing ? (
-        <Layout.Section>
-          <InlineStack gap="200" blockAlign="center" wrap={false}>
-            <Spinner accessibilityLabel="Refreshing intelligence" size="small" />
-            <Text as="span" tone="subdued" variant="bodySm">
-              Refreshing intelligence with your latest store data…
-            </Text>
-          </InlineStack>
-        </Layout.Section>
-      ) : null}
-
-      {/* 1. AI executive summary + the seven headline readings. */}
-      <Layout.Section>
-        <div className="veda-enter">
-          <ExecutiveHero data={data} />
-        </div>
-      </Layout.Section>
-
-      {notReady ? (
-        <Layout.Section>
-          <EducationalEmptyState
-            title="VedaSuite is still preparing this store"
-            why="Ranked opportunities and revenue estimates stay hidden until your Shopify connection, data sync and plan are all ready. Showing partial results now would mean ranking your store on incomplete data."
-            steps={[
-              "Finish connecting Shopify so order and product sync can run",
-              "Let the first full sync complete — this usually takes a few minutes",
-              "Confirm your plan so the matching modules are enabled",
-            ]}
-          />
-        </Layout.Section>
-      ) : (
-        <>
-          {/* 2. Where to focus today. */}
-          <Layout.Section>
-            <WhereToFocusToday opportunities={data.opportunities} />
-          </Layout.Section>
-
-          {/* 3. Critical attention — only when the engine flagged something. */}
-          {data.criticalAttention.length > 0 ? (
-            <Layout.Section>
-              <CriticalAttentionLane items={data.criticalAttention} />
-            </Layout.Section>
-          ) : null}
-
-          {/* 4. Revenue leak detector. */}
-          <Layout.Section>
-            <RevenueLeakDetector model={data.revenueLeak} />
-          </Layout.Section>
-        </>
-      )}
-
-      {/* 7. Data coverage & sync status. */}
-      <Layout.Section>
-        <DataCoverageCard coverage={data.dataCoverage} />
-      </Layout.Section>
-    </>
+    <Layout.Section>
+      <DataCoverageCard coverage={data.dataCoverage} />
+    </Layout.Section>
   );
 }

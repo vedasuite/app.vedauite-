@@ -63,9 +63,9 @@ export function ModuleGate({
     resolveBackendStarterModule(appState) ?? entitlements?.starterModule ?? null;
   const starterLabel =
     currentStarterModule === "fraud"
-      ? "Fraud Intelligence"
+      ? "Customer Loss"
       : currentStarterModule === "competitor"
-      ? "Competitor Intelligence"
+      ? "Market Signals"
       : null;
 
   return (

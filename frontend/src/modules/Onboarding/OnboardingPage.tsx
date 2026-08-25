@@ -347,10 +347,10 @@ export function OnboardingPage() {
 
   const featureName =
     pendingModule === "fraud"
-      ? "Fraud Intelligence"
+      ? "Customer Loss"
       : pendingModule === "competitor"
-      ? "Competitor Intelligence"
-      : "AI Pricing Engine";
+      ? "Market Signals"
+      : "Pricing & Product Profit";
 
   const primaryLabel =
     onboarding?.canAccessDashboard

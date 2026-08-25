@@ -584,14 +584,14 @@ export function CompetitorPage() {
 
   return (
     <ModuleGate
-      title="Competitor Intelligence"
-      subtitle="Track competitor pricing, promotions, stock posture, and response opportunities across key domains."
+      title="Market Signals"
+      subtitle="Signals read from competitor pages VedaSuite could reach. Each domain reports whether its last check actually succeeded."
       requiredPlan="Starter, Growth, or Pro"
       allowed={allowed && !planLocked}
       featureKey="competitor"
     >
       <Page
-        title="Competitor Intelligence"
+        title="Market Signals"
         subtitle={getPageSubtitle(primaryState)}
         primaryAction={{
           content: ingesting ? "Refreshing..." : getPrimaryActionLabel(primaryState),

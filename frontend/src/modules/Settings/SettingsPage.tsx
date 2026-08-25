@@ -182,7 +182,7 @@ export function SettingsPage() {
       : pricingBias <= 35
       ? "Pricing automation can be more responsive, but still needs merchant guardrails."
       : "Balanced pricing posture is best for controlled approval-led automation."
-    : "Pricing & Profit is not active on this plan, so AI pricing controls stay view-only.";
+    : "Pricing & Product Profit is not active on this plan, so pricing controls stay view-only.";
   const activePlanLabel = resolveBackendPlan(appState) ?? subscription?.planName ?? "NONE";
   const activePlanTone =
     activePlanLabel === "PRO"
@@ -342,7 +342,7 @@ export function SettingsPage() {
               <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">Margin protection preset</Text>
                 <Text as="p" tone="subdued">
-                  Push the AI stack toward profit protection and tighter decision thresholds.
+                  Push the engines toward profit protection and tighter decision thresholds.
                 </Text>
                 <Button
                   onClick={() => {
@@ -402,7 +402,7 @@ export function SettingsPage() {
                     {!competitorEnabled ? (
                       <Banner title="Competitor websites can be prepared ahead of activation" tone="info">
                         <p>
-                          You can prepare competitor websites now. Competitor analysis starts when a plan with Competitor Intelligence is active.
+                          You can prepare competitor websites now. Competitor analysis starts when a plan with Market Signals is active.
                         </p>
                       </Banner>
                     ) : null}
@@ -422,7 +422,7 @@ export function SettingsPage() {
                     {!pricingProfitEnabled ? (
                       <Banner title="Pricing & Profit settings are staged for activation" tone="info">
                         <p>
-                          Settings are always open, but AI pricing changes and profit guardrails only become live once the matching plan access is active.
+                          Settings are always open, but pricing changes and profit guardrails only become live once the matching plan access is active.
                         </p>
                       </Banner>
                     ) : null}

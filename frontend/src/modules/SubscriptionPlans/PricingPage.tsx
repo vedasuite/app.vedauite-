@@ -142,7 +142,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     ],
     includedFeatureBullets: [
       "Choose Fraud & Return Protection",
-      "Or choose Competitor Intelligence",
+      "Or choose Market Signals",
     ],
     idealFor: "Small stores that want one focused workflow first.",
   },
@@ -151,7 +151,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     priceLabel: "$49/month",
     summary: "Advanced competitor and pricing intelligence.",
     featureBullets: [
-      "AI pricing recommendations (limited — full Profit Optimization is Pro-only)",
+      "Pricing recommendations (limited — full Product Profit is Pro-only)",
       "Automated competitor monitoring",
       "Product match detection",
       "Pricing change alerts",
@@ -159,7 +159,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     ],
     includedFeatureBullets: [
       "Trust & Abuse",
-      "Competitor Intelligence",
+      "Market Signals",
       "Pricing & Profit (limited)",
     ],
     idealFor: "Stores that want competitor, pricing, and risk insights together.",
@@ -168,9 +168,9 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   PRO: {
     planName: "PRO",
     priceLabel: "$99/month",
-    summary: "Full AI commerce intelligence suite.",
+    summary: "The complete VedaSuite engine set.",
     featureBullets: [
-      "AI profit optimization",
+      "Product profit optimization",
       "Advanced shopper scoring",
       "Competitor trend analytics",
       "Multi-store insights",
@@ -178,7 +178,7 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     ],
     includedFeatureBullets: [
       "Trust & Abuse",
-      "Competitor Intelligence",
+      "Market Signals",
       "Pricing & Profit (complete)",
       "Advanced Pro features",
     ],
@@ -188,9 +188,9 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
 
 function starterLabel(moduleKey: StarterModule | null) {
   return moduleKey === "fraud"
-    ? "Fraud Intelligence"
+    ? "Customer Loss"
     : moduleKey === "competitor"
-    ? "Competitor Intelligence"
+    ? "Market Signals"
     : "Not selected";
 }
 
@@ -872,14 +872,14 @@ export function PricingPage() {
                           Choose Starter feature
                         </Text>
                         <RadioButton
-                          label="Fraud Intelligence"
+                          label="Customer Loss"
                           id="starter-trust-abuse"
                           name="starter-module"
                           checked={starterModule === "fraud"}
                           onChange={() => setStarterModule("fraud")}
                         />
                         <RadioButton
-                          label="Competitor Intelligence"
+                          label="Market Signals"
                           id="starter-competitor"
                           name="starter-module"
                           checked={starterModule === "competitor"}

@@ -93,13 +93,13 @@ export default function App() {
         <Route path="/" element={<EntryRoute />} />
         <Route path="/app" element={<EntryRoute />} />
         <Route path="/app/onboarding" element={withRouteBoundary("Onboarding", <OnboardingPage />)} />
-        <Route path="/app/dashboard" element={withRouteBoundary("Dashboard", <DashboardPage />)} />
+        <Route path="/app/dashboard" element={withRouteBoundary("Store Overview", <DashboardPage />)} />
         <Route path="/app/action-center" element={withRouteBoundary("Action Center", <ActionCenterPage />)} />
         <Route
           path="/app/fraud-intelligence"
           element={
             withRouteBoundary(
-              "Fraud Intelligence",
+              "Customer Loss",
               <InsightRoute moduleKey="fraud">
                 <TrustAbusePage />
               </InsightRoute>
@@ -110,7 +110,7 @@ export default function App() {
           path="/app/competitor-intelligence"
           element={
             withRouteBoundary(
-              "Competitor Intelligence",
+              "Market Signals",
               <InsightRoute moduleKey="competitor">
                 <CompetitorPage />
               </InsightRoute>
@@ -121,7 +121,7 @@ export default function App() {
           path="/app/ai-pricing-engine"
           element={
             withRouteBoundary(
-              "AI Pricing Engine",
+              "Pricing & Product Profit",
               <InsightRoute moduleKey="pricing">
                 <PricingProfitPage />
               </InsightRoute>

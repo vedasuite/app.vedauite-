@@ -1143,7 +1143,7 @@ export function DashboardPage() {
 
   if (loading) {
     return (
-      <Page title="Dashboard" subtitle="Loading store metrics and insights.">
+      <Page title="Store Overview" subtitle="Loading store metrics and findings.">
         <Card>
           <InlineStack align="center">
             <Spinner accessibilityLabel="Loading dashboard" size="large" />
@@ -1161,8 +1161,8 @@ export function DashboardPage() {
     <div className="veda-page-wide">
       <Page
         fullWidth
-        title="Your store intelligence overview"
-        subtitle="Key alerts, recommendations, and direct access to each VedaSuite workflow."
+        title="Store Overview"
+        subtitle="A summary of the open findings in your Action Center, plus store health and direct access to each workspace."
         primaryAction={{
           content: "Update insights",
           onAction: () => void syncLiveStoreData(),
@@ -1553,7 +1553,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Fraud Intelligence
+                          Customer Loss
                         </Text>
                         <Text as="p" tone="subdued">
                           {fraudQuickAccessDisplay.reason ??
@@ -1591,7 +1591,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Competitor Intelligence
+                          Market Signals
                         </Text>
                         <Text as="p" tone="subdued">
                           {competitorQuickAccessDisplay.reason ??
@@ -1629,7 +1629,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          AI Pricing Engine
+                          Pricing & Product Profit
                         </Text>
                         <Text as="p" tone="subdued">
                           {pricingQuickAccessDisplay.reason ??

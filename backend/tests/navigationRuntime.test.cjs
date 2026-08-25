@@ -167,8 +167,13 @@ test("PURITY: the model holds no state between calls", () => {
   assert.notEqual(first, third, "must return a fresh array, never a shared reference");
 
   // Mutating a returned entry must not corrupt the next call.
-  first[2].label = "MUTATED";
-  assert.equal(buildNavigationModel(NO_MODULES)[2].label, "Action Center");
+  // Looked up by path, not by index: this test is about purity, and pinning it
+  // to a position made it fail when Phase G/H reordered the menu — which is a
+  // false alarm, not a purity violation.
+  const actionCenterOf = (entries) =>
+    entries.find((e) => e.path === "/app/action-center");
+  actionCenterOf(first).label = "MUTATED";
+  assert.equal(actionCenterOf(buildNavigationModel(NO_MODULES)).label, "Action Center");
 });
 
 test("SANITY: the model and AppFrame agree on the Action Center entry", () => {
@@ -179,4 +184,95 @@ test("SANITY: the model and AppFrame agree on the Action Center entry", () => {
   assert.equal(entry.label, "Action Center");
   assert.equal(entry.badge, undefined);
   assert.equal(labels(GROWTH_MODULES).length, NAV_PATHS.length);
+});
+
+// ===========================================================================
+// PHASE G/H — positioning
+// ===========================================================================
+
+test("G/H: the Action Center is the first working surface in the menu", () => {
+  // Onboarding comes first only while there is setup to do. Of the surfaces a
+  // merchant works in, the Action Center must lead: it is the only one that
+  // knows what needs doing, in what order, with evidence and a lifecycle.
+  const entries = buildNavigationModel(GROWTH_MODULES);
+  const paths = entries.map((e) => e.path);
+  assert.equal(paths[0], "/app/onboarding");
+  assert.equal(paths[1], "/app/action-center");
+  assert.ok(
+    paths.indexOf("/app/action-center") < paths.indexOf("/app/dashboard"),
+    "the Action Center must precede the Store Overview"
+  );
+});
+
+test("G/H: no merchant-facing label claims AI", () => {
+  // The pricing and profit engines are arithmetic over cost, price and
+  // observed velocity with an explicit evidence gate. No model is involved, so
+  // "AI Pricing Engine" was a capability claim VedaSuite could not defend.
+  // The one genuine AI surface is the Action Center brief, which labels itself
+  // at the point of use rather than in the navigation.
+  for (const entry of buildNavigationModel(GROWTH_MODULES)) {
+    assert.doesNotMatch(
+      entry.label,
+      /\bAI\b/i,
+      `"${entry.label}" must not claim AI in the navigation`
+    );
+  }
+});
+
+test("G/H: labels use the engine family vocabulary", () => {
+  const byPath = Object.fromEntries(
+    buildNavigationModel(GROWTH_MODULES).map((e) => [e.path, e.label])
+  );
+  assert.equal(byPath["/app/action-center"], "Action Center");
+  assert.equal(byPath["/app/dashboard"], "Store Overview");
+  assert.equal(byPath["/app/fraud-intelligence"], "Customer Loss");
+  assert.equal(byPath["/app/ai-pricing-engine"], "Pricing & Product Profit");
+  assert.equal(byPath["/app/competitor-intelligence"], "Market Signals");
+});
+
+test("SAFETY: renaming labels did not rename any route", () => {
+  // Stored finding snapshots carry a `route` pointing at these exact URLs, and
+  // those rows are merchant data written by past syncs. A renamed path would
+  // silently break the Open button on every historical finding.
+  const paths = new Set(buildNavigationModel(null).map((e) => e.path));
+  for (const required of [
+    "/app/onboarding",
+    "/app/dashboard",
+    "/app/action-center",
+    "/app/fraud-intelligence",
+    "/app/competitor-intelligence",
+    "/app/ai-pricing-engine",
+    "/app/billing",
+    "/app/settings",
+    "/app/support",
+  ]) {
+    assert.ok(paths.has(required), `${required} must still exist`);
+  }
+});
+
+test("SAFETY: renaming labels did not change any entitlement key", () => {
+  // Display names changed; the badge still keys off fraud / pricing /
+  // competitor exactly as the billing system expects.
+  const gated = buildNavigationModel({
+    fraud: false,
+    competitor: false,
+    pricing: false,
+  });
+  const badgeFor = (p) => gated.find((e) => e.path === p)?.badge;
+  assert.equal(badgeFor("/app/fraud-intelligence"), "Upgrade");
+  assert.equal(badgeFor("/app/ai-pricing-engine"), "Upgrade");
+  assert.equal(badgeFor("/app/competitor-intelligence"), "Upgrade");
+
+  const enabled = buildNavigationModel({
+    fraud: true,
+    competitor: true,
+    pricing: true,
+  });
+  for (const p of [
+    "/app/fraud-intelligence",
+    "/app/ai-pricing-engine",
+    "/app/competitor-intelligence",
+  ]) {
+    assert.equal(enabled.find((e) => e.path === p)?.badge, undefined);
+  }
 });

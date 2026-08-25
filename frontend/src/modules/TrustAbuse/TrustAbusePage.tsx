@@ -21,6 +21,7 @@ import { useAppState } from "../../hooks/useAppState";
 import { useShopifyAdminLinks } from "../../hooks/useShopifyAdminLinks";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { isBackendModuleEnabled } from "../../lib/backendModuleAccess";
+import { ModuleInsights } from "../Dashboard/components/ModuleInsights";
 import {
   fraudBannerFor,
   fraudRefreshToast,
@@ -308,11 +309,11 @@ export function TrustAbusePage() {
 
   if (!allowed || planLocked) {
     return (
-      <Page title="Detect refund abuse and customer risk" subtitle="Fraud Intelligence keeps refund abuse, risky customers, and order-risk review in one operational workspace.">
+      <Page title="Customer Loss" subtitle="Refund abuse, risky customers, and order-risk review in one operational workspace.">
         <Layout>
           <Layout.Section>
             <Banner title="Upgrade required: Starter, Growth, or Pro" tone="info">
-              <p>Fraud Intelligence is available on Trial, Growth, Pro, or Starter when it is your selected Starter feature.</p>
+              <p>Customer Loss is available on Trial, Growth, Pro, or Starter when it is your selected Starter feature.</p>
             </Banner>
           </Layout.Section>
           <Layout.Section>
@@ -336,18 +337,41 @@ export function TrustAbusePage() {
 
   return (
     <Page
-      title="Fraud Intelligence"
-      subtitle="Review risky orders, customer behavior, and the policy actions VedaSuite recommends right now."
+      title="Customer Loss"
+      subtitle="Review risky orders, customer behaviour, and the policy actions VedaSuite recommends right now."
       primaryAction={{ content: "Refresh", onAction: () => void loadOverview(true), loading, disabled: loading }}
     >
       <Layout>
         {loading ? (
           <Layout.Section>
-            <Banner title="Refreshing fraud intelligence" tone="info">
+            <Banner title="Refreshing customer loss analysis" tone="info">
               <p>VedaSuite is updating the review queue, customer evidence, and policy recommendations.</p>
             </Banner>
           </Layout.Section>
         ) : null}
+        {/*
+          The customer-loss family's explainable insights.
+          Competitor and Pricing already carried this panel; this page did not,
+          so the fraud/trust/return-abuse insights existed ONLY inside the
+          store-level Dashboard sections. Phase F removed those sections because
+          they contradicted the Action Center, and this restores the same
+          content here — scoped to one family, where it is an analysis of this
+          workspace rather than a competing store-level headline.
+        */}
+        <Layout.Section>
+          <ModuleInsights
+            modules={["fraud", "trust", "return_abuse"]}
+            title="Customer loss insights"
+            pressureLabel="Loss pressure"
+            pressureCaption="Weighted from the urgency of open refund-abuse and risky-order findings."
+            emptyWhy="Customer-loss findings need enough order and refund history to tell a pattern from a coincidence. VedaSuite stays silent rather than calling a single refund a trend."
+            emptySteps={[
+              "Let more order and refund history accumulate",
+              "Keep monitoring running so repeat patterns can be recognised",
+              "Review the Action Center for anything already raised",
+            ]}
+          />
+        </Layout.Section>
         {/* One banner per real state. "Still preparing" is now reserved for
             work genuinely in progress; a synced store without enough history
             says so plainly, and a ready store with nothing risky gets a
