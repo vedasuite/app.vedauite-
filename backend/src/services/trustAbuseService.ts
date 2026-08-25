@@ -94,15 +94,19 @@ export async function getTrustAbuseOverview(shopDomain: string) {
               typeof metadata.customerEmail === "string"
                 ? maskIdentity(metadata.customerEmail, "Customer profile")
                 : "Customer profile",
-            // NULL rather than an invented 60. Showing a trust score of 60 for
-            // a shopper who has no recorded score is a fabricated claim, and
-            // the 60 + scoreImpact baseline is the same constant in disguise.
-            trustScore:
-              typeof metadata.score === "number"
-                ? metadata.score
-                : typeof event.scoreImpact === "number"
-                ? Math.max(0, Math.min(100, 60 + event.scoreImpact))
-                : null,
+            // NULL rather than an invented number.
+            //
+            // PHASE J. The comment here already said "the 60 + scoreImpact
+            // baseline is the same constant in disguise" — and the code below
+            // it went on to compute exactly that. Only the FIRST branch was
+            // ever fixed. `scoreImpact` is a DELTA; reconstructing an absolute
+            // score from it requires a baseline, VedaSuite has no observed
+            // baseline for a shopper it never scored, and 60 was that missing
+            // baseline wearing arithmetic as a disguise.
+            //
+            // The stored metadata score is the only observed value here. When
+            // it is absent there is no trust score, and the UI says so.
+            trustScore: typeof metadata.score === "number" ? metadata.score : null,
             tier:
               typeof metadata.category === "string"
                 ? metadata.category
@@ -119,20 +123,34 @@ export async function getTrustAbuseOverview(shopDomain: string) {
             occurredAt: event.createdAt,
           };
         })
-      : customers.slice(0, 6).map((customer) => ({
-          id: customer.id,
-          shopper: maskIdentity(customer.email, "Customer profile"),
-          trustScore: customer.creditScore,
-          tier: customer.creditCategory,
-          refundRate: Number((customer.refundRate * 100).toFixed(1)),
-          eventSummary:
-            customer.creditScore >= 80
-              ? "Trusted handling history with low refund pressure."
-              : customer.creditScore < 50
-              ? "Escalating trust concerns from refund and fraud signals."
-              : "Normal trust posture with periodic review.",
-          occurredAt: null,
-        }));
+      : customers.slice(0, 6).map((customer) => {
+          // PHASE J. `Customer.creditScore` is `Int @default(50)`, so EVERY
+          // customer row has a score whether or not one was ever computed. Read
+          // straight through, a shopper VedaSuite has never assessed appeared
+          // with a trust score of 50 and the wording "Normal trust posture with
+          // periodic review" — a database default presented as an observation.
+          //
+          // A score is treated as observed only when the customer has activity
+          // behind it. Without that there is no score and no posture claim.
+          const assessed = customer.totalOrders > 0 || customer.totalRefunds > 0;
+          const score = assessed ? customer.creditScore : null;
+          return {
+            id: customer.id,
+            shopper: maskIdentity(customer.email, "Customer profile"),
+            trustScore: score,
+            tier: assessed ? customer.creditCategory : "Not yet assessed",
+            refundRate: Number((customer.refundRate * 100).toFixed(1)),
+            eventSummary:
+              score == null
+                ? "No trust score recorded for this shopper yet."
+                : score >= 80
+                ? "Trusted handling history with low refund pressure."
+                : score < 50
+                ? "Escalating trust concerns from refund and fraud signals."
+                : "Normal trust posture with periodic review.",
+            occurredAt: null,
+          };
+        });
 
   const trustTierSummary = [
     {

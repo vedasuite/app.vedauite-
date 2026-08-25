@@ -224,17 +224,46 @@ function calculateReturnAbuseScore(customer: StoreSnapshot["customers"][number])
 
 function buildOrderRisk(order: StoreSnapshot["orders"][number]) {
   const customerRefundRate = order.customer?.refundRate ?? 0;
-  const customerTrustScore = order.customer?.creditScore ?? 55;
   const signalPressure =
     order.fraudSignals.reduce((sum, signal) => sum + signal.riskScore, 0) /
     Math.max(1, order.fraudSignals.length);
 
+  // PHASE J — the trust term contributes only when a trust score was OBSERVED.
+  //
+  // This used to read `order.customer?.creditScore ?? 55`, so an order from a
+  // customer VedaSuite had never scored silently contributed 4.5 points of
+  // "risk" derived from nothing. That number then set the High / Medium / Low
+  // badge a merchant acts on.
+  //
+  // Dropping the term to zero would be just as wrong in the other direction: a
+  // scoreless customer would look SAFER than a well-scored one. So the weight
+  // is REDISTRIBUTED — the remaining observed components are rescaled to fill
+  // the missing 0.1 — and the score stays a weighted average of things
+  // VedaSuite actually knows.
+  //
+  // `creditScore` is Int @default(50), so a bare non-null check would let the
+  // database default back in. Activity is what makes the score an observation.
+  const customer = order.customer;
+  const trustObserved =
+    !!customer && ((customer.totalOrders ?? 0) > 0 || (customer.totalRefunds ?? 0) > 0);
+
+  const observedWeights = trustObserved
+    ? { fraud: 0.45, pressure: 0.25, refund: 0.2, trust: 0.1 }
+    : { fraud: 0.45, pressure: 0.25, refund: 0.2, trust: 0 };
+  const weightSum =
+    observedWeights.fraud +
+    observedWeights.pressure +
+    observedWeights.refund +
+    observedWeights.trust;
+  const rescale = 1 / weightSum;
+
   const score = clamp(
     Math.round(
-      Math.max(order.fraudScore, 0) * 0.45 +
-        signalPressure * 0.25 +
-        customerRefundRate * 100 * 0.2 +
-        (100 - customerTrustScore) * 0.1 +
+      (Math.max(order.fraudScore, 0) * observedWeights.fraud +
+        signalPressure * observedWeights.pressure +
+        customerRefundRate * 100 * observedWeights.refund +
+        (trustObserved ? (100 - customer!.creditScore) * observedWeights.trust : 0)) *
+        rescale +
         (order.refundRequested ? 8 : 0)
     ),
     0,
@@ -289,7 +318,9 @@ function buildTimelineEvents(store: StoreSnapshot) {
     title: string;
     detail: string;
     severity: string;
-    scoreImpact?: number;
+    // Nullable: the column is `Int?`, and null means "no prior score to
+    // measure a movement against" rather than "no movement".
+    scoreImpact?: number | null;
     metadataJson?: string;
     createdAt: Date;
   }> = [];
@@ -312,7 +343,15 @@ function buildTimelineEvents(store: StoreSnapshot) {
         detail: `Trust score ${trust.score} with ${customer.totalOrders} orders and ${customer.totalRefunds} refunds.`,
       }),
       severity: trust.score >= 80 ? "success" : trust.score >= 55 ? "info" : "warning",
-      scoreImpact: trust.score - (customer.creditScore ?? 50),
+      // PHASE J. A delta needs something to be a delta FROM. `creditScore` is
+      // Int @default(50), so for a customer who has never been scored this
+      // computed `trust.score - 50` and stored it as a real movement — and the
+      // trust workspace then rebuilt an absolute score from it. Null when there
+      // is no prior assessment: no baseline, no delta.
+      scoreImpact:
+        customer.totalOrders > 0 || customer.totalRefunds > 0
+          ? trust.score - customer.creditScore
+          : null,
       metadataJson: JSON.stringify({
         customerEmail: customer.email,
         score: trust.score,

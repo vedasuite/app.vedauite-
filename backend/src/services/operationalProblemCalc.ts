@@ -297,7 +297,7 @@ export function detectHighRiskBacklog(input: {
         "raised is not knowable — VedaSuite stores no chargeback data.",
     },
     recommendedAction:
-      "Open Fraud Intelligence and clear the oldest high-risk orders first. No automatic action was taken.",
+      "Open Customer Loss and clear the oldest high-risk orders first. No automatic action was taken.",
     subjectKey: "high_risk_backlog",
   };
 }
@@ -529,7 +529,7 @@ export function detectDataCoverage(input: {
       note: "Computed from counts of stored rows only.",
     },
     recommendedAction:
-      "Add product cost data in the AI Pricing Engine to improve margin accuracy. No automatic action was taken.",
+      "Add product cost data in the Pricing & Product Profit to improve margin accuracy. No automatic action was taken.",
     subjectKey: "data_coverage",
   };
 }

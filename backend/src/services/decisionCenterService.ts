@@ -129,7 +129,7 @@ export async function getUnifiedDecisionCenter(shopDomain: string) {
     decisions.push({
       id: "competitor_signal",
       title: `Respond to ${competitorSignal.productHandle} market pressure`,
-      module: "Competitor Intelligence",
+      module: "Market Signals",
       severity: competitorSignal.promotion ? "High" : "Medium",
       rationale: competitorSignal.promotion
         ? `Promotion detected from ${competitorSignal.competitorName}.`

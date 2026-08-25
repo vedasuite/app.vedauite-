@@ -30,8 +30,8 @@ function buildSyncActivitySummary(params: {
   const competitorRows = params.operational.counts.competitorRows;
   const competitorReason =
     competitorRows > 0
-      ? "Competitor analysis is managed from Competitor Intelligence."
-      : "Open Competitor Intelligence to add competitor websites and run analysis.";
+      ? "Competitor analysis is managed from Market Signals."
+      : "Open Market Signals to add competitor websites and run analysis.";
 
   return {
     ordersProcessed: params.syncResult.ordersSynced,

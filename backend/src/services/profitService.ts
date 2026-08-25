@@ -17,7 +17,7 @@ async function assertProPlan(shopDomain: string) {
     subscription.featureAccess.fullProfitEngine;
 
   if (!hasFullProfitAccess) {
-    throw new HttpError(403, "AI Profit Optimization Engine is available only on PRO.");
+    throw new HttpError(403, "Product Profit optimization is available only on PRO.");
   }
 
   return store;

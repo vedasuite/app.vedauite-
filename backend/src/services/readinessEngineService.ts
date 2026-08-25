@@ -501,7 +501,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
     }),
     title:
       !subscription.enabledModules.fraud
-        ? "Fraud Intelligence is locked"
+        ? "Customer Loss is locked"
         : operational.counts.timelineEvents > 0
         ? "Fraud protection enabled"
         : syncStatus.status === "SYNC_IN_PROGRESS" ||
@@ -510,7 +510,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         : "Sync orders to enable fraud protection",
     description:
       !subscription.enabledModules.fraud
-        ? "Upgrade the current plan to unlock Fraud Intelligence."
+        ? "Upgrade the current plan to unlock Customer Loss."
       : operational.counts.timelineEvents > 0
         ? "Risk checks and refund-abuse signals are available from recent store activity."
       : syncStatus.status === "FAILED"
@@ -520,7 +520,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.fraud
         ? "Open billing"
       : operational.counts.timelineEvents > 0
-        ? "Open Fraud Intelligence"
+        ? "Open Customer Loss"
         : "Update store insights",
     route: subscription.enabledModules.fraud ? "/app/fraud-intelligence" : "/app/billing",
     freshnessAt: lastProcessingAt,
@@ -547,7 +547,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
   });
   const competitorDescription =
     !subscription.enabledModules.competitor
-      ? "Upgrade the current plan to unlock Competitor Intelligence."
+      ? "Upgrade the current plan to unlock Market Signals."
       : !competitorHasSetup
       ? "Add competitor websites to begin tracking pricing and product trends."
       : competitorFailed
@@ -567,7 +567,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         : competitorState,
     title:
       !subscription.enabledModules.competitor
-        ? "Competitor Intelligence is locked"
+        ? "Market Signals is locked"
         : !competitorHasSetup
         ? "Add competitor websites to begin analysis"
         : operational.counts.competitorRows > 0 && !isStaleTimestamp(operational.latestCompetitorAt)
@@ -582,7 +582,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       : !competitorHasSetup
         ? "Add competitor websites"
       : operational.counts.competitorRows > 0
-        ? "Open Competitor Intelligence"
+        ? "Open Market Signals"
         : "Review competitor websites and tracked products",
     route: subscription.enabledModules.competitor
       ? "/app/competitor-intelligence"
@@ -651,12 +651,12 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
         : "setup_needed",
     title:
       !subscription.enabledModules.pricing
-        ? "AI Pricing Engine is locked"
+        ? "Pricing & Product Profit is locked"
         : pricingViewState.status === "ready"
         ? "Pricing analysis ready"
         : pricingViewState.status === "failed_timeout" ||
           pricingViewState.status === "failed_error"
-        ? "AI Pricing Engine needs attention"
+        ? "Pricing & Product Profit needs attention"
         : pricingViewState.status === "syncing"
         ? "Pricing analysis is updating"
         : "More store activity is needed before pricing analysis is ready",
@@ -665,7 +665,7 @@ export async function getUnifiedReadinessState(shopDomain: string): Promise<Unif
       !subscription.enabledModules.pricing
         ? "Open billing"
         : pricingViewState.status === "ready"
-        ? "Open AI Pricing Engine"
+        ? "Open Pricing & Product Profit"
         : pricingViewState.nextAction ?? "Update store insights",
     route: subscription.enabledModules.pricing ? "/app/ai-pricing-engine" : "/app/billing",
     freshnessAt: pricingViewState.lastSuccessfulRunAt,

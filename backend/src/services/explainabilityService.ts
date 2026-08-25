@@ -261,17 +261,43 @@ export async function getDashboardInsights(
     if (compCount >= MAX_INSIGHTS_PER_MODULE) break;
     const pf = profitByHandle.get(c.productHandle);
     const ourPrice = pf?.sellingPrice ?? null;
+    // PHASE J. `ourPrice ?? 0` was safe only by coincidence: the same value is
+    // also passed as `sellingPrice`, and computeCompetitorImpact rejects a null
+    // or non-positive sellingPrice before it ever divides by ourPrice. Relying
+    // on two parameters happening to carry one value is a trap for whoever
+    // changes either of them, so the guard is stated here instead.
+    if (ourPrice == null || !(ourPrice > 0)) {
+      // No selling price means no gap to measure. Skipping is correct: a zero
+      // would make the competitor's entire price look like our exposure.
+      continue;
+    }
     const impact = calc.computeCompetitorImpact({
-      nowIso, currency, ourPrice: ourPrice ?? 0, competitorPrice: c.price,
+      nowIso, currency, ourPrice, competitorPrice: c.price,
       salesVelocity: pf?.salesVelocity ?? null, sellingPrice: ourPrice,
       matchConfidence: competitorConfidenceFromJson(c.insightsJson),
       collectedAtIso: c.collectedAt.toISOString(),
     });
-    const gap = ourPrice && c.price ? (ourPrice - c.price) / ourPrice : null;
+    // PHASE J. A second unsupported claim lived here. `reasons` asserted "A
+    // tracked competitor is priced below your product" UNCONDITIONALLY — even
+    // when the measured gap was negative, i.e. when the merchant was already
+    // the cheaper of the two. The title said the same thing. Both now follow
+    // the direction the numbers actually show.
+    const gap = c.price != null && c.price > 0 ? (ourPrice - c.price) / ourPrice : null;
+    if (gap == null) {
+      // No competitor price collected for this row: nothing to compare.
+      continue;
+    }
+    const competitorIsCheaper = gap > 0;
     insights.push({
       id: `competitor:${store.id}:${c.id}`, storeId: store.id, module: "competitor",
-      title: `Competitor price pressure on ${c.productHandle}`,
-      reasons: ["A tracked competitor is priced below your product."],
+      title: competitorIsCheaper
+        ? `Competitor price pressure on ${c.productHandle}`
+        : `Competitor price comparison for ${c.productHandle}`,
+      reasons: [
+        competitorIsCheaper
+          ? "A tracked competitor is priced below your product."
+          : "A tracked competitor is priced at or above your product.",
+      ],
       evidence: calc.buildAggregateEvidence({
         price_gap: gap != null ? `${(gap * 100).toFixed(1)}%` : undefined,
         match_confidence: competitorConfidenceFromJson(c.insightsJson),
@@ -317,7 +343,7 @@ export async function getDashboardInsights(
       financialImpact: r.financialImpact,
       confidence: r.financialImpact.status === "quantified" ? "medium" : "low",
       recency: nowIso, urgency: "medium", easeOfAction: "one_click_review",
-      recommendedAction: "Review this shopper’s refund history in Fraud Intelligence.",
+      recommendedAction: "Review this shopper’s refund history in Customer Loss.",
       score: blankScore(),
       methodology: { summary: "Excess-over-baseline; money over last 30 days; full order value used (no partial-refund amounts stored).", assumptions: ["≥5 customer & ≥50 store eligible orders."], caps: ["Capped at eligible 30-day order value."] },
       route: "/app/fraud-intelligence", dataQuality: r.financialImpact.status === "quantified" ? "ok" : "insufficient_data",
@@ -345,7 +371,7 @@ export async function getDashboardInsights(
       financialImpact: hr.financialImpact,
       confidence: "high", recency: nowIso,
       urgency: hr.orderCount >= 3 ? "critical" : "high", easeOfAction: "one_click_review",
-      recommendedAction: "Review open high-risk orders in Fraud Intelligence.",
+      recommendedAction: "Review open high-risk orders in Customer Loss.",
       score: blankScore(),
       methodology: { summary: `Sum of open High-risk order totals (statuses: ${calc.OPEN_HIGH_RISK_STATUSES.join(", ")}; excludes refunded).`, assumptions: ["Full order value at risk while unresolved."], caps: ["Point-in-time snapshot (current_open_exposure)."] },
       route: "/app/fraud-intelligence", dataQuality: "ok",

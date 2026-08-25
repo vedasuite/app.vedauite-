@@ -75,11 +75,11 @@ function moduleRoute(moduleKey: OnboardingModuleKey) {
 function moduleTitle(moduleKey: OnboardingModuleKey) {
   switch (moduleKey) {
     case "fraud":
-      return "Fraud Intelligence";
+      return "Customer Loss";
     case "competitor":
-      return "Competitor Intelligence";
+      return "Market Signals";
     case "pricing":
-      return "AI Pricing Engine";
+      return "Pricing & Product Profit";
   }
 }
 
@@ -170,7 +170,7 @@ export async function getOnboardingState(shopDomain: string) {
   const moduleAvailability = [
     {
       key: "fraud" as const,
-      title: "Fraud Intelligence",
+      title: "Customer Loss",
       route: moduleRoute("fraud"),
       summary: "Flags risky customers, detects refund abuse, and surfaces chargeback-risk orders.",
       planLabel: "Starter · Growth · Pro",
@@ -182,11 +182,11 @@ export async function getOnboardingState(shopDomain: string) {
       available: subscription.enabledModules.fraud,
       lockReason: subscription.enabledModules.fraud
         ? null
-        : "Included in Starter plan (choose Fraud Intelligence as your starter feature), Growth, and Pro. Go to Billing to choose a plan.",
+        : "Included in Starter plan (choose Customer Loss as your starter feature), Growth, and Pro. Go to Billing to choose a plan.",
     },
     {
       key: "competitor" as const,
-      title: "Competitor Intelligence",
+      title: "Market Signals",
       route: moduleRoute("competitor"),
       summary: "Tracks competitor prices, monitors promotions, and surfaces ad activity on your product handles.",
       planLabel: "Growth · Pro",
@@ -202,7 +202,7 @@ export async function getOnboardingState(shopDomain: string) {
     },
     {
       key: "pricing" as const,
-      title: "AI Pricing Engine",
+      title: "Pricing & Product Profit",
       route: moduleRoute("pricing"),
       summary: "Recommends optimal prices for your products, balancing margin and demand signals.",
       planLabel: "Growth · Pro",
@@ -312,7 +312,7 @@ export async function getOnboardingState(shopDomain: string) {
       label: "Step 2: Pick a feature to start with",
       complete: moduleSelectionComplete,
       description:
-        "Choose which VedaSuite feature to open first: Fraud Intelligence, Competitor Intelligence, or AI Pricing Engine.",
+        "Choose which VedaSuite feature to open first: Customer Loss, Market Signals, or Pricing & Product Profit.",
       helper:
         !dataSyncComplete
           ? "Finish syncing Shopify data first, then pick a feature below."
@@ -510,21 +510,21 @@ export async function getOnboardingState(shopDomain: string) {
       ? [
           {
             key: "fraud-guided",
-            module: "Fraud Intelligence",
+            module: "Customer Loss",
             title: "Guided setup: Customer flagged for repeated refund behaviour",
             detail:
               "Fraud insights appear here after Shopify orders and customer history are available.",
           },
           {
             key: "competitor-guided",
-            module: "Competitor Intelligence",
+            module: "Market Signals",
             title: "Guided setup: Competitor changed price on a tracked product",
             detail:
               "Competitor changes appear after competitor websites are connected and analysis completes.",
           },
           {
             key: "pricing-guided",
-            module: "AI Pricing Engine",
+            module: "Pricing & Product Profit",
             title: "Guided setup: Suggested price change based on baseline store data",
             detail:
               "Pricing actions appear after enough product and order history is available.",
