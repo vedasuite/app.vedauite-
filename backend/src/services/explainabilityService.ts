@@ -11,6 +11,10 @@ import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
 import { resolveEntitlements } from "./subscriptionService";
 import * as calc from "./explainabilityCalc";
+import {
+  classifyMonetaryClaim,
+  storedProfitValueIsObserved,
+} from "./evidenceEligibility";
 
 const MAX_INSIGHTS_PER_MODULE = 10;
 const IMPACT_CAP_FALLBACK = 1000;
@@ -200,23 +204,53 @@ export async function getDashboardInsights(
   }
   const selectedUpside = calc.dedupePotentialUpside(upsideCandidates).slice(0, MAX_INSIGHTS_PER_MODULE);
   for (const s of selectedUpside) {
-    const impact: calc.FinancialImpact = {
-      status: "quantified", min: 0, max: Math.round((s.amount ?? 0) * 100) / 100,
-      currency, period: "monthly_estimate", basis: `Selected source: ${s.source} (deduplicated per product/window).`, isEstimate: true,
-    };
+    // THE SHARED GATE. Pricing and the Dashboard ask the same question here, so
+    // they can no longer contradict each other.
+    //
+    // Both inputs a per-product monetary projection needs are unobservable
+    // today: there are no order line items (so velocity cannot be attributed to
+    // a product) and no Shopify cost feed (so margin cannot be computed). The
+    // values in ProfitOptimizationData are persisted FALLBACKS, so reading them
+    // back and null-checking is not an evidence check.
+    //
+    // This is what produced "Potential revenue $5,641" and "Expected return
+    // $680" on the Dashboard while Pricing correctly said "Not enough data yet".
+    const verdict = classifyMonetaryClaim({
+      salesVelocityObserved: storedProfitValueIsObserved(),
+      productCostObserved: storedProfitValueIsObserved(),
+    });
+
+    const impact: calc.FinancialImpact = verdict.allowed
+      ? {
+          status: "quantified", min: 0, max: Math.round((s.amount ?? 0) * 100) / 100,
+          currency, period: "monthly_estimate", basis: `Selected source: ${s.source} (deduplicated per product/window).`, isEstimate: true,
+        }
+      : {
+          status: "impact_not_quantifiable",
+          reason: verdict.explanation,
+        };
     insights.push({
       id: `upside:${s.storeId}:${calc.canonicalProductIdentity(s)}:${calc.analysisWindowUTC(s.createdAtIso)}`,
       storeId: store.id, module: "pricing", title: `Pricing opportunity on ${s.productHandle}`,
-      reasons: ["Recommended price is above current price with positive expected gain."],
+      reasons: verdict.allowed
+        ? ["Recommended price is above current price with positive expected gain."]
+        : ["A higher price may be possible for this product.", verdict.explanation],
       evidence: calc.buildAggregateEvidence({ margin_percentage: "" }),
-      financialImpact: impact, confidence: "medium", recency: s.createdAtIso,
+      financialImpact: impact, confidence: verdict.confidence, recency: s.createdAtIso,
       urgency: "medium", easeOfAction: "guided",
-      recommendedAction: "Review and apply the recommended price in Shopify.",
+      recommendedAction: verdict.allowed
+        ? "Review and apply the recommended price in Shopify."
+        : "Review this product manually. VedaSuite cannot size the opportunity until the missing data is available.",
       score: blankScore(),
       methodology: { summary: "One estimate per product/window via source priority.", assumptions: ["Advisory estimate; merchant applies price."], caps: ["Never sums multiple sources for one product."] },
       route: "/app/ai-pricing-engine", dataQuality: "ok",
     });
-    upsideItems.push({ key: s.productHandle, label: `Upside — ${s.productHandle}`, min: 0, max: impact.status === "quantified" ? impact.max : 0, period: "monthly_estimate", confidence: "medium" });
+    // Only a permitted figure may enter the revenue-leak groups that feed the
+    // Dashboard headline. A refused claim contributes nothing at all - it must
+    // not appear as a 0 that silently widens a range either.
+    if (impact.status === "quantified") {
+      upsideItems.push({ key: s.productHandle, label: `Upside — ${s.productHandle}`, min: 0, max: impact.max, period: "monthly_estimate", confidence: verdict.confidence });
+    }
   }
 
   // ---------- Competitor price pressure ----------
