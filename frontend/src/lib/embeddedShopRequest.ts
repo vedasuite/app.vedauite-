@@ -1,4 +1,8 @@
-import { bustSessionTokenCache, getEmbeddedSessionToken } from "../shopifyAppBridge";
+import {
+  bustSessionTokenCache,
+  getEmbeddedSessionToken,
+  isTokenUsable,
+} from "../shopifyAppBridge";
 import { withRequestTimeout } from "./requestTimeout";
 import { getEmbeddedContext } from "./shopifyEmbeddedContext";
 
@@ -10,10 +14,19 @@ type EmbeddedRequestOptions = {
   signal?: AbortSignal;
 };
 
-// Retries reserved for expired/invalid session tokens, independent of the
-// caller's retry budget. Two is enough: the first fetches a fresh token, the
-// second covers App Bridge still initialising on a cold load.
-const AUTH_RETRIES = 2;
+/**
+ * At most ONE automatic retry for an expired session token.
+ *
+ * One is the right number and more is not: by the time a 401 comes back, the
+ * only recoverable cause is a stale token, and a single forced re-mint either
+ * fixes that or proves it was never the problem. Retrying twice against a
+ * genuine authorization failure just delays the honest error the merchant needs
+ * to see.
+ *
+ * App Bridge still initialising is handled before the request instead —
+ * getEmbeddedSessionToken awaits readiness — so it does not need a retry here.
+ */
+const AUTH_RETRIES = 1;
 
 function buildUrl(path: string) {
   const url = new URL(path, window.location.origin);
@@ -153,14 +166,17 @@ function isRetriableError(error: unknown) {
 }
 
 async function acquireSessionToken(bust = false): Promise<string | null> {
-  // On 401 retry, the cached token was just rejected — force a fresh idToken() call.
+  // On 401 retry, the cached token was just rejected — force a fresh idToken()
+  // call. `forceFresh` also drops this shop's cache entry inside the token
+  // layer BEFORE it reads anything, so the rejected token cannot be served
+  // again by a concurrent caller in the same tick.
   if (bust) {
     bustSessionTokenCache();
   }
 
   const t0 = Date.now();
   try {
-    const token = await getEmbeddedSessionToken();
+    const token = await getEmbeddedSessionToken({ forceFresh: bust });
     if (token) {
       // eslint-disable-next-line no-console
       console.info("[vedasuite.auth] session_token_acquired", { ms: Date.now() - t0, tokenLength: token.length });
@@ -221,12 +237,24 @@ export async function embeddedShopRequest<T = unknown>(
           responseResult.response.headers.get(
             "x-shopify-retry-invalid-session-request"
           ) === "1";
-        const willRetry = shopifyWantsRetry && authAttempt < AUTH_RETRIES;
+
+        // The client's OWN evidence, not just the server's hint.
+        //
+        // Retrying only when the server sets that header made recovery depend
+        // on something outside this codebase: a proxy that strips it, or any
+        // 401 raised before that middleware runs, left the merchant staring at
+        // "Invalid Shopify session token" during ordinary navigation. We can
+        // see for ourselves whether the token we just sent had expired, and
+        // that is sufficient grounds to re-mint and try again.
+        const sentTokenWasStale = !!sessionToken && !isTokenUsable(sessionToken);
+        const willRetry =
+          (shopifyWantsRetry || sentTokenWasStale) && authAttempt < AUTH_RETRIES;
         // eslint-disable-next-line no-console
         console.warn("[vedasuite.auth] 401_received", {
           path,
           authAttempt,
           shopifyWantsRetry,
+          sentTokenWasStale,
           willRetry,
         });
         if (willRetry) {

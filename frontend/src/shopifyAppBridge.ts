@@ -44,8 +44,70 @@ export function bustSessionTokenCache() {
 // Widening the margin only makes the client refresh sooner. It does NOT extend
 // the token's lifetime, is not persisted anywhere, and does not weaken backend
 // verification — the server still rejects anything genuinely expired.
-const TOKEN_EXPIRY_SAFETY_MS = 25_000;
+export const TOKEN_EXPIRY_SAFETY_MS = 25_000;
 const MAX_TOKEN_CACHE_MS = 30_000;
+
+/**
+ * How close to expiry a token may be and still be SENT.
+ *
+ * Deliberately much smaller than the cache margin above, because the two
+ * margins answer different questions:
+ *
+ *   TOKEN_EXPIRY_SAFETY_MS — may this token still be served FROM CACHE for some
+ *                            unknown future request? Conservative on purpose.
+ *   TOKEN_USABLE_MARGIN_MS — will this token still be valid when THIS request
+ *                            lands, moments from now? Only needs to cover
+ *                            network latency and clock skew.
+ *
+ * Using the cache margin at the point of use would reject perfectly good tokens
+ * with 20 seconds of life left and re-mint for no reason.
+ */
+export const TOKEN_USABLE_MARGIN_MS = 5_000;
+
+/**
+ * Milliseconds until the token's OWN `exp` claim, or null if unreadable.
+ *
+ * The JWT is the authority here, not our bookkeeping. That distinction is the
+ * whole defect this file previously had — see isTokenUsable.
+ */
+export function millisUntilTokenExpiry(
+  token: string,
+  now: number = Date.now()
+): number | null {
+  const expiry = readTokenExpiry(token);
+  return expiry === null ? null : expiry - now;
+}
+
+/**
+ * Whether a token can still be sent.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * getEmbeddedSessionToken used to return whatever App Bridge handed back, and
+ * the cached path trusted `expiresAt` — a value WE computed when we stored it.
+ * Neither path ever asked the token itself whether it was still alive.
+ *
+ * So a dead JWT could go out: App Bridge can return a token from its own cache
+ * that is already most of the way through its ~60s life, and a backgrounded tab
+ * or clock skew can put our bookkeeping and the JWT's `exp` out of step. The
+ * server then answered 401 "jwt expired". Worse, busting OUR cache on retry did
+ * not force App Bridge to mint a new one, so the retry could send the same dead
+ * token and the merchant finally saw the raw error — recoverable only by a full
+ * page refresh, which is exactly what was reported.
+ *
+ * A token with no readable `exp` is treated as usable: it may be a test double
+ * or an opaque format, and refusing to send it would break the request for a
+ * reason we cannot actually demonstrate. The server remains the authority.
+ */
+export function isTokenUsable(
+  token: string | null | undefined,
+  now: number = Date.now()
+): boolean {
+  if (!token) return false;
+  const remaining = millisUntilTokenExpiry(token, now);
+  if (remaining === null) return true;
+  return remaining > TOKEN_USABLE_MARGIN_MS;
+}
 
 function readTokenExpiry(token: string): number | null {
   try {
@@ -107,7 +169,45 @@ export function resetAppBridgeReadyState() {
   appBridgeReadyPromise = null;
 }
 
-export async function getEmbeddedSessionToken(): Promise<string | null> {
+/**
+ * Asks App Bridge for a token and refuses to hand back a dead one.
+ *
+ * If the minted token is already past its usable margin, it is retried ONCE —
+ * App Bridge may have served its own cached copy the first time. If the second
+ * attempt is also dead, that is a real condition (badly skewed clock, or an App
+ * Bridge that needs the page reloaded) and it is reported rather than sent, so
+ * the failure names its cause instead of arriving as a generic 401.
+ */
+async function mintUsableToken(bridge: { idToken(): Promise<string> }): Promise<string> {
+  const first = await withRequestTimeout(
+    bridge.idToken(),
+    12000,
+    "Shopify session token request timed out."
+  );
+  if (isTokenUsable(first)) {
+    return first;
+  }
+
+  // Bounded: exactly one re-mint, never a loop.
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+  const second = await withRequestTimeout(
+    bridge.idToken(),
+    12000,
+    "Shopify session token request timed out."
+  );
+  if (isTokenUsable(second)) {
+    return second;
+  }
+
+  throw new Error(
+    "Shopify returned an already-expired session token twice. Reload VedaSuite " +
+      "from Shopify Admin; if this persists, check the device clock."
+  );
+}
+
+export async function getEmbeddedSessionToken(
+  options: { forceFresh?: boolean } = {}
+): Promise<string | null> {
   if (typeof window === "undefined") {
     return null;
   }
@@ -127,9 +227,20 @@ export async function getEmbeddedSessionToken(): Promise<string | null> {
   const { shop } = getEmbeddedContext();
   const cacheKey = shop || "default";
   const now = Date.now();
+
+  // A forced refresh discards this shop's entry BEFORE anything is read, so a
+  // token the server just rejected can never be served again from cache.
+  if (options.forceFresh) {
+    sessionTokenCache.delete(cacheKey);
+  }
+
   const cached = sessionTokenCache.get(cacheKey);
 
-  if (cached?.token && cached.expiresAt > now) {
+  // TWO conditions, both required. `expiresAt` is our own bookkeeping and can
+  // drift out of step with the JWT — after a backgrounded tab, or under clock
+  // skew — so the token's own `exp` is checked as well. Trusting only the
+  // former is what let a dead token reach the server.
+  if (cached?.token && cached.expiresAt > now && isTokenUsable(cached.token, now)) {
     return cached.token;
   }
 
@@ -137,11 +248,7 @@ export async function getEmbeddedSessionToken(): Promise<string | null> {
     return cached.inflight;
   }
 
-  const inflight = withRequestTimeout(
-    window.shopify.idToken(),
-    12000,
-    "Shopify session token request timed out."
-  ).then((token) => {
+  const inflight = mintUsableToken(window.shopify).then((token) => {
     sessionTokenCache.set(cacheKey, {
       token,
       expiresAt: cacheExpiryFor(token),
