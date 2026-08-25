@@ -278,6 +278,15 @@ model FraudSignal {
 }
 
 model CompetitorDomain {
+  /// Outcome of the most recent collection attempt. One of the
+  /// CompetitorFetchStatus values; NULL means never attempted. Persisted so the
+  /// UI never has to INFER why a domain has no fresh data.
+  lastAttemptAt     DateTime?
+  lastAttemptStatus String?
+  /// Technical detail for logs and support. Never shown to merchants.
+  lastAttemptDetail String?
+  /// When this domain last yielded usable data, whatever happened since.
+  lastSuccessAt     DateTime?
   id        String   @id @default(cuid())
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId   String

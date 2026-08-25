@@ -162,7 +162,10 @@ test("SAFETY: a failed fetch returns null and fabricates nothing", () => {
     path.resolve(__dirname, "../src/services/shopifyAdminService.ts"),
     "utf8"
   );
-  const block = admin.match(/competitor\.snapshot_fallback[\s\S]{0,200}/);
-  assert.ok(block, "the fallback path must exist");
+  // Renamed to competitor.fetch_failed in Phase D, and now carries a specific
+  // status instead of one undifferentiated fallback line.
+  const block = admin.match(/competitor\.fetch_failed[\s\S]{0,300}/);
+  assert.ok(block, "the failure path must exist");
   assert.match(block[0], /return null/, "it must return null, never synthetic data");
+  assert.match(block[0], /status: outcome\.status/, "and must record WHY it failed");
 });

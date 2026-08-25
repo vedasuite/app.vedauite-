@@ -3,6 +3,13 @@ import { env } from "../config/env";
 import { shopifyInt, shopifyFloat } from "../lib/shopifyScalars";
 import { logEvent, withRetry } from "./observabilityService";
 import {
+  classifyFetchError,
+  classifyHttpStatus,
+  classifySuccess,
+  classifyUnparseable,
+  type FetchOutcome,
+} from "./competitorFetchStatus";
+import {
   forceRefreshOfflineAccessToken,
   isShopifyAuthRejection,
   normalizeShopDomain,
@@ -604,7 +611,8 @@ export async function fetchCompetitorSnapshot(
     return await withRetry(
       async () => {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        // 4s aborted legitimately slow cold sites and looked like a hard failure.
+        const timeout = setTimeout(() => controller.abort(), 10000);
 
         try {
           const response = await fetch(
@@ -626,7 +634,14 @@ export async function fetchCompetitorSnapshot(
           }
 
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            const httpOutcome = classifyHttpStatus(domain, response.status);
+            lastFetchOutcome.set(domain, httpOutcome);
+            // Only a transient status is worth another attempt. A 403 block
+            // blocks again; retrying it wasted two requests per product.
+            if (!httpOutcome.retryable) {
+              return null;
+            }
+            throw new Error(httpOutcome.technicalDetail);
           }
 
           const html = await response.text();
@@ -657,8 +672,13 @@ export async function fetchCompetitorSnapshot(
           );
 
           if (extractedPrice == null && !promotionDetected && stockStatus === "in_stock") {
+            // Reachable, but no price signal found. Distinct from a failure:
+            // the merchant's domain is fine — VedaSuite could not parse it.
+            lastFetchOutcome.set(domain, classifyUnparseable(domain));
             return null;
           }
+
+          recordCompetitorFetchSuccess(domain, extractedPrice == null);
 
           return {
             competitorUrl: `https://${domain}/products/${productHandle}`,
@@ -696,13 +716,43 @@ export async function fetchCompetitorSnapshot(
         },
       }
     );
-  } catch {
-    logEvent("warn", "competitor.snapshot_fallback", {
+  } catch (error) {
+    // Classify the REAL cause. `TypeError: fetch failed` is Node's generic
+    // wrapper; the code lives in error.cause.code and was previously discarded,
+    // so an unresolvable domain, a blocked site and a slow site all looked
+    // identical — and all were retried, including the ones that can never
+    // succeed.
+    const outcome = classifyFetchError(domain, error);
+    logEvent(outcome.retryable ? "warn" : "info", "competitor.fetch_failed", {
       domain,
       productHandle,
+      status: outcome.status,
+      retryable: outcome.retryable,
+      detail: outcome.technicalDetail,
     });
+    lastFetchOutcome.set(domain, outcome);
     return null;
   }
+}
+
+/**
+ * Outcome of the most recent attempt per domain, for the caller to persist.
+ *
+ * In-process and intentionally simple: the sync writes it to CompetitorDomain
+ * immediately after the batch, so nothing depends on this surviving a restart.
+ */
+const lastFetchOutcome = new Map<string, FetchOutcome>();
+
+/** Reads and clears the recorded outcome for a domain. */
+export function takeCompetitorFetchOutcome(domain: string): FetchOutcome | null {
+  const outcome = lastFetchOutcome.get(domain) ?? null;
+  lastFetchOutcome.delete(domain);
+  return outcome;
+}
+
+/** Records a successful or partial read so the caller can persist it. */
+export function recordCompetitorFetchSuccess(domain: string, partial: boolean) {
+  lastFetchOutcome.set(domain, classifySuccess(domain, partial));
 }
 
 export async function syncShopifyStoreData(shopDomain: string) {

@@ -204,6 +204,7 @@ const HISTORICAL_MIGRATIONS = [
 const NON_HISTORICAL_MIGRATIONS = [
   "20260804_intelligence_finding_foundation",
   "20260825_profit_input_provenance",
+  "20260825_competitor_attempt_status",
 ];
 /** Kept for the post-deploy checks that name the original one. */
 const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];
