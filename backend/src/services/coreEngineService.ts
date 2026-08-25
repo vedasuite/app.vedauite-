@@ -93,7 +93,7 @@ type StoreSnapshot = {
   profitData: Array<{
     id: string;
     productHandle: string;
-    productCost: number;
+    productCost: number | null;
     sellingPrice: number;
     competitorAveragePrice: number | null;
     advertisingSpend: number | null;
@@ -553,8 +553,27 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
       );
     }
 
-    const productCost = latestProfit?.productCost ?? roundMoney(currentPrice * 0.58);
-    const salesVelocity = latestProfit?.salesVelocity ?? Math.max(4, store.orders.length / Math.max(1, baselineProducts.size));
+    // PROVENANCE. Assumptions are still used for INTERNAL ranking, but they are
+    // no longer persisted as if they were observations.
+    //
+    // A prior value only counts as observed if it was RECORDED as observed.
+    // Neither input is observable today — there is no Shopify cost feed and no
+    // order line items — so in practice both resolve to "assumed", and the
+    // stored column is left NULL rather than filled with a guess.
+    const costObserved = latestProfit?.costSource === "observed" && latestProfit.productCost != null;
+    const velocityObserved =
+      latestProfit?.velocitySource === "observed" && latestProfit.salesVelocity != null;
+
+    const observedProductCost = costObserved ? (latestProfit!.productCost as number) : null;
+    const observedSalesVelocity = velocityObserved ? (latestProfit!.salesVelocity as number) : null;
+
+    // Internal-only heuristics. They may drive ranking and ordering; they may
+    // never qualify a monetary claim as evidence-backed.
+    const assumedProductCost = roundMoney(currentPrice * 0.58);
+    const assumedSalesVelocity = Math.max(4, store.orders.length / Math.max(1, baselineProducts.size));
+
+    const productCost = observedProductCost ?? assumedProductCost;
+    const salesVelocity = observedSalesVelocity ?? assumedSalesVelocity;
     const optimalPrice = roundMoney(
       Math.max(
         currentPrice,
@@ -574,13 +593,20 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
           data: {
             storeId: store.id,
             productHandle,
-            productCost,
+            // UNKNOWN STAYS UNKNOWN. Only an observed value is persisted; the
+            // internal heuristic above is used for ranking and never written,
+            // so a later reader cannot mistake it for merchant data.
+            productCost: observedProductCost,
+            costSource: costObserved ? "observed" : "assumed",
+            salesVelocity: observedSalesVelocity,
+            velocitySource: velocityObserved ? "observed" : "assumed",
             sellingPrice: currentPrice,
             competitorAveragePrice,
-            advertisingSpend: latestProfit?.advertisingSpend ?? roundMoney(currentPrice * 0.1),
-            shippingCost: latestProfit?.shippingCost ?? roundMoney(currentPrice * 0.06),
+            // Also assumptions. Left NULL rather than persisted as fact; the
+            // columns are already nullable.
+            advertisingSpend: latestProfit?.advertisingSpend ?? null,
+            shippingCost: latestProfit?.shippingCost ?? null,
             returnRate: latestProfit?.returnRate ?? storeReturnRate,
-            salesVelocity,
             optimalPrice,
             projectedMarginIncrease,
             projectedMonthlyProfit,

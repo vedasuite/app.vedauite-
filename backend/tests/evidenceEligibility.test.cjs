@@ -175,13 +175,43 @@ test("CROSS-SCREEN: a refused claim still surfaces the opportunity honestly", ()
 // ===========================================================================
 
 test("PROVENANCE: the assumed ratios that produced $5,641 are documented", () => {
-  // These still exist in coreEngineService - the fix is that their OUTPUT may
-  // no longer be presented as a merchant-facing figure. Pinning them here means
-  // a future change to them cannot silently re-open the hole.
-  assert.match(CORE_SRC, /productCost \?\? roundMoney\(currentPrice \* 0\.58\)/);
-  assert.match(CORE_SRC, /salesVelocity \?\? Math\.max\(4,/);
-  assert.match(CORE_SRC, /shippingCost \?\? currentPrice \* 0\.06/);
-  assert.match(CORE_SRC, /advertisingSpend \?\? currentPrice \* 0\.1/);
+  // The ratios still exist as INTERNAL ranking heuristics, but they are now
+  // explicitly named as assumed and are never persisted, so a later reader
+  // cannot mistake them for merchant data.
+  assert.match(CORE_SRC, /assumedProductCost = roundMoney\(currentPrice \* 0\.58\)/);
+  assert.match(CORE_SRC, /assumedSalesVelocity = Math\.max\(4,/);
+});
+
+test("PROVENANCE: only OBSERVED values are persisted — unknown stays unknown", () => {
+  // The core of the fix: the fallback is no longer written into the row, so
+  // `salesVelocity != null` can never again pass on a laundered guess.
+  assert.match(CORE_SRC, /productCost: observedProductCost/);
+  assert.match(CORE_SRC, /salesVelocity: observedSalesVelocity/);
+  assert.match(CORE_SRC, /costSource: costObserved \? "observed" : "assumed"/);
+  assert.match(CORE_SRC, /velocitySource: velocityObserved \? "observed" : "assumed"/);
+  assert.match(
+    CORE_SRC,
+    /advertisingSpend: latestProfit\?\.advertisingSpend \?\? null/,
+    "assumed shipping/ads are left NULL rather than persisted as fact"
+  );
+});
+
+test("PROVENANCE: the row-level reader honours the recorded source", () => {
+  assert.equal(
+    elig.profitRowProvenance({ productCost: 10, costSource: "assumed" }).costObserved,
+    false,
+    "an assumed value must not count however non-null it is"
+  );
+  assert.equal(
+    elig.profitRowProvenance({ productCost: 10, costSource: "observed" }).costObserved,
+    true
+  );
+  assert.equal(
+    elig.profitRowProvenance({ productCost: null, costSource: "observed" }).costObserved,
+    false,
+    "observed but null is still unknown"
+  );
+  assert.equal(elig.profitRowProvenance(null).velocityObserved, false);
 });
 
 test("SAFETY: the placeholder wording is the agreed one", () => {

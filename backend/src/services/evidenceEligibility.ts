@@ -62,7 +62,41 @@ export const PROFIT_INPUTS = {
 
 export type ProfitInputName = keyof typeof PROFIT_INPUTS;
 
+/**
+ * The five states every surface shares.
+ *
+ * Dashboard, Action Center, Pricing, Customer Loss and Market Signals all
+ * classify into these, so the same underlying evidence cannot produce
+ * contradictory claims on different screens.
+ */
+export type EvidenceState =
+  | "evidence_backed"
+  | "partially_supported"
+  | "insufficient_data"
+  | "stale"
+  | "unavailable";
+
+/** Which states permit a merchant-facing monetary figure. */
+export const MONETARY_ALLOWED_STATES: readonly EvidenceState[] = ["evidence_backed"];
+
+/** Which states permit an exact recommendation (a target price, say). */
+export const EXACT_CLAIM_ALLOWED_STATES: readonly EvidenceState[] = [
+  "evidence_backed",
+  "partially_supported",
+];
+
+/** Merchant-facing label for each state. Never claims AI. */
+export const EVIDENCE_STATE_LABEL: Record<EvidenceState, string> = {
+  evidence_backed: "Evidence-backed",
+  partially_supported: "Limited evidence",
+  insufficient_data: "Not enough evidence yet",
+  stale: "Based on older data",
+  unavailable: "Could not be checked",
+};
+
 export interface MonetaryClaimVerdict {
+  /** The shared five-state classification. */
+  state: EvidenceState;
   /** May a currency figure be shown at all? */
   allowed: boolean;
   /** Inputs that are missing or assumed, in merchant language. */
@@ -100,6 +134,7 @@ export function classifyMonetaryClaim(input: {
 
   if (missing.length === 0) {
     return {
+      state: "evidence_backed",
       allowed: true,
       missing: [],
       explanation: "",
@@ -109,11 +144,27 @@ export function classifyMonetaryClaim(input: {
     };
   }
 
+  // Exactly one input present is PARTIALLY supported: enough to point at the
+  // opportunity and show a direction, never enough to put money on it.
+  if (missing.length === 1) {
+    const reason = !input.salesVelocityObserved
+      ? PROFIT_INPUTS.salesVelocity.reason
+      : PROFIT_INPUTS.productCost.reason;
+    return {
+      state: "partially_supported",
+      allowed: false,
+      missing,
+      explanation: `VedaSuite can see part of this but not all of it: it does not know ${missing[0]}. ${reason}`,
+      confidence: "low",
+    };
+  }
+
   const reasons: string[] = [];
   if (!input.salesVelocityObserved) reasons.push(PROFIT_INPUTS.salesVelocity.reason);
   if (!input.productCostObserved) reasons.push(PROFIT_INPUTS.productCost.reason);
 
   return {
+    state: "insufficient_data",
     allowed: false,
     missing,
     explanation: `VedaSuite cannot put a reliable figure on this yet because it does not know ${missing.join(
@@ -132,6 +183,26 @@ export function classifyMonetaryClaim(input: {
  */
 export function storedProfitValueIsObserved(): boolean {
   return false;
+}
+
+/**
+ * Reads REAL provenance from a ProfitOptimizationData row.
+ *
+ * Replaces the blanket "never observed" assumption now that the row records
+ * how each value was obtained. It still returns false for every existing row,
+ * because the migration defaults them to "assumed" - which is accurate, not
+ * pessimistic: neither input was observable when they were written.
+ */
+export function profitRowProvenance(row: {
+  productCost?: number | null;
+  costSource?: string | null;
+  salesVelocity?: number | null;
+  velocitySource?: string | null;
+} | null | undefined): { costObserved: boolean; velocityObserved: boolean } {
+  return {
+    costObserved: row?.costSource === "observed" && row?.productCost != null,
+    velocityObserved: row?.velocitySource === "observed" && row?.salesVelocity != null,
+  };
 }
 
 /** Merchant-facing placeholder wherever a figure is not permitted. */

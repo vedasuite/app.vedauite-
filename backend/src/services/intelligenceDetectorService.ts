@@ -510,7 +510,7 @@ export async function detectOperationalProblems(input: {
 
   const handlesWithCost = new Set(
     profitRows
-      .filter((r) => Number.isFinite(r.productCost) && r.productCost > 0)
+      .filter((r) => r.productCost != null && Number.isFinite(r.productCost) && r.productCost > 0)
       .map((r) => (r.productHandle || "").trim().toLowerCase())
   );
   const productHandles = new Set(products.map((p) => (p.handle || "").trim().toLowerCase()));

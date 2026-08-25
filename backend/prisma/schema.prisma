@@ -320,7 +320,15 @@ model ProfitOptimizationData {
   store                   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId                 String
   productHandle           String
-  productCost             Float
+  /// NULL means unknown. VedaSuite has no Shopify product-cost feed, so a
+  /// value here is only trustworthy when costSource = "observed".
+  productCost             Float?
+  /// "observed" | "assumed". Gates whether productCost may support a
+  /// merchant-facing monetary claim. Defaults to assumed — never optimistic.
+  costSource              String   @default("assumed")
+  /// "observed" | "assumed". Per-product velocity is not derivable today
+  /// (there are no order line items), so this is "assumed" in practice.
+  velocitySource          String   @default("assumed")
   sellingPrice            Float
   competitorAveragePrice  Float?
   advertisingSpend        Float?
