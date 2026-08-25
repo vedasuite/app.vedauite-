@@ -115,6 +115,16 @@ export async function recomputeCustomerScore(customerId: string) {
   });
   if (!customer) throw new HttpError(404, "Customer not found.");
 
+  // MODEL ORIGIN, not an observation.
+  //
+  // Audited in Phase J and kept deliberately. Every other constant this
+  // programme removed was standing in for a fact VedaSuite could not observe —
+  // a cost it does not receive, a velocity it cannot derive, a trust score that
+  // was never computed. This one is different: it is the starting point of a
+  // scale that is then moved ENTIRELY by observed inputs (refund rate, fraud
+  // signal count, payment reliability). The output is openly a VedaSuite score,
+  // not a measurement of something in the merchant's store, so a defined origin
+  // is what makes the scale meaningful rather than what fabricates it.
   const base = 70;
   const refundPenalty = Math.min(40, customer.refundRate * 100);
   const fraudPenalty = Math.min(30, customer.fraudSignalsCount * 5);
@@ -163,7 +173,12 @@ export async function getTrustOperatingLayer(shopDomain: string) {
         "Offer lower-friction post-purchase support and prioritize fulfillment confidence.",
       operationalAction: "Use trusted buyers as the lowest-friction service segment.",
       automationMode: "Low-touch automation",
-      confidence: 86,
+      // PHASE J. These were 86 / 71 / 91 with nothing behind them: fixed
+      // percentages attached to fixed advice, which would read to a merchant
+      // as a measured certainty about their store. The advice itself is sound
+      // and stays; the invented number does not. Basis states WHY the guidance
+      // applies instead of scoring it.
+      basis: "Standing policy guidance for this trust tier, not a measurement of your store.",
     },
     {
       id: "normal_watch",
@@ -173,7 +188,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
         "Maintain standard refund handling and review rising refund or fraud patterns.",
       operationalAction: "Escalate only when fraud signals or refund frequency increase.",
       automationMode: "Advisory automation",
-      confidence: 71,
+      basis: "Standing policy guidance for this trust tier, not a measurement of your store.",
     },
     {
       id: "risky_controls",
@@ -183,7 +198,7 @@ export async function getTrustOperatingLayer(shopDomain: string) {
         "Pair refund decisions with fraud review and consider tighter verification before fulfillment.",
       operationalAction: "Route risky buyers into fraud review before policy exceptions.",
       automationMode: "Review-first automation",
-      confidence: 91,
+      basis: "Standing policy guidance for this trust tier, not a measurement of your store.",
     },
   ];
 

@@ -213,14 +213,21 @@ test("WIRING: the readiness wait is shared, not repeated per request", () => {
   );
 });
 
-test("WIRING: both request paths go through getEmbeddedSessionToken", () => {
-  // embeddedShopRequest (onboarding, billing) and the axios client (modules)
-  // must share the fix; view-insight uses the former.
+test("WIRING: there is exactly ONE authenticated request path", () => {
+  // This used to assert that BOTH embeddedShopRequest and an axios client in
+  // api/client.ts acquired a session token. That axios client had no 401 retry
+  // at all, so anything using it would have hit precisely the expired-token
+  // failure the smoke test found. Nothing imported it, and it has been removed
+  // rather than fixed — one path that always refreshes and retries is a
+  // stronger guarantee than two paths that merely agree today.
   const request = fs.readFileSync(REQUEST_SRC, "utf8");
   assert.match(request, /getEmbeddedSessionToken/, "embeddedShopRequest must use it");
 
-  const client = fs.readFileSync(path.join(FRONTEND, "api/client.ts"), "utf8");
-  assert.match(client, /getEmbeddedSessionToken/, "the axios client must use it too");
+  assert.equal(
+    fs.existsSync(path.join(FRONTEND, "api/client.ts")),
+    false,
+    "the second, retry-less request path must not come back"
+  );
 });
 
 test("WIRING: view-insight is dispatched through the fixed path", () => {

@@ -127,8 +127,8 @@ export function formatMerchantInsightDetail(input: {
 }) {
   if (input.eventType === "refund_requested") {
     return input.orderLabel
-      ? `${input.orderLabel} is waiting for refund review. Open Fraud Intelligence to review the supporting signals.`
-      : "A recent order is waiting for refund review. Open Fraud Intelligence to review the supporting signals.";
+      ? `${input.orderLabel} is waiting for refund review. Open Customer Loss to review the supporting signals.`
+      : "A recent order is waiting for refund review. Open Customer Loss to review the supporting signals.";
   }
 
   if (input.category === "trust") {

@@ -43,6 +43,11 @@ function buildWorld({ flagEnabled = true } = {}) {
   prisma.syncJob = { findMany: async () => [] };
   prisma.productSnapshot = { findMany: async () => [] };
   prisma.profitOptimizationData = { findMany: async () => [] };
+  // Phase E: Pricing and Market Signals read these. Empty means both
+  // correctly produce zero findings.
+  prisma.priceHistory = { findMany: async () => [] };
+  prisma.competitorDomain = { findMany: async () => [] };
+  prisma.competitorData = { findMany: async () => [] };
   prisma.store = {
     findUnique: async () => ({
       lastSyncAt: new Date(),

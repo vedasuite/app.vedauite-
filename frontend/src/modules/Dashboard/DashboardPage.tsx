@@ -114,10 +114,27 @@ type DashboardState = {
     reason: string;
   };
   kpis: {
+    storeHealth: number;
     fraudAlerts: number;
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+  };
+  /**
+   * PHASE F. Every tile above is now a projection of the OPEN findings Action
+   * Center shows, so the two pages cannot disagree. `available` is false when
+   * VedaSuite is not recording findings — in that case the counts are all zero
+   * but mean nothing, and the tiles must render a dash rather than a "0" the
+   * merchant would read as "no problems".
+   */
+  findings?: {
+    available: boolean;
+    unavailableReason: string | null;
+    totalOpen: number;
+    bySeverity: { critical: number; high: number; medium: number; low: number };
+    attentionTitle: string;
+    attentionDetail: string;
+    route: string;
   };
   recentInsights: DashboardInsight[];
   quickAccess: {
@@ -177,9 +194,9 @@ type SyncJobResponse = {
         errorsCount: number;
         noChangeReasons?: string[];
         moduleProcessing?: {
-          fraud?: { processed: boolean; status: string; reason: string };
-          competitor?: { processed: boolean; status: string; reason: string };
-          pricing?: { processed: boolean; status: string; reason: string };
+          fraud?: ModuleProcessingResult;
+          competitor?: ModuleProcessingResult;
+          pricing?: ModuleProcessingResult;
         };
       } | null;
     } | null;
@@ -192,6 +209,27 @@ type SyncJobResponse = {
 type SyncActivitySummary = NonNullable<
   NonNullable<NonNullable<SyncJobResponse["result"]>["summary"]>["activitySummary"]
 >;
+
+/**
+ * One module's processing outcome from a sync.
+ *
+ * Named explicitly because the obvious indexed access silently produced
+ * `never`: `moduleProcessing` is an OPTIONAL property, so
+ * `SyncActivitySummary["moduleProcessing"]` includes `undefined`, and
+ * `keyof (T | undefined)` is `never` — which collapses
+ * `...[keyof ...]` to `never` too.
+ *
+ * The consequence was not a crash, it was silence: `deriveQuickAccessDisplay`
+ * took a parameter of type `never | null`, so TypeScript checked nothing about
+ * the object it actually receives, on the path that decides what each Quick
+ * Access card tells the merchant. A shape change upstream would have been
+ * caught by nobody.
+ */
+type ModuleProcessingResult = {
+  processed: boolean;
+  status: string;
+  reason: string;
+};
 
 type DashboardPayload = {
   metrics: Metrics;
@@ -220,6 +258,7 @@ type DashboardRefreshResult = {
 
 type DashboardVisibleSnapshot = {
   kpis: {
+    storeHealth: number;
     fraudAlerts: number;
     competitorChanges: number;
     pricingOpportunities: number;
@@ -252,6 +291,25 @@ function toneForReadiness(value?: string | null) {
     default:
       return "info";
   }
+}
+
+/**
+ * The same readiness state, expressed as a tone a Banner actually accepts.
+ *
+ * Polaris Badge and Banner have DIFFERENT tone unions: Badge allows
+ * "attention", Banner allows only success | info | warning | critical. One tone
+ * function was feeding both, so every Banner rendered for a syncing store
+ * passed tone="attention" — a value Polaris does not recognise, which silently
+ * falls back to the default. The banner meant to stand out looked ordinary.
+ *
+ * "warning" is Banner's equivalent of Badge's "attention": something in
+ * progress that the merchant should notice, but not a failure.
+ */
+function bannerToneForReadiness(
+  value?: string | null
+): "success" | "info" | "warning" | "critical" {
+  const tone = toneForReadiness(value);
+  return tone === "attention" ? "warning" : tone;
 }
 
 function labelForReadiness(value?: string | null) {
@@ -356,7 +414,7 @@ function deriveQuickAccessDisplay(args: {
   baseStatus?: DashboardQuickAccessStatus | string | null;
   baseReason?: string | null;
   baseFreshnessAt?: string | null;
-  processing?: SyncActivitySummary["moduleProcessing"][keyof SyncActivitySummary["moduleProcessing"]] | null;
+  processing?: ModuleProcessingResult | null;
 }) {
   if (!args.processing) {
     return {
@@ -432,6 +490,9 @@ function buildDashboardSnapshot(
 
   return {
     kpis: {
+      // Both branches now read the same server-side projection: the top-level
+      // fields are a copy of dashboardState.kpis, not a rival calculation.
+      storeHealth: dashboardState?.kpis.storeHealth ?? 0,
       fraudAlerts:
         dashboardState?.kpis.fraudAlerts ?? payload.metrics.fraudAlertsToday,
       competitorChanges:
@@ -837,7 +898,7 @@ export function DashboardPage() {
         setError(
           nextError instanceof Error
             ? nextError.message
-            : "Unable to load the dashboard."
+            : "Unable to load Store Overview."
         );
         setLoading(false);
       });
@@ -992,6 +1053,7 @@ export function DashboardPage() {
             metrics && diagnostics ? { metrics, diagnostics } : null
           ) ?? {
             kpis: {
+              storeHealth: 0,
               fraudAlerts: 0,
               competitorChanges: 0,
               pricingOpportunities: 0,
@@ -1010,7 +1072,7 @@ export function DashboardPage() {
             },
             lastRefreshedAt: dashboardLastRefreshedAt,
           },
-        summary: "Refresh failed. Retry the sync to update dashboard signals.",
+        summary: "Refresh failed. Retry the sync to update Store Overview.",
       });
     } finally {
       setSyncing(false);
@@ -1044,47 +1106,64 @@ export function DashboardPage() {
     }
   }, [applyDashboardPayload, host, loadDashboard]);
 
+  const dashboardFindings = dashboardState?.findings ?? null;
+  // When findings are not being recorded, the counts are all zero but say
+  // nothing about the store. A "0" would be read as "no problems found", which
+  // is a claim VedaSuite has not earned, so the tiles show a dash instead.
+  const findingsAvailable = dashboardFindings ? dashboardFindings.available : true;
+  const kpiValue = (n: number) => (findingsAvailable ? n : "—");
+
   const metricsCards = useMemo(
     () => [
       {
+        title: "Store health",
+        value: kpiValue(dashboardState?.kpis.storeHealth ?? 0),
+        note: "Connection and sync issues",
+      },
+      {
         title: "Fraud alerts",
-        value: dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0,
-        note: "Refund abuse and risky orders",
+        value: kpiValue(
+          dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0
+        ),
+        note: "Open refund-abuse and risky-order findings",
       },
       {
         title: "Competitor changes",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.competitorChanges ??
-          metrics?.competitorPriceChanges ??
-          0,
-        note: "Latest monitored price moves",
+            metrics?.competitorPriceChanges ??
+            0
+        ),
+        note: "Open findings from monitored competitors",
       },
       {
         title: "Pricing opportunities",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.pricingOpportunities ??
-          metrics?.aiPricingSuggestions ??
-          0,
-        note: "Pricing records ready to review",
+            metrics?.aiPricingSuggestions ??
+            0
+        ),
+        note: "Open pricing findings to review",
       },
       {
         title: "Profit opportunities",
-        value:
+        value: kpiValue(
           dashboardState?.kpis.profitOpportunities ??
-          metrics?.profitOptimizationOpportunities ??
-          0,
-        note: "Optimization records available",
+            metrics?.profitOptimizationOpportunities ??
+            0
+        ),
+        note: "Open product-profit findings",
       },
     ],
-    [dashboardState, metrics]
+    [dashboardState, metrics, findingsAvailable]
   );
   const currentRefreshSummary =
     syncing
-      ? "Refreshing dashboard data and checking for updated metrics."
+      ? "Refreshing Store Overview and checking for updated findings."
       : refreshResult?.summary ??
     (dashboardLastRefreshedAt
       ? `Refreshed at ${formatRelativeTimestamp(dashboardLastRefreshedAt)}.`
-      : "Refresh the dashboard to pull the latest Shopify data.");
+      : "Refresh Store Overview to pull the latest Shopify data.");
 
   const syncHealthLabel =
     dashboardSyncHealth?.status
@@ -1104,10 +1183,10 @@ export function DashboardPage() {
 
   if (loading) {
     return (
-      <Page title="Dashboard" subtitle="Loading store metrics and insights.">
+      <Page title="Store Overview" subtitle="Loading store metrics and findings.">
         <Card>
           <InlineStack align="center">
-            <Spinner accessibilityLabel="Loading dashboard" size="large" />
+            <Spinner accessibilityLabel="Loading Store Overview" size="large" />
           </InlineStack>
         </Card>
       </Page>
@@ -1122,8 +1201,8 @@ export function DashboardPage() {
     <div className="veda-page-wide">
       <Page
         fullWidth
-        title="Your store intelligence overview"
-        subtitle="Key alerts, recommendations, and direct access to each VedaSuite workflow."
+        title="Store Overview"
+        subtitle="A summary of the open findings in your Action Center, plus store health and direct access to each workspace."
         primaryAction={{
           content: "Update insights",
           onAction: () => void syncLiveStoreData(),
@@ -1160,7 +1239,7 @@ export function DashboardPage() {
 
         {error ? (
           <Layout.Section>
-            <Banner title="Dashboard action failed" tone="critical">
+            <Banner title="Store Overview action failed" tone="critical">
               <p>{error}</p>
             </Banner>
           </Layout.Section>
@@ -1168,7 +1247,7 @@ export function DashboardPage() {
 
         {onboarding && !onboarding.canAccessDashboard ? (
           <Layout.Section>
-            <Banner title="Dashboard available after onboarding" tone="info">
+            <Banner title="Store Overview available after onboarding" tone="info">
               <BlockStack gap="200">
                 <p>
                   VedaSuite is still preparing this store. The view below stays simple until connection, billing, and the first workflow are ready.
@@ -1225,18 +1304,30 @@ export function DashboardPage() {
 
         {showSyncHealthBanner ? (
           <Layout.Section>
+            {/*
+              `metrics?.` throughout, not `metrics.`.
+              This block is reached whenever showSyncHealthBanner is true, and
+              that flag is true when metrics is NULL: it falls through to
+              `metrics?.dataState !== "READY_WITH_DATA"`, and undefined is not
+              READY_WITH_DATA. The only early return on this page is for
+              `loading`, so a failed metrics fetch left metrics null, loading
+              false, and this banner rendering — where `metrics.summaryTitle`
+              threw and white-screened the page into the route error boundary.
+              The page already has an honest error banner above; it never got
+              the chance to show it.
+            */}
             <Banner
               title={
                 dashboardSyncHealth?.title ??
-                metrics.summaryTitle ??
-                "Dashboard insights are still settling"
+                metrics?.summaryTitle ??
+                "Store Overview is still settling"
               }
-              tone={toneForReadiness(dashboardSyncHealth?.status ?? metrics.dataState)}
+              tone={bannerToneForReadiness(dashboardSyncHealth?.status ?? metrics?.dataState)}
             >
               <BlockStack gap="200">
                 <p>
                   {dashboardSyncHealth?.reason ??
-                    metrics.summaryDetail ??
+                    metrics?.summaryDetail ??
                     "VedaSuite is still preparing this store."}
                 </p>
                 <InlineStack gap="300">
@@ -1312,7 +1403,7 @@ export function DashboardPage() {
                 refreshResult.refreshStatus === "success"
                   ? "success"
                   : refreshResult.refreshStatus === "partial"
-                  ? "attention"
+                  ? "warning"
                   : "critical"
               }
             >
@@ -1343,7 +1434,7 @@ export function DashboardPage() {
                       </List.Item>
                       <List.Item>
                         {refreshResult.visibleDataChanged
-                          ? "New dashboard insights are ready."
+                          ? "New findings are ready."
                           : "Everything looks healthy right now."}
                       </List.Item>
                     </List>
@@ -1370,8 +1461,43 @@ export function DashboardPage() {
           </Layout.Section>
         ) : null}
 
+        {/*
+          PHASE F. One statement of what needs attention, derived from the same
+          open findings Action Center shows — so this band and that page can
+          never disagree, and every tile below it is a breakdown of this number.
+        */}
+        {!syncing && dashboardFindings ? (
+          <Layout.Section>
+            <Banner
+              title={dashboardFindings.attentionTitle}
+              tone={
+                !dashboardFindings.available
+                  ? "warning"
+                  : dashboardFindings.bySeverity.critical > 0
+                  ? "critical"
+                  : dashboardFindings.totalOpen > 0
+                  ? "info"
+                  : "success"
+              }
+              action={
+                dashboardFindings.available && dashboardFindings.totalOpen > 0
+                  ? {
+                      content: "Open Action Center",
+                      onAction: () => navigateEmbedded(dashboardFindings.route),
+                    }
+                  : undefined
+              }
+            >
+              <p>
+                {dashboardFindings.unavailableReason ??
+                  dashboardFindings.attentionDetail}
+              </p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="300">
+          <InlineGrid columns={{ xs: 1, sm: 2, md: 5 }} gap="300">
             {syncing
               ? metricsCards.map((item) => (
                   <Card key={item.title}>
@@ -1408,7 +1534,7 @@ export function DashboardPage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
                   <Text as="h2" variant="headingLg">
-                    Recent insights
+                    Top findings
                   </Text>
                   <Badge tone={toneForReadiness(metrics?.dataState)}>
                     {labelForReadiness(metrics?.dataState)}
@@ -1448,10 +1574,20 @@ export function DashboardPage() {
                         </InlineStack>
                       </div>
                     ))
-                  ) : (
-                    <Banner title="No urgent alerts right now" tone="success">
+                  ) : !findingsAvailable ? (
+                    // Not the same as "nothing is wrong". Saying so would be a
+                    // claim about the store that VedaSuite cannot currently make.
+                    <Banner title="Findings are not available" tone="warning">
                       <p>
-                        No refund reviews, pricing actions, or competitor alerts currently require attention.
+                        {dashboardFindings?.unavailableReason ??
+                          "VedaSuite cannot show findings for this store right now."}
+                      </p>
+                    </Banner>
+                  ) : (
+                    <Banner title="Nothing needs your attention right now" tone="success">
+                      <p>
+                        VedaSuite found no open findings for this store. This is a
+                        real result, not a loading state.
                       </p>
                     </Banner>
                   )}
@@ -1469,7 +1605,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Fraud Intelligence
+                          Customer Loss
                         </Text>
                         <Text as="p" tone="subdued">
                           {fraudQuickAccessDisplay.reason ??
@@ -1507,7 +1643,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          Competitor Intelligence
+                          Market Signals
                         </Text>
                         <Text as="p" tone="subdued">
                           {competitorQuickAccessDisplay.reason ??
@@ -1545,7 +1681,7 @@ export function DashboardPage() {
                     <InlineStack align="space-between" blockAlign="start" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="headingMd">
-                          AI Pricing Engine
+                          Pricing & Product Profit
                         </Text>
                         <Text as="p" tone="subdued">
                           {pricingQuickAccessDisplay.reason ??

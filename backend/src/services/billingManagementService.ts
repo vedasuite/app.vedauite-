@@ -107,9 +107,9 @@ function planSummary(planName: BillingPlanName) {
     case "STARTER":
       return "Fraud & Return Protection for small stores, with one selected Starter feature.";
     case "GROWTH":
-      return "Advanced competitor and pricing intelligence with enhanced fraud analysis.";
+      return "Market signals and pricing, with deeper customer loss analysis.";
     case "PRO":
-      return "Full AI commerce intelligence suite with profit optimization and priority processing.";
+      return "The complete VedaSuite engine set with profit optimization and priority processing.";
     case "TRIAL":
       return "Trial provides temporary evaluation access before a paid plan is selected.";
     default:

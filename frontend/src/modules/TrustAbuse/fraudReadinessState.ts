@@ -1,5 +1,5 @@
 /**
- * Truthful presentation of Fraud Intelligence readiness.
+ * Truthful presentation of Customer Loss readiness.
  *
  * The backend already distinguishes these situations and ships an accurate
  * `reason` with each one. The page previously collapsed every non-ready state
@@ -8,7 +8,23 @@
  * contradictory things at once. This maps the backend's own state onto honest
  * copy instead of re-deriving anything in the UI.
  *
- * Nothing here changes fraud scoring, thresholds or readiness rules — it only
+ * WHY THE IDENTIFIERS STILL SAY "FRAUD"
+ * ------------------------------------
+ * The exported names (FraudUiState, fraudBannerFor, resolveFraudUiState, the
+ * `fraud` entitlement key they ultimately serve) are INTERNAL identifiers and
+ * are deliberately unchanged. Renaming them would touch the entitlement path
+ * for no merchant-visible benefit. Only the strings a merchant reads changed.
+ *
+ * WHAT CHANGED IN THE COPY, AND WHY
+ * ---------------------------------
+ * This module is Customer Loss: money leaving through refunds, returns,
+ * chargebacks and repeat customer behaviour. Fraud detection is one of the
+ * ENGINES underneath it, not the subject. The old copy inverted that — "no
+ * urgent fraud reviews are open", "fraud data refreshed" — which told a
+ * merchant with ordinary refund leakage that the module had nothing for them,
+ * because they were reading a fraud verdict rather than a loss verdict.
+ *
+ * Nothing here changes scoring, thresholds or readiness rules — it only
  * decides what to *say* about a state the backend already determined.
  */
 
@@ -99,32 +115,36 @@ export function fraudBannerFor(
   switch (state) {
     case "ERROR":
       return {
-        title: "Fraud intelligence needs attention",
+        title: "Customer loss analysis needs attention",
         body:
           backendReason ??
-          "The latest fraud analysis could not be completed. Your previous results are unchanged.",
+          "The latest customer loss analysis could not be completed. Your previous results are unchanged.",
         tone: "critical",
       };
     case "PROCESSING":
       return {
-        title: "Fraud data is being prepared",
+        title: "Customer loss analysis is running",
         body:
           backendReason ??
-          "VedaSuite is analysing your synced orders and customers. This usually finishes within a few minutes.",
+          "VedaSuite is analysing your synced orders, refunds and customers. This usually finishes within a few minutes.",
         tone: "info",
       };
     case "INSUFFICIENT_ACTIVITY":
+      // Names what is missing and why it matters. "More store activity is
+      // needed" told the merchant nothing they could act on: they could not
+      // tell whether VedaSuite wanted more orders, more refunds, or more time.
       return {
-        title: "More store activity is needed",
+        title: "Not enough history to establish a loss pattern yet",
         body:
           backendReason ??
-          "Your store data is synced, but there is not yet enough order, customer or return history to generate reliable fraud intelligence.",
+          "VedaSuite checked your synced orders, refunds and customer records. Repeated loss is only reported once there is enough order and refund history to tell a pattern from a one-off return — a single refund is not evidence of one.",
         tone: "warning",
       };
     case "READY_NO_FINDINGS":
       return {
-        title: "Fraud analysis is up to date",
-        body: "No high-risk orders or urgent fraud reviews were detected.",
+        title: "No repeated customer loss found",
+        body:
+          "VedaSuite analysed your refunds, returns and order-risk signals and found no repeating loss pattern that meets its evidence bar. Individual orders and customers are still listed below.",
         tone: "success",
       };
     case "READY_WITH_FINDINGS":
@@ -143,19 +163,19 @@ export function fraudRefreshToast(
 ): string {
   switch (state) {
     case "PROCESSING":
-      return "Fraud data refresh requested. Processing is still in progress.";
+      return "Refresh requested. Customer loss analysis is still running.";
     case "INSUFFICIENT_ACTIVITY":
-      return "Fraud data refreshed. More store activity is still needed before insights are available.";
+      return "Refreshed. Still not enough order and refund history to establish a loss pattern.";
     case "READY_NO_FINDINGS":
-      return "Fraud intelligence refreshed — no urgent risks were detected.";
+      return "Refreshed — no repeated customer loss pattern was found.";
     case "READY_WITH_FINDINGS": {
       const total = countFraudFindings(counts);
-      return `Fraud intelligence refreshed — ${total} item${total === 1 ? "" : "s"} need${
+      return `Refreshed — ${total} customer loss item${total === 1 ? "" : "s"} need${
         total === 1 ? "s" : ""
       } attention.`;
     }
     case "ERROR":
       // Callers must not show a success toast on failure; this is a guard.
-      return "Fraud intelligence could not be refreshed.";
+      return "Customer loss analysis could not be refreshed.";
   }
 }

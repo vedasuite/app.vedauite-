@@ -65,6 +65,27 @@ function buildWorld({ flagEnabled = true, orders = [], customers = [], profitRow
       return profitRows.filter((r) => r.storeId === where.storeId);
     },
   };
+  // Phase E added the Pricing and Market Signals detector families, which read
+  // these. Empty by default: with no price history and no competitor domain
+  // whose last attempt succeeded, both correctly produce ZERO findings.
+  prisma.priceHistory = {
+    findMany: async () => {
+      writes.push({ table: "priceHistory", op: "read" });
+      return [];
+    },
+  };
+  prisma.competitorDomain = {
+    findMany: async () => {
+      writes.push({ table: "competitorDomain", op: "read" });
+      return [];
+    },
+  };
+  prisma.competitorData = {
+    findMany: async () => {
+      writes.push({ table: "competitorData", op: "read" });
+      return [];
+    },
+  };
   prisma.productSnapshot = {
     findMany: async ({ where }) => {
       writes.push({ table: "productSnapshot", op: "read" });

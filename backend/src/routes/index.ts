@@ -20,6 +20,7 @@ import { shopifyRouter } from "./shopifyRoutes";
 import { insightsRouter } from "./insightsRoutes";
 import { subscriptionDebugRouter, subscriptionRouter } from "./subscriptionRoutes";
 import { supportAdminRouter } from "./supportAdminRoutes";
+import { stagingSeedRouter } from "./stagingSeedRoutes";
 import { supportRouter } from "./supportRoutes";
 import { trustAbuseRouter } from "./trustAbuseRoutes";
 
@@ -32,6 +33,10 @@ router.use(launchRouter);
 // Developer support console — gated by SUPPORT_ADMIN_TOKEN inside the router,
 // mounted OUTSIDE /api since the developer has no Shopify session token.
 router.use("/support-admin", supportAdminRouter);
+// STAGING-ONLY test-data console. Returns 404 everywhere unless
+// STAGING_SEED_TOKEN is set, so on production this does not exist. Mounted
+// outside /api because the operator has no Shopify session token.
+router.use("/staging-seed", stagingSeedRouter);
 
 router.use("/api", verifyShopifySessionToken);
 // Mint an offline Admin API token from the verified session token whenever one

@@ -275,7 +275,7 @@ export function OnboardingPage() {
       // rather than the pre-confirmation snapshot.
       const nextOnboarding = await confirmPlan();
       if (nextOnboarding.canAccessDashboard) {
-        setToast("Plan confirmed. Setup is complete — your Dashboard is ready.");
+        setToast("Plan confirmed. Setup is complete — your Store Overview is ready.");
         navigateEmbedded("/app/dashboard");
       } else {
         // Only ever claim work remains when a visible step genuinely is
@@ -347,14 +347,14 @@ export function OnboardingPage() {
 
   const featureName =
     pendingModule === "fraud"
-      ? "Fraud Intelligence"
+      ? "Customer Loss"
       : pendingModule === "competitor"
-      ? "Competitor Intelligence"
-      : "AI Pricing Engine";
+      ? "Market Signals"
+      : "Pricing & Product Profit";
 
   const primaryLabel =
     onboarding?.canAccessDashboard
-      ? "Open dashboard"
+      ? "Open Store Overview"
       : onboarding?.primaryAction.key === "CHOOSE_MODULE"
       ? `Start with ${featureName}`
       : onboarding?.primaryAction.label ?? "Start setup";
@@ -537,7 +537,7 @@ export function OnboardingPage() {
                 <InlineStack align="space-between" blockAlign="center" gap="200" wrap>
                   <Text as="p" variant="bodySm" tone="subdued">
                     {onboarding.canAccessDashboard
-                      ? "All steps done — open the dashboard to get started."
+                      ? "All steps done — open Store Overview to get started."
                       : onboarding.steps.find((step) => step.active)?.label ?? "Continue setup"}
                   </Text>
                   <Text as="span" variant="bodySm" fontWeight="semibold">
@@ -631,7 +631,7 @@ export function OnboardingPage() {
                 <Text as="p" tone="subdued">
                   Three features, each on its own page. Pick one to open first.
                 </Text>
-                <BlockStack gap="250">
+                <BlockStack gap="200">
                   {onboarding.moduleOverview.map((module) => (
                     <div key={module.key} className="vs-action-card">
                       <InlineStack align="space-between" blockAlign="start" gap="300">
@@ -688,7 +688,7 @@ export function OnboardingPage() {
                 </BlockStack>
                 {selectedModuleDetails ? (
                   <Banner title={`Starting with ${selectedModuleDetails.title}`} tone="info">
-                    <p>VedaSuite will open {selectedModuleDetails.title} after setup completes. You can switch features any time from the dashboard.</p>
+                    <p>VedaSuite will open {selectedModuleDetails.title} after setup completes. You can switch between workspaces at any time from the navigation.</p>
                   </Banner>
                 ) : null}
               </BlockStack>
@@ -798,7 +798,7 @@ export function OnboardingPage() {
                   <List.Item>Connect Shopify and confirm sync health.</List.Item>
                   <List.Item>Sync products, customers, and orders.</List.Item>
                   <List.Item>Choose the first workflow to review.</List.Item>
-                  <List.Item>Confirm the current plan and open the dashboard.</List.Item>
+                  <List.Item>Confirm the current plan and open Store Overview.</List.Item>
                 </List>
               </BlockStack>
             </Card>
@@ -818,7 +818,7 @@ export function OnboardingPage() {
                   </Button>
                   {onboarding.selectedModuleRoute ? (
                     <Button onClick={() => navigateEmbedded(onboarding.selectedModuleRoute!)}>
-                      Open {onboarding.selectedModuleTitle}
+                      Open {onboarding.selectedModuleTitle ?? "your workspace"}
                     </Button>
                   ) : null}
                 </InlineStack>

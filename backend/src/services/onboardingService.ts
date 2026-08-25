@@ -75,11 +75,11 @@ function moduleRoute(moduleKey: OnboardingModuleKey) {
 function moduleTitle(moduleKey: OnboardingModuleKey) {
   switch (moduleKey) {
     case "fraud":
-      return "Fraud Intelligence";
+      return "Customer Loss";
     case "competitor":
-      return "Competitor Intelligence";
+      return "Market Signals";
     case "pricing":
-      return "AI Pricing Engine";
+      return "Pricing & Product Profit";
   }
 }
 
@@ -170,7 +170,7 @@ export async function getOnboardingState(shopDomain: string) {
   const moduleAvailability = [
     {
       key: "fraud" as const,
-      title: "Fraud Intelligence",
+      title: "Customer Loss",
       route: moduleRoute("fraud"),
       summary: "Flags risky customers, detects refund abuse, and surfaces chargeback-risk orders.",
       planLabel: "Starter · Growth · Pro",
@@ -182,11 +182,11 @@ export async function getOnboardingState(shopDomain: string) {
       available: subscription.enabledModules.fraud,
       lockReason: subscription.enabledModules.fraud
         ? null
-        : "Included in Starter plan (choose Fraud Intelligence as your starter feature), Growth, and Pro. Go to Billing to choose a plan.",
+        : "Included in Starter plan (choose Customer Loss as your starter feature), Growth, and Pro. Go to Billing to choose a plan.",
     },
     {
       key: "competitor" as const,
-      title: "Competitor Intelligence",
+      title: "Market Signals",
       route: moduleRoute("competitor"),
       summary: "Tracks competitor prices, monitors promotions, and surfaces ad activity on your product handles.",
       planLabel: "Growth · Pro",
@@ -202,7 +202,7 @@ export async function getOnboardingState(shopDomain: string) {
     },
     {
       key: "pricing" as const,
-      title: "AI Pricing Engine",
+      title: "Pricing & Product Profit",
       route: moduleRoute("pricing"),
       summary: "Recommends optimal prices for your products, balancing margin and demand signals.",
       planLabel: "Growth · Pro",
@@ -312,12 +312,12 @@ export async function getOnboardingState(shopDomain: string) {
       label: "Step 2: Pick a feature to start with",
       complete: moduleSelectionComplete,
       description:
-        "Choose which VedaSuite feature to open first: Fraud Intelligence, Competitor Intelligence, or AI Pricing Engine.",
+        "Choose which VedaSuite feature to open first: Customer Loss, Market Signals, or Pricing & Product Profit.",
       helper:
         !dataSyncComplete
           ? "Finish syncing Shopify data first, then pick a feature below."
           : !selectedModule
-          ? "Pick any feature to start with — you can switch later from the dashboard."
+          ? "Pick any feature to start with — you can switch later from the navigation."
           : selectedModuleAvailable && selectedModuleReadiness?.ready
           ? `${moduleTitle(selectedModule)} is selected and ready to open.`
           : selectedModuleAvailable && selectedModuleReadiness
@@ -353,7 +353,7 @@ export async function getOnboardingState(shopDomain: string) {
       label: "Step 4: Confirm Plan",
       complete: planConfirmationComplete,
       description:
-        "Confirm the current plan so VedaSuite can unlock the right modules and take you to the dashboard.",
+        "Confirm the current plan so VedaSuite can unlock the right modules and take you to Store Overview.",
       helper: planConfirmationComplete
         ? `Plan confirmed: ${billing.planName}.`
         : readiness.billing.description,
@@ -423,7 +423,7 @@ export async function getOnboardingState(shopDomain: string) {
           }
       : {
           key: "OPEN_DASHBOARD" as const,
-          label: "Open Dashboard",
+          label: "Open Store Overview",
           route: "/app/dashboard",
         };
 
@@ -510,21 +510,21 @@ export async function getOnboardingState(shopDomain: string) {
       ? [
           {
             key: "fraud-guided",
-            module: "Fraud Intelligence",
+            module: "Customer Loss",
             title: "Guided setup: Customer flagged for repeated refund behaviour",
             detail:
               "Fraud insights appear here after Shopify orders and customer history are available.",
           },
           {
             key: "competitor-guided",
-            module: "Competitor Intelligence",
+            module: "Market Signals",
             title: "Guided setup: Competitor changed price on a tracked product",
             detail:
               "Competitor changes appear after competitor websites are connected and analysis completes.",
           },
           {
             key: "pricing-guided",
-            module: "AI Pricing Engine",
+            module: "Pricing & Product Profit",
             title: "Guided setup: Suggested price change based on baseline store data",
             detail:
               "Pricing actions appear after enough product and order history is available.",
@@ -566,7 +566,7 @@ export async function getOnboardingState(shopDomain: string) {
       syncState.status === "EMPTY_STORE_DATA"
         ? "Shopify synced successfully, but the store currently has limited order or customer history."
         : !hasAnyProcessedData && hasAnyRawData
-        ? "VedaSuite is still turning synced store data into dashboard-ready outputs."
+        ? "VedaSuite is still turning synced store data into findings."
         : null,
     readiness,
   };
@@ -666,7 +666,7 @@ export async function confirmOnboardingPlan(shopDomain: string) {
 export async function markOnboardingComplete(shopDomain: string) {
   const onboarding = await getOnboardingState(shopDomain);
   if (!onboarding.canAccessDashboard) {
-    throw new HttpError(400, "Complete the onboarding flow before entering the dashboard.");
+    throw new HttpError(400, "Complete the onboarding flow before opening Store Overview.");
   }
 
   await prisma.store.update({

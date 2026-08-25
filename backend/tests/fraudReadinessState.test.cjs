@@ -53,8 +53,11 @@ test("State A — sync genuinely running reports processing, not insufficient da
   assert.equal(state, "PROCESSING");
 
   const banner = fraudBannerFor(state, null);
-  assert.equal(banner.title, "Fraud data is being prepared");
+  assert.equal(banner.title, "Customer loss analysis is running");
   assert.equal(banner.tone, "info", "work in progress is informational, not a warning");
+  // The module is Customer Loss; fraud detection is one engine underneath it.
+  // "Fraud data is being prepared" made a fraud verdict the whole subject.
+  assert.doesNotMatch(banner.title, /\bfraud\b/i);
 });
 
 test("State B — sync complete but insufficient activity says so plainly", () => {
@@ -63,9 +66,21 @@ test("State B — sync complete but insufficient activity says so plainly", () =
     assert.equal(state, "INSUFFICIENT_ACTIVITY", `${code} should mean insufficient activity`);
 
     const banner = fraudBannerFor(state, null);
-    assert.equal(banner.title, "More store activity is needed");
-    assert.match(banner.body, /not yet enough order, customer or return history/i);
+    assert.equal(banner.title, "Not enough history to establish a loss pattern yet");
     assert.ok(!/preparing/i.test(banner.title), "must not claim work is in progress");
+
+    // An empty state must answer what was checked, why there is no finding,
+    // and what is missing. The old "More store activity is needed" answered
+    // none of those: a merchant could not tell whether VedaSuite wanted more
+    // orders, more refunds, or simply more time.
+    assert.match(banner.body, /checked your synced orders, refunds and customer records/i);
+    assert.match(banner.body, /enough order and refund history/i);
+    assert.match(banner.body, /a single refund is not evidence/i);
+    assert.doesNotMatch(
+      banner.title,
+      /^More store activity is needed$/,
+      "the generic placeholder must not come back"
+    );
   }
 });
 
@@ -83,9 +98,16 @@ test("State C — ready with zero findings is a positive state, not a warning", 
   assert.equal(state, "READY_NO_FINDINGS");
 
   const banner = fraudBannerFor(state, null);
-  assert.equal(banner.title, "Fraud analysis is up to date");
+  assert.equal(banner.title, "No repeated customer loss found");
   assert.equal(banner.tone, "success");
-  assert.match(banner.body, /No high-risk orders or urgent fraud reviews were detected/i);
+  // States what was analysed, so "nothing found" reads as a result rather than
+  // as an absence of work.
+  assert.match(banner.body, /analysed your refunds, returns and order-risk signals/i);
+  assert.match(banner.body, /evidence bar/i);
+  // "No urgent fraud reviews are open" told a merchant with ordinary refund
+  // leakage that the module had nothing for them — they were reading a fraud
+  // verdict where a loss verdict belonged.
+  assert.doesNotMatch(banner.body, /urgent fraud reviews/i);
 });
 
 test("State D — ready with findings shows no blocking banner", () => {
@@ -110,12 +132,17 @@ test("REGRESSION: a successful refresh while insufficient never claims data is u
 
   assert.equal(
     toast,
-    "Fraud data refreshed. More store activity is still needed before insights are available."
+    "Refreshed. Still not enough order and refund history to establish a loss pattern."
   );
   assert.ok(!/up to date/i.test(toast), "the old contradictory wording must not return");
+  // The toast must name what is missing, not just that something is.
+  assert.match(toast, /order and refund history/i);
 
   // And the banner must still truthfully report the shortfall.
-  assert.equal(fraudBannerFor(state, null).title, "More store activity is needed");
+  assert.equal(
+    fraudBannerFor(state, null).title,
+    "Not enough history to establish a loss pattern yet"
+  );
 });
 
 test("REGRESSION: zero metrics are only 'no risk found' when analysis is actually ready", () => {
@@ -138,14 +165,14 @@ test("an unknown readiness code is never optimistically treated as ready", () =>
 test("refresh toast — processing", () => {
   assert.equal(
     fraudRefreshToast(resolveFraudUiState("SYNC_IN_PROGRESS", NO_FINDINGS), NO_FINDINGS),
-    "Fraud data refresh requested. Processing is still in progress."
+    "Refresh requested. Customer loss analysis is still running."
   );
 });
 
 test("refresh toast — ready with no findings", () => {
   assert.equal(
     fraudRefreshToast(resolveFraudUiState("READY_WITH_DATA", NO_FINDINGS), NO_FINDINGS),
-    "Fraud intelligence refreshed — no urgent risks were detected."
+    "Refreshed — no repeated customer loss pattern was found."
   );
 });
 
@@ -153,11 +180,11 @@ test("refresh toast — findings are counted, with correct singular/plural", () 
   const one = { returnAbuseProfiles: 1, highRiskOrders: 0, manualReviewCount: 0 };
   assert.equal(
     fraudRefreshToast(resolveFraudUiState("READY_WITH_DATA", one), one),
-    "Fraud intelligence refreshed — 1 item needs attention."
+    "Refreshed — 1 customer loss item needs attention."
   );
   assert.equal(
     fraudRefreshToast(resolveFraudUiState("READY_WITH_DATA", WITH_FINDINGS), WITH_FINDINGS),
-    "Fraud intelligence refreshed — 3 items need attention."
+    "Refreshed — 3 customer loss items need attention."
   );
 });
 

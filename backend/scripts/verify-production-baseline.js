@@ -197,8 +197,17 @@ const HISTORICAL_MIGRATIONS = [
   },
 ];
 
-/** The ONE migration that must remain unapplied, for migrate deploy to apply. */
-const PENDING_MIGRATION = "20260804_intelligence_finding_foundation";
+/**
+ * Migrations that must be APPLIED by migrate deploy, never marked as done.
+ * Everything not in HISTORICAL_MIGRATIONS belongs here.
+ */
+const NON_HISTORICAL_MIGRATIONS = [
+  "20260804_intelligence_finding_foundation",
+  "20260825_profit_input_provenance",
+  "20260825_competitor_attempt_status",
+];
+/** Kept for the post-deploy checks that name the original one. */
+const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];
 
 /**
  * The pure verification core: given an introspection snapshot, decide which
@@ -598,8 +607,8 @@ async function main() {
           ).rows
         : [];
       need(
-        recorded.length === 15,
-        `_prisma_migrations holds exactly 15 rows (found ${recorded.length})`
+        recorded.length === HISTORICAL_MIGRATIONS.length + NON_HISTORICAL_MIGRATIONS.length,
+        `_prisma_migrations holds exactly ${HISTORICAL_MIGRATIONS.length + NON_HISTORICAL_MIGRATIONS.length} rows (found ${recorded.length})`
       );
       need(
         recorded.some(
@@ -667,7 +676,12 @@ async function main() {
   process.exit(report.failed.length === 0 ? 0 : 1);
 }
 
-module.exports = { HISTORICAL_MIGRATIONS, PENDING_MIGRATION, verifyAll };
+module.exports = {
+  HISTORICAL_MIGRATIONS,
+  PENDING_MIGRATION,
+  NON_HISTORICAL_MIGRATIONS,
+  verifyAll,
+};
 
 // Never auto-run on require: the test suite imports the pure core only.
 if (require.main !== module) {

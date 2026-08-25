@@ -172,11 +172,14 @@ function toneForPrimaryState(value: PricingPrimaryState) {
   return "info" as const;
 }
 
-function toneForDiagnostic(value: string) {
+// Badge has no "subdued" tone. Returning it silently produced an untoned
+// badge, so the neutral case is now `undefined` - which renders the same
+// default badge, but says so.
+function toneForDiagnostic(value: string): "success" | "attention" | "info" | undefined {
   if (value === "ready") return "success";
   if (value === "partial") return "attention";
   if (value === "empty") return "info";
-  return "subdued";
+  return undefined;
 }
 
 function gainLabel(overview: Overview) {
@@ -396,14 +399,14 @@ export function PricingProfitPage() {
   if (!allowed || screenState.accessDenied) {
     return (
       <Page
-        title="AI Pricing Engine"
-        subtitle="Optimize pricing for margin and demand with clearer pricing workflows."
+        title="Pricing & Product Profit"
+        subtitle="Pricing and margin recommendations, each stated only as far as your data supports it."
       >
         <Layout>
           <Layout.Section>
             <ModuleInsights
               modules={["pricing", "profit"]}
-              title="Pricing & profit recommendations"
+              title="Open pricing and product profit findings"
               pressureLabel="Opportunity pressure"
               pressureCaption="Weighted from the urgency of open pricing and margin opportunities."
               emptyWhy="Pricing recommendations require product cost and selling price to calculate a defensible margin impact. Without cost data VedaSuite cannot tell a profitable price change from a loss-making one, so it stays silent."
@@ -416,7 +419,7 @@ export function PricingProfitPage() {
           </Layout.Section>
           <Layout.Section>
             <Banner title="Upgrade required: Growth or Pro" tone="info">
-              <p>AI Pricing Engine unlocks on Growth and expands fully on Pro.</p>
+              <p>Pricing &amp; Product Profit unlocks on Growth and expands fully on Pro.</p>
             </Banner>
           </Layout.Section>
           <Layout.Section>
@@ -452,7 +455,7 @@ export function PricingProfitPage() {
 
   return (
     <Page
-      title="AI Pricing Engine"
+      title="Pricing & Product Profit"
       subtitle="Review the products that need pricing attention, why they were flagged, and what data supports each action."
       primaryAction={{
         content: refreshing ? "Updating..." : "Update pricing insights",
@@ -596,7 +599,7 @@ export function PricingProfitPage() {
                   {hasExampleCatalogRecommendations ? (
                     <Banner title="Baseline recommendations based on the current catalog" tone="info">
                       <p>
-                        These AI-generated recommendations use the current catalog and available store activity. Review each recommendation before applying any price changes.
+                        These recommendations are calculated from your catalog and available store activity - no model is involved. Review each one before applying any price change.
                       </p>
                     </Banner>
                   ) : null}
@@ -631,7 +634,7 @@ export function PricingProfitPage() {
                           <Text as="p" variant="bodySm" tone="subdued">{item.support}</Text>
                           <InlineStack gap="200">
                             <Badge tone="info">{item.dataBasis}</Badge>
-                            {item.inputsUsed.map((input) => <Badge key={`${item.id}-${input}`} tone="subdued">{input}</Badge>)}
+                            {item.inputsUsed.map((input) => <Badge key={`${item.id}-${input}`}>{input}</Badge>)}
                           </InlineStack>
                           <Text as="p" variant="bodySm">{item.merchantActionNote}</Text>
                         </BlockStack>

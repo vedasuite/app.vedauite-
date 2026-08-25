@@ -111,12 +111,18 @@ function BillingRedirectState({
   );
 }
 
+/**
+ * Display name for the module a Starter plan selected.
+ *
+ * The KEYS are entitlement keys and must not change — billing reads them.
+ * Only the display names move with the Phase G/H vocabulary.
+ */
 function starterModuleLabel(value: string | null | undefined) {
   if (value === "fraud") {
-    return "Fraud";
+    return "Customer Loss";
   }
   if (value === "competitor") {
-    return "Competitor";
+    return "Market Signals";
   }
   return null;
 }

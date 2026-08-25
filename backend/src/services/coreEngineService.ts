@@ -93,7 +93,7 @@ type StoreSnapshot = {
   profitData: Array<{
     id: string;
     productHandle: string;
-    productCost: number;
+    productCost: number | null;
     sellingPrice: number;
     competitorAveragePrice: number | null;
     advertisingSpend: number | null;
@@ -224,17 +224,46 @@ function calculateReturnAbuseScore(customer: StoreSnapshot["customers"][number])
 
 function buildOrderRisk(order: StoreSnapshot["orders"][number]) {
   const customerRefundRate = order.customer?.refundRate ?? 0;
-  const customerTrustScore = order.customer?.creditScore ?? 55;
   const signalPressure =
     order.fraudSignals.reduce((sum, signal) => sum + signal.riskScore, 0) /
     Math.max(1, order.fraudSignals.length);
 
+  // PHASE J — the trust term contributes only when a trust score was OBSERVED.
+  //
+  // This used to read `order.customer?.creditScore ?? 55`, so an order from a
+  // customer VedaSuite had never scored silently contributed 4.5 points of
+  // "risk" derived from nothing. That number then set the High / Medium / Low
+  // badge a merchant acts on.
+  //
+  // Dropping the term to zero would be just as wrong in the other direction: a
+  // scoreless customer would look SAFER than a well-scored one. So the weight
+  // is REDISTRIBUTED — the remaining observed components are rescaled to fill
+  // the missing 0.1 — and the score stays a weighted average of things
+  // VedaSuite actually knows.
+  //
+  // `creditScore` is Int @default(50), so a bare non-null check would let the
+  // database default back in. Activity is what makes the score an observation.
+  const customer = order.customer;
+  const trustObserved =
+    !!customer && ((customer.totalOrders ?? 0) > 0 || (customer.totalRefunds ?? 0) > 0);
+
+  const observedWeights = trustObserved
+    ? { fraud: 0.45, pressure: 0.25, refund: 0.2, trust: 0.1 }
+    : { fraud: 0.45, pressure: 0.25, refund: 0.2, trust: 0 };
+  const weightSum =
+    observedWeights.fraud +
+    observedWeights.pressure +
+    observedWeights.refund +
+    observedWeights.trust;
+  const rescale = 1 / weightSum;
+
   const score = clamp(
     Math.round(
-      Math.max(order.fraudScore, 0) * 0.45 +
-        signalPressure * 0.25 +
-        customerRefundRate * 100 * 0.2 +
-        (100 - customerTrustScore) * 0.1 +
+      (Math.max(order.fraudScore, 0) * observedWeights.fraud +
+        signalPressure * observedWeights.pressure +
+        customerRefundRate * 100 * observedWeights.refund +
+        (trustObserved ? (100 - customer!.creditScore) * observedWeights.trust : 0)) *
+        rescale +
         (order.refundRequested ? 8 : 0)
     ),
     0,
@@ -257,7 +286,13 @@ function baselinePriceRecommendation(args: {
       ? args.competitorAveragePrice - args.currentPrice
       : 0;
   const returnPenalty = (args.returnRate ?? 0) * args.currentPrice * 0.12;
-  const salesLift = Math.min(4, (args.salesVelocity ?? 8) / 6);
+  // No observed velocity means no velocity term at all. Substituting 8 added a
+  // constant ~1.33 to every recommended price for no measured reason, and that
+  // constant was visible in the merchant-facing target.
+  const salesLift =
+    args.salesVelocity != null && Number.isFinite(args.salesVelocity)
+      ? Math.min(4, args.salesVelocity / 6)
+      : 0;
   const biasLift = (args.pricingBias - 50) / 180;
   const recommendedPrice = roundMoney(
     Math.max(
@@ -283,7 +318,9 @@ function buildTimelineEvents(store: StoreSnapshot) {
     title: string;
     detail: string;
     severity: string;
-    scoreImpact?: number;
+    // Nullable: the column is `Int?`, and null means "no prior score to
+    // measure a movement against" rather than "no movement".
+    scoreImpact?: number | null;
     metadataJson?: string;
     createdAt: Date;
   }> = [];
@@ -306,7 +343,15 @@ function buildTimelineEvents(store: StoreSnapshot) {
         detail: `Trust score ${trust.score} with ${customer.totalOrders} orders and ${customer.totalRefunds} refunds.`,
       }),
       severity: trust.score >= 80 ? "success" : trust.score >= 55 ? "info" : "warning",
-      scoreImpact: trust.score - (customer.creditScore ?? 50),
+      // PHASE J. A delta needs something to be a delta FROM. `creditScore` is
+      // Int @default(50), so for a customer who has never been scored this
+      // computed `trust.score - 50` and stored it as a real movement — and the
+      // trust workspace then rebuilt an absolute score from it. Null when there
+      // is no prior assessment: no baseline, no delta.
+      scoreImpact:
+        customer.totalOrders > 0 || customer.totalRefunds > 0
+          ? trust.score - customer.creditScore
+          : null,
       metadataJson: JSON.stringify({
         customerEmail: customer.email,
         score: trust.score,
@@ -481,12 +526,40 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
       store.profitData.find((row) => row.productHandle === productHandle) ?? null;
     const competitorRows = store.competitorData.filter((row) => row.productHandle === productHandle);
 
-    const currentPrice =
+    // A product with no real price of its own cannot be priced. The previous
+    // `?? 49` invented a base price out of nothing and then built an entire
+    // recommendation, margin delta and profit projection on top of it.
+    const observedCurrentPrice =
       latestPrice?.currentPrice ??
       latestProfit?.sellingPrice ??
-      roundMoney(
-        competitorRows.find((row) => row.price != null)?.price ?? 49
-      );
+      competitorRows.find((row) => row.price != null)?.price ??
+      null;
+    if (observedCurrentPrice == null) {
+      continue;
+    }
+    const currentPrice = roundMoney(observedCurrentPrice);
+
+    // PROVENANCE. Assumptions are still used for INTERNAL ranking, but they are
+    // no longer persisted as if they were observations.
+    //
+    // A prior value only counts as observed if it was RECORDED as observed.
+    // Neither input is observable today — there is no Shopify cost feed and no
+    // order line items — so in practice both resolve to "assumed", and the
+    // stored column is left NULL rather than filled with a guess.
+    const costObserved = latestProfit?.costSource === "observed" && latestProfit.productCost != null;
+    const velocityObserved =
+      latestProfit?.velocitySource === "observed" && latestProfit.salesVelocity != null;
+
+    const observedProductCost = costObserved ? (latestProfit!.productCost as number) : null;
+    const observedSalesVelocity = velocityObserved ? (latestProfit!.salesVelocity as number) : null;
+
+    // Internal-only heuristics. They may drive ranking and ordering; they may
+    // never qualify a monetary claim as evidence-backed.
+    const assumedProductCost = roundMoney(currentPrice * 0.58);
+    const assumedSalesVelocity = Math.max(4, store.orders.length / Math.max(1, baselineProducts.size));
+
+    const productCost = observedProductCost ?? assumedProductCost;
+    const salesVelocity = observedSalesVelocity ?? assumedSalesVelocity;
     const competitorAveragePrice =
       competitorRows.filter((row) => row.price != null).length > 0
         ? roundMoney(
@@ -502,12 +575,22 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
       pricingBias: store.pricingBias,
       competitorAveragePrice,
       returnRate: latestProfit?.returnRate ?? storeReturnRate,
-      salesVelocity: latestProfit?.salesVelocity ?? 8,
+      // NULL when unobserved. baselinePriceRecommendation omits its velocity
+      // term entirely rather than substituting 8, so a displayed target is
+      // never partly an assumption.
+      salesVelocity: observedSalesVelocity,
     });
     const expectedMarginDelta = roundMoney(((recommendedPrice - currentPrice) / currentPrice) * 100);
-    const expectedProfitGain = roundMoney(
-      Math.max(0, recommendedPrice - currentPrice) * (latestProfit?.salesVelocity ?? 8) * 6
-    );
+    // NULL unless velocity was observed. This figure is delta x velocity x 6;
+    // with an assumed velocity it is fiction, and it must not be persisted for
+    // a later reader to present as money.
+    const expectedProfitGain = velocityObserved
+      ? roundMoney(
+          Math.max(0, recommendedPrice - currentPrice) *
+            (observedSalesVelocity as number) *
+            6
+        )
+      : null;
 
     if (!latestPrice || Math.abs(latestPrice.recommendedPrice - recommendedPrice) > 0.01) {
       pricingCreates.push(
@@ -523,17 +606,29 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
               source: "core_engine",
               syncedAt: new Date().toISOString(),
               fallbackUsed: competitorAveragePrice == null,
-              demandScore: clamp(
-                Math.round((latestProfit?.salesVelocity ?? 8) * 5 + (100 - store.profitGuardrail)),
-                25,
-                95
-              ),
-              demandTrend:
-                (latestProfit?.salesVelocity ?? 8) >= 14
-                  ? "strong"
-                  : (latestProfit?.salesVelocity ?? 8) >= 8
-                  ? "stable"
-                  : "softening",
+              // demandScore is NULL when velocity was never observed.
+              //
+              // It used to be clamp(round((salesVelocity ?? 8) * 5 + ...), 25, 95),
+              // which was always non-null and always partly the assumption. Downstream
+              // code treats a non-null demandScore as evidence of observed demand, so
+              // that made an assumption look measured — the same laundering this
+              // programme exists to remove.
+              demandScore: velocityObserved
+                ? clamp(
+                    Math.round(
+                      (observedSalesVelocity as number) * 5 + (100 - store.profitGuardrail)
+                    ),
+                    25,
+                    95
+                  )
+                : null,
+              demandTrend: !velocityObserved
+                ? "insufficient history"
+                : (observedSalesVelocity as number) >= 14
+                ? "strong"
+                : (observedSalesVelocity as number) >= 8
+                ? "stable"
+                : "softening",
               demandSignals: [
                 competitorAveragePrice != null
                   ? `Competitor average price is ${competitorAveragePrice.toFixed(2)}.`
@@ -553,8 +648,6 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
       );
     }
 
-    const productCost = latestProfit?.productCost ?? roundMoney(currentPrice * 0.58);
-    const salesVelocity = latestProfit?.salesVelocity ?? Math.max(4, store.orders.length / Math.max(1, baselineProducts.size));
     const optimalPrice = roundMoney(
       Math.max(
         currentPrice,
@@ -574,13 +667,20 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
           data: {
             storeId: store.id,
             productHandle,
-            productCost,
+            // UNKNOWN STAYS UNKNOWN. Only an observed value is persisted; the
+            // internal heuristic above is used for ranking and never written,
+            // so a later reader cannot mistake it for merchant data.
+            productCost: observedProductCost,
+            costSource: costObserved ? "observed" : "assumed",
+            salesVelocity: observedSalesVelocity,
+            velocitySource: velocityObserved ? "observed" : "assumed",
             sellingPrice: currentPrice,
             competitorAveragePrice,
-            advertisingSpend: latestProfit?.advertisingSpend ?? roundMoney(currentPrice * 0.1),
-            shippingCost: latestProfit?.shippingCost ?? roundMoney(currentPrice * 0.06),
+            // Also assumptions. Left NULL rather than persisted as fact; the
+            // columns are already nullable.
+            advertisingSpend: latestProfit?.advertisingSpend ?? null,
+            shippingCost: latestProfit?.shippingCost ?? null,
             returnRate: latestProfit?.returnRate ?? storeReturnRate,
-            salesVelocity,
             optimalPrice,
             projectedMarginIncrease,
             projectedMonthlyProfit,

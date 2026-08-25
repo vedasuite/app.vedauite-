@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 /**
  * NAVIGATION REACHABILITY.
@@ -27,7 +28,7 @@ const NAV_MODEL = path.join(FRONTEND, "layout/navigationModel.js");
 
 const appSource = fs.readFileSync(APP_TSX, "utf8");
 const frameSource = fs.readFileSync(APP_FRAME, "utf8");
-const navModelSource = fs.readFileSync(NAV_MODEL, "utf8");
+// NAV_MODEL is imported and executed rather than read as text — see navPaths().
 
 /**
  * Routes that intentionally have no navigation entry. Anything added here needs
@@ -48,20 +49,34 @@ function routedPaths() {
 }
 
 /**
- * All `{ path, label }` entries declared in the navigation model.
+ * All `{ path, label }` entries the navigation model actually produces.
  *
- * The entries live in navigationModel.js rather than inline in AppFrame so the
- * list can also be executed (see navigationRuntime.test.cjs). These static
- * checks stay here because they cross-reference App.tsx's routes.
+ * EXECUTED, not pattern-matched. This used to scrape the source with
+ * `/\{\s*path:\s*"..."\s*,\s*label:\s*"..."/`, which silently stopped matching
+ * the moment Phase G/H put an explanatory comment between the brace and the
+ * `path:` key — and reported the three module routes as unreachable when they
+ * were perfectly reachable. A test that fails because a comment was added is
+ * testing the formatting, not the behaviour.
+ *
+ * The model is pure and dependency-free precisely so it can be run here. It is
+ * called with every module disabled, because the entry list must be complete
+ * regardless of plan (navigationRuntime.test.cjs proves that separately).
  */
+let navEntries = null;
+
+test.before(async () => {
+  const mod = await import(pathToFileURL(NAV_MODEL).href);
+  navEntries = mod.buildNavigationModel({
+    fraud: false,
+    competitor: false,
+    pricing: false,
+  });
+});
+
 function navPaths() {
-  const paths = [];
-  for (const m of navModelSource.matchAll(
-    /\{\s*path:\s*"(\/app[^"]*)"\s*,\s*label:\s*"([^"]+)"/g
-  )) {
-    paths.push({ path: m[1], label: m[2] });
-  }
-  return paths;
+  return navEntries
+    .filter((entry) => entry.path.startsWith("/app"))
+    .map((entry) => ({ path: entry.path, label: entry.label }));
 }
 
 test("every /app route is reachable from the authenticated navigation", () => {

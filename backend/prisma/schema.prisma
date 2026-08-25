@@ -278,6 +278,15 @@ model FraudSignal {
 }
 
 model CompetitorDomain {
+  /// Outcome of the most recent collection attempt. One of the
+  /// CompetitorFetchStatus values; NULL means never attempted. Persisted so the
+  /// UI never has to INFER why a domain has no fresh data.
+  lastAttemptAt     DateTime?
+  lastAttemptStatus String?
+  /// Technical detail for logs and support. Never shown to merchants.
+  lastAttemptDetail String?
+  /// When this domain last yielded usable data, whatever happened since.
+  lastSuccessAt     DateTime?
   id        String   @id @default(cuid())
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId   String
@@ -320,7 +329,15 @@ model ProfitOptimizationData {
   store                   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
   storeId                 String
   productHandle           String
-  productCost             Float
+  /// NULL means unknown. VedaSuite has no Shopify product-cost feed, so a
+  /// value here is only trustworthy when costSource = "observed".
+  productCost             Float?
+  /// "observed" | "assumed". Gates whether productCost may support a
+  /// merchant-facing monetary claim. Defaults to assumed — never optimistic.
+  costSource              String   @default("assumed")
+  /// "observed" | "assumed". Per-product velocity is not derivable today
+  /// (there are no order line items), so this is "assumed" in practice.
+  velocitySource          String   @default("assumed")
   sellingPrice            Float
   competitorAveragePrice  Float?
   advertisingSpend        Float?

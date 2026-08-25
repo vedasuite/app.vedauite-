@@ -11,6 +11,10 @@ import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
 import { resolveEntitlements } from "./subscriptionService";
 import * as calc from "./explainabilityCalc";
+import {
+  classifyMonetaryClaim,
+  storedProfitValueIsObserved,
+} from "./evidenceEligibility";
 
 const MAX_INSIGHTS_PER_MODULE = 10;
 const IMPACT_CAP_FALLBACK = 1000;
@@ -200,23 +204,53 @@ export async function getDashboardInsights(
   }
   const selectedUpside = calc.dedupePotentialUpside(upsideCandidates).slice(0, MAX_INSIGHTS_PER_MODULE);
   for (const s of selectedUpside) {
-    const impact: calc.FinancialImpact = {
-      status: "quantified", min: 0, max: Math.round((s.amount ?? 0) * 100) / 100,
-      currency, period: "monthly_estimate", basis: `Selected source: ${s.source} (deduplicated per product/window).`, isEstimate: true,
-    };
+    // THE SHARED GATE. Pricing and the Dashboard ask the same question here, so
+    // they can no longer contradict each other.
+    //
+    // Both inputs a per-product monetary projection needs are unobservable
+    // today: there are no order line items (so velocity cannot be attributed to
+    // a product) and no Shopify cost feed (so margin cannot be computed). The
+    // values in ProfitOptimizationData are persisted FALLBACKS, so reading them
+    // back and null-checking is not an evidence check.
+    //
+    // This is what produced "Potential revenue $5,641" and "Expected return
+    // $680" on the Dashboard while Pricing correctly said "Not enough data yet".
+    const verdict = classifyMonetaryClaim({
+      salesVelocityObserved: storedProfitValueIsObserved(),
+      productCostObserved: storedProfitValueIsObserved(),
+    });
+
+    const impact: calc.FinancialImpact = verdict.allowed
+      ? {
+          status: "quantified", min: 0, max: Math.round((s.amount ?? 0) * 100) / 100,
+          currency, period: "monthly_estimate", basis: `Selected source: ${s.source} (deduplicated per product/window).`, isEstimate: true,
+        }
+      : {
+          status: "impact_not_quantifiable",
+          reason: verdict.explanation,
+        };
     insights.push({
       id: `upside:${s.storeId}:${calc.canonicalProductIdentity(s)}:${calc.analysisWindowUTC(s.createdAtIso)}`,
       storeId: store.id, module: "pricing", title: `Pricing opportunity on ${s.productHandle}`,
-      reasons: ["Recommended price is above current price with positive expected gain."],
+      reasons: verdict.allowed
+        ? ["Recommended price is above current price with positive expected gain."]
+        : ["A higher price may be possible for this product.", verdict.explanation],
       evidence: calc.buildAggregateEvidence({ margin_percentage: "" }),
-      financialImpact: impact, confidence: "medium", recency: s.createdAtIso,
+      financialImpact: impact, confidence: verdict.confidence, recency: s.createdAtIso,
       urgency: "medium", easeOfAction: "guided",
-      recommendedAction: "Review and apply the recommended price in Shopify.",
+      recommendedAction: verdict.allowed
+        ? "Review and apply the recommended price in Shopify."
+        : "Review this product manually. VedaSuite cannot size the opportunity until the missing data is available.",
       score: blankScore(),
       methodology: { summary: "One estimate per product/window via source priority.", assumptions: ["Advisory estimate; merchant applies price."], caps: ["Never sums multiple sources for one product."] },
       route: "/app/ai-pricing-engine", dataQuality: "ok",
     });
-    upsideItems.push({ key: s.productHandle, label: `Upside — ${s.productHandle}`, min: 0, max: impact.status === "quantified" ? impact.max : 0, period: "monthly_estimate", confidence: "medium" });
+    // Only a permitted figure may enter the revenue-leak groups that feed the
+    // Dashboard headline. A refused claim contributes nothing at all - it must
+    // not appear as a 0 that silently widens a range either.
+    if (impact.status === "quantified") {
+      upsideItems.push({ key: s.productHandle, label: `Upside — ${s.productHandle}`, min: 0, max: impact.max, period: "monthly_estimate", confidence: verdict.confidence });
+    }
   }
 
   // ---------- Competitor price pressure ----------
@@ -227,17 +261,43 @@ export async function getDashboardInsights(
     if (compCount >= MAX_INSIGHTS_PER_MODULE) break;
     const pf = profitByHandle.get(c.productHandle);
     const ourPrice = pf?.sellingPrice ?? null;
+    // PHASE J. `ourPrice ?? 0` was safe only by coincidence: the same value is
+    // also passed as `sellingPrice`, and computeCompetitorImpact rejects a null
+    // or non-positive sellingPrice before it ever divides by ourPrice. Relying
+    // on two parameters happening to carry one value is a trap for whoever
+    // changes either of them, so the guard is stated here instead.
+    if (ourPrice == null || !(ourPrice > 0)) {
+      // No selling price means no gap to measure. Skipping is correct: a zero
+      // would make the competitor's entire price look like our exposure.
+      continue;
+    }
     const impact = calc.computeCompetitorImpact({
-      nowIso, currency, ourPrice: ourPrice ?? 0, competitorPrice: c.price,
+      nowIso, currency, ourPrice, competitorPrice: c.price,
       salesVelocity: pf?.salesVelocity ?? null, sellingPrice: ourPrice,
       matchConfidence: competitorConfidenceFromJson(c.insightsJson),
       collectedAtIso: c.collectedAt.toISOString(),
     });
-    const gap = ourPrice && c.price ? (ourPrice - c.price) / ourPrice : null;
+    // PHASE J. A second unsupported claim lived here. `reasons` asserted "A
+    // tracked competitor is priced below your product" UNCONDITIONALLY — even
+    // when the measured gap was negative, i.e. when the merchant was already
+    // the cheaper of the two. The title said the same thing. Both now follow
+    // the direction the numbers actually show.
+    const gap = c.price != null && c.price > 0 ? (ourPrice - c.price) / ourPrice : null;
+    if (gap == null) {
+      // No competitor price collected for this row: nothing to compare.
+      continue;
+    }
+    const competitorIsCheaper = gap > 0;
     insights.push({
       id: `competitor:${store.id}:${c.id}`, storeId: store.id, module: "competitor",
-      title: `Competitor price pressure on ${c.productHandle}`,
-      reasons: ["A tracked competitor is priced below your product."],
+      title: competitorIsCheaper
+        ? `Competitor price pressure on ${c.productHandle}`
+        : `Competitor price comparison for ${c.productHandle}`,
+      reasons: [
+        competitorIsCheaper
+          ? "A tracked competitor is priced below your product."
+          : "A tracked competitor is priced at or above your product.",
+      ],
       evidence: calc.buildAggregateEvidence({
         price_gap: gap != null ? `${(gap * 100).toFixed(1)}%` : undefined,
         match_confidence: competitorConfidenceFromJson(c.insightsJson),
@@ -283,7 +343,7 @@ export async function getDashboardInsights(
       financialImpact: r.financialImpact,
       confidence: r.financialImpact.status === "quantified" ? "medium" : "low",
       recency: nowIso, urgency: "medium", easeOfAction: "one_click_review",
-      recommendedAction: "Review this shopper’s refund history in Fraud Intelligence.",
+      recommendedAction: "Review this shopper’s refund history in Customer Loss.",
       score: blankScore(),
       methodology: { summary: "Excess-over-baseline; money over last 30 days; full order value used (no partial-refund amounts stored).", assumptions: ["≥5 customer & ≥50 store eligible orders."], caps: ["Capped at eligible 30-day order value."] },
       route: "/app/fraud-intelligence", dataQuality: r.financialImpact.status === "quantified" ? "ok" : "insufficient_data",
@@ -311,7 +371,7 @@ export async function getDashboardInsights(
       financialImpact: hr.financialImpact,
       confidence: "high", recency: nowIso,
       urgency: hr.orderCount >= 3 ? "critical" : "high", easeOfAction: "one_click_review",
-      recommendedAction: "Review open high-risk orders in Fraud Intelligence.",
+      recommendedAction: "Review open high-risk orders in Customer Loss.",
       score: blankScore(),
       methodology: { summary: `Sum of open High-risk order totals (statuses: ${calc.OPEN_HIGH_RISK_STATUSES.join(", ")}; excludes refunded).`, assumptions: ["Full order value at risk while unresolved."], caps: ["Point-in-time snapshot (current_open_exposure)."] },
       route: "/app/fraud-intelligence", dataQuality: "ok",
@@ -362,12 +422,12 @@ export async function getDashboardInsights(
       module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5,
       note: returnAbuseTruncated
         ? "Order volume exceeds the analysis bound for this period; return-abuse exposure not quantified."
-        : orderTotalCount < 5 ? "More order history needed." : undefined,
+        : orderTotalCount < 5 ? "Needs at least 5 synced orders before refund and return behaviour can be compared to a store baseline." : undefined,
     });
   if (allowedCaps.has("competitor"))
-    dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "Add competitor domains to enable pressure estimates." : undefined });
+    dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "No competitor rows collected. Add a competitor domain in Market Signals, then run a sync." : undefined });
   if (allowedCaps.has("pricing") || allowedCaps.has("profit"))
-    dataCoverage.push({ module: "pricing", rowsAvailable: priceHistoryCount + profitDataCount, lastSyncAt, sufficient: priceHistoryCount + profitDataCount > 0, note: store.profitData.every((p) => !p.productCost) ? "Add product cost to quantify margin." : undefined });
+    dataCoverage.push({ module: "pricing", rowsAvailable: priceHistoryCount + profitDataCount, lastSyncAt, sufficient: priceHistoryCount + profitDataCount > 0, note: store.profitData.every((p) => !p.productCost) ? "No product cost recorded. Shopify does not send cost to VedaSuite, so margin cannot be quantified until you supply it." : undefined });
 
   const executiveSummary = calc.buildExecutiveSummary({ nowIso, dataReady, opportunities, criticalAttention, revenueLeak });
 

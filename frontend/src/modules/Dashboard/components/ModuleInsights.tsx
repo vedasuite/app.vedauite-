@@ -1,4 +1,4 @@
-import { BlockStack, Text } from "@shopify/polaris";
+import { Banner, BlockStack, Text } from "@shopify/polaris";
 import { MagicIcon } from "@shopify/polaris-icons";
 import { EducationalEmptyState } from "../../../components/intelligence/EducationalEmptyState";
 import { SectionHeader } from "../../../components/intelligence/SectionHeader";
@@ -7,23 +7,100 @@ import {
   KpiSkeletonGrid,
 } from "../../../components/intelligence/IntelligenceSkeletons";
 import { useInsightsDashboard } from "../../../hooks/useInsightsDashboard";
-import type { InsightModule } from "../../../lib/insightsTypes";
+import { useModuleFindings } from "../../../hooks/useModuleFindings";
+import type { ModuleFinding } from "../../../hooks/useModuleFindings";
+import type { ExplainableInsight, InsightModule } from "../../../lib/insightsTypes";
 import { ExplainableInsightCard } from "./ExplainableInsightCard";
 import { ModuleIntelligencePanel } from "./ModuleIntelligencePanel";
 import "../../../components/intelligence/intelligence.css";
 
 /**
- * Additive explainability panel for an existing module page.
+ * The open findings for one engine family, on that family's workspace page.
  *
- * Reuses the shared insights endpoint plus the same card and gauge components
- * as the dashboard, so a finding reads identically wherever it appears. Never
- * interferes with the host page: it stays silent on auth errors (the page has
- * its own reconnect handling) and renders nothing on failure rather than
- * showing a competing error banner.
+ * WHAT CHANGED, AND WHY
+ * ---------------------
+ * This panel used to read /api/insights/dashboard, which recomputes insights
+ * on every request and knows nothing about IntelligenceFinding. That made the
+ * workspaces the last surface able to contradict the Action Center: a merchant
+ * could resolve a finding, watch it disappear from the Action Center and the
+ * Store Overview, then open the matching workspace and still find it there —
+ * with a "Critical" badge and a monetary impact beside it.
+ *
+ * It now reads the SAME open findings the Action Center renders, filtered to
+ * this family. Every merchant-facing surface — Action Center, Store Overview,
+ * the three workspaces and the AI brief — reads one source with one lifecycle.
+ *
+ * Coverage still comes from the insights endpoint on purpose: "how many rows
+ * were analysed" makes no claim about problems, money, confidence or status,
+ * so it cannot contradict a finding.
+ *
+ * Never interferes with the host page: it stays silent on auth errors (the page
+ * has its own reconnect handling) rather than showing a competing banner.
  */
+
+/**
+ * Adapts a finding to the shape the existing card and panel render.
+ *
+ * A pure remapping — no value is recomputed, reworded or added. `reasons` is
+ * rebuilt from the two sentences the card already displayed under those
+ * headings, and the empty score breakdown is honest: ranking is the Action
+ * Center's, and inventing per-component numbers to fill a shape would be the
+ * fabrication this whole programme removes.
+ */
+function toInsight(finding: ModuleFinding): ExplainableInsight {
+  return {
+    id: finding.id,
+    storeId: "",
+    module: finding.module as InsightModule,
+    title: finding.title,
+    reasons: [finding.whatHappened, finding.whyItMatters].filter(Boolean),
+    evidence: finding.evidence ?? [],
+    financialImpact:
+      finding.impact.status === "quantified"
+        ? {
+            status: "quantified",
+            min: finding.impact.min,
+            max: finding.impact.max,
+            currency: finding.impact.currency,
+            period: finding.impact.period as ExplainableInsight["financialImpact"] extends {
+              period: infer P;
+            }
+              ? P
+              : never,
+            basis: finding.impact.basis ?? "",
+          }
+        : { status: "impact_not_quantifiable", reason: finding.impact.reason },
+    confidence: finding.confidence,
+    recency: finding.lastSeenAt,
+    urgency: finding.severity,
+    easeOfAction: "manual",
+    recommendedAction: finding.recommendedAction,
+    score: {
+      total: finding.rank.score,
+      components: {
+        financialImpact: 0,
+        urgency: 0,
+        confidence: 0,
+        easeOfAction: 0,
+        recency: 0,
+      },
+      weights: {
+        financialImpact: 0,
+        urgency: 0,
+        confidence: 0,
+        easeOfAction: 0,
+        recency: 0,
+      },
+    },
+    methodology: finding.methodology ?? { summary: "", assumptions: [], caps: [] },
+    route: finding.route,
+    dataQuality: finding.dataComplete ? "ok" : "insufficient_data",
+  } as ExplainableInsight;
+}
+
 export function ModuleInsights({
   modules,
-  title = "Explainable insights",
+  title = "Open findings",
   pressureLabel,
   pressureCaption,
   emptyWhy,
@@ -36,13 +113,15 @@ export function ModuleInsights({
   emptyWhy?: string;
   emptySteps?: string[];
 }) {
-  const { data, loading, error, authRequired } = useInsightsDashboard();
-  const wanted = new Set(modules);
+  const { findings, loading, unavailable, authRequired } = useModuleFindings(modules);
+  // Coverage only. No money, no confidence, no status — nothing that could
+  // disagree with a finding.
+  const { data: coverageData } = useInsightsDashboard();
 
   // The host page owns the reconnect experience — don't duplicate it here.
   if (authRequired) return null;
 
-  if (loading && !data) {
+  if (loading) {
     return (
       <BlockStack gap="300">
         <Text as="h3" variant="headingSm">
@@ -54,15 +133,22 @@ export function ModuleInsights({
     );
   }
 
-  if (!data || error) return null;
+  if (unavailable) {
+    // "VedaSuite could not check" is not "nothing is wrong". Rendering the
+    // second in place of the first is precisely the kind of quiet false
+    // reassurance this programme exists to remove.
+    return (
+      <Banner title="Findings could not be loaded" tone="warning">
+        <p>
+          This is a temporary read problem, not a statement about your store.
+          Refresh to try again.
+        </p>
+      </Banner>
+    );
+  }
 
-  // An insight can appear in both lanes; show it once.
-  const seen = new Set<string>();
-  const items = [...data.opportunities, ...data.criticalAttention]
-    .filter((insight) => wanted.has(insight.module))
-    .filter((insight) => (seen.has(insight.id) ? false : (seen.add(insight.id), true)));
-
-  const relevantCoverage = data.dataCoverage.filter(
+  const wanted = new Set<string>(modules);
+  const relevantCoverage = (coverageData?.dataCoverage ?? []).filter(
     (entry) => entry.module === "all" || wanted.has(entry.module as InsightModule)
   );
 
@@ -73,16 +159,18 @@ export function ModuleInsights({
     .filter((entry) => entry.module !== "all")
     .reduce((total, entry) => total + Math.max(0, entry.rowsAvailable), 0);
 
+  const items = findings.map(toInsight);
+
   return (
     <div className="veda-band">
       <SectionHeader
-        eyebrow="Explainable AI"
+        eyebrow="Evidence-backed findings"
         title={title}
         icon={MagicIcon}
         iconTone="info"
         count={
           items.length > 0
-            ? `${items.length} finding${items.length === 1 ? "" : "s"}`
+            ? `${items.length} open finding${items.length === 1 ? "" : "s"}`
             : undefined
         }
         countTone="info"
@@ -91,15 +179,15 @@ export function ModuleInsights({
       {items.length === 0 ? (
         monitoredRows > 0 ? (
           // Activity HAS been analysed, but nothing cleared the evidence bar.
-          // Saying "no explainable findings" alone read as "nothing happened",
-          // directly contradicting the activity counts shown elsewhere on the
-          // page. This states both facts truthfully without inventing a
-          // recommendation or lowering any threshold.
+          // Saying "no findings" alone read as "nothing happened", directly
+          // contradicting the activity counts shown elsewhere on the page. This
+          // states both facts truthfully without inventing a recommendation or
+          // lowering any threshold.
           <EducationalEmptyState
-            title="Activity detected — no recommendations yet"
+            title="Activity detected — no findings yet"
             why={`VedaSuite analysed ${monitoredRows.toLocaleString()} record${
               monitoredRows === 1 ? "" : "s"
-            } for this module and detected activity, but none of it currently meets the confidence required for an AI recommendation. Recommendations are generated only when there is enough supporting evidence to explain and quantify them.`}
+            } for this module and detected activity, but none of it currently meets the evidence bar for a finding. Findings appear only when there is enough supporting data to explain and quantify them.`}
             steps={
               emptySteps ?? [
                 "Add product cost and selling price so margin impact can be calculated",
@@ -110,10 +198,10 @@ export function ModuleInsights({
           />
         ) : (
           <EducationalEmptyState
-            title="No explainable findings for this module yet"
+            title="No open findings for this module"
             why={
               emptyWhy ??
-              "Findings appear here once this module has enough synced history for VedaSuite to estimate impact and assign a confidence level. Nothing is shown until it can be explained."
+              "Findings appear here once this module has enough synced history for VedaSuite to explain and, where the data allows, quantify what it found. Nothing is shown until it can be explained. Anything you have already resolved will not reappear here."
             }
             steps={
               emptySteps ?? [

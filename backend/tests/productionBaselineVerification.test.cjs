@@ -23,7 +23,12 @@ const path = require("node:path");
 const SCRIPT = path.resolve(__dirname, "../scripts/verify-production-baseline.js");
 const MIGRATIONS_DIR = path.resolve(__dirname, "../prisma/migrations");
 
-const { HISTORICAL_MIGRATIONS, PENDING_MIGRATION, verifyAll } = require(SCRIPT);
+const {
+  HISTORICAL_MIGRATIONS,
+  PENDING_MIGRATION,
+  NON_HISTORICAL_MIGRATIONS,
+  verifyAll,
+} = require(SCRIPT);
 
 /** Reads a migration's SQL with comments stripped. */
 function sqlFor(name) {
@@ -75,7 +80,7 @@ test("COMPLETENESS: exactly the 14 historical migrations are declared", () => {
 
   assert.equal(declared.length, 14, "exactly 14 historical migrations");
   assert.deepEqual(
-    [...declared, PENDING_MIGRATION].sort(),
+    [...declared, ...NON_HISTORICAL_MIGRATIONS].sort(),
     onDisk,
     "the manifest plus the pending migration must account for every directory"
   );
@@ -368,7 +373,7 @@ test("RUNBOOK: resolve commands plus the pending one account for every migration
     .sort();
 
   assert.deepEqual(
-    [...commanded, PENDING_MIGRATION].sort(),
+    [...commanded, ...NON_HISTORICAL_MIGRATIONS].sort(),
     onDisk,
     "no migration may be unaccounted for by the runbook"
   );

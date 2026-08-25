@@ -442,7 +442,7 @@ export function ActionCenterPage() {
                     : "VedaSuite has not analysed this store yet. Run Sync Data to get started."}
                 </Text>
                 <InlineStack gap="200">
-                  <Button onClick={() => navigateEmbedded("/app/dashboard")}>Go to Dashboard</Button>
+                  <Button onClick={() => navigateEmbedded("/app/dashboard")}>Go to Store Overview</Button>
                 </InlineStack>
               </BlockStack>
             </Card>

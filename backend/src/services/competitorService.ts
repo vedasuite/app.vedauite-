@@ -1661,8 +1661,15 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
                 catalogObservation: true,
                 competitorProductTitle: competitorProduct.title,
                 competitorProductHandle: competitorProduct.handle,
-                confidenceScore: 64,
-                confidenceLabel: "medium",
+                // PHASE J. A catalog observation with NO matched Shopify
+                // product was labelled "medium" - the exact threshold at
+                // which computeCompetitorImpact becomes willing to state
+                // money. A row whose own matchReason says no product match
+                // was found cannot carry medium match confidence, and the 64
+                // was a number with nothing behind it. Low keeps the
+                // observation visible and keeps it unable to fund a claim.
+                confidenceLabel: "low",
+                confidenceBasis: "catalog_observation_without_product_match",
                 matchReason:
                   "Competitor catalog product and price were detected. Add matching products to the Shopify catalog for direct product comparison.",
                 usedFallbackPrice: false,
@@ -1764,7 +1771,9 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
                     : "in_stock",
                 source: "website_catalog",
                 adCopy: null,
-                confidenceScore: Math.max(62, Math.min(88, bestCatalogMatch.score)),
+                // The real match score, not a floor. A floor of 62 reported a weak match
+                  // as 62% confident, which is a merchant-facing claim built from a constant.
+                  confidenceScore: Math.max(0, Math.min(100, bestCatalogMatch.score)),
                 confidenceLabel:
                   bestCatalogMatch.score >= 72
                     ? ("high" as const)
@@ -1849,8 +1858,15 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
                 catalogObservation: true,
                 competitorProductTitle: competitorProduct.title,
                 competitorProductHandle: competitorProduct.handle,
-                confidenceScore: 64,
-                confidenceLabel: "medium",
+                // PHASE J. A catalog observation with NO matched Shopify
+                // product was labelled "medium" - the exact threshold at
+                // which computeCompetitorImpact becomes willing to state
+                // money. A row whose own matchReason says no product match
+                // was found cannot carry medium match confidence, and the 64
+                // was a number with nothing behind it. Low keeps the
+                // observation visible and keeps it unable to fund a claim.
+                confidenceLabel: "low",
+                confidenceBasis: "catalog_observation_without_product_match",
                 matchReason:
                   "Competitor catalog product and price were detected. No direct Shopify catalog match was found yet.",
                 usedFallbackPrice: false,
@@ -1956,7 +1972,9 @@ export async function getCompetitorResponseEngine(shopDomain: string) {
           Number(mover.promotionSignals > 0) +
           Number(mover.stockSignals > 0) +
           Number(mover.priceDelta !== 0),
-        confidence: Math.max(35, Math.min(80, pressureScore)),
+        // The real pressure score. The previous floor of 35 meant "no pressure"
+          // still surfaced as 35% confident.
+          confidence: Math.max(0, Math.min(100, pressureScore)),
         reasons: [
           mover.priceDelta !== 0
             ? `Observed price delta: ${mover.priceDelta >= 0 ? "+" : "-"}$${Math.abs(mover.priceDelta).toFixed(2)}`

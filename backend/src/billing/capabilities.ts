@@ -361,15 +361,22 @@ export function buildFeatureAccessFromCapabilities(
   };
 }
 
+/**
+ * Merchant-facing display name for a Starter plan's chosen module.
+ *
+ * The KEYS are entitlement keys and are load-bearing for billing — they are
+ * deliberately untouched. Only the display names follow the Phase G/H
+ * vocabulary, so the plan page, onboarding and the navigation agree.
+ */
 export function normalizeStarterModuleLabel(moduleKey: StarterModule | null) {
   if (moduleKey === "fraud") {
-    return "Fraud Intelligence";
+    return "Customer Loss";
   }
   if (moduleKey === "competitor") {
-    return "Competitor Intelligence";
+    return "Market Signals";
   }
   if (moduleKey === "pricing") {
-    return "AI Pricing Engine";
+    return "Pricing & Product Profit";
   }
   return null;
 }

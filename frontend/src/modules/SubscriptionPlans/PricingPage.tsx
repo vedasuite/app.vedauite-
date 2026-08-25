@@ -133,53 +133,53 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   STARTER: {
     planName: "STARTER",
     priceLabel: "$19/month",
-    summary: "Fraud & Return Protection for small stores.",
+    summary: "One focused workspace for small stores.",
     featureBullets: [
       "Refund abuse detection",
       "Customer risk scoring",
-      "Basic order intelligence",
+      "Order-level risk evidence",
       "Manual competitor tracking",
     ],
     includedFeatureBullets: [
-      "Choose Fraud & Return Protection",
-      "Or choose Competitor Intelligence",
+      "Choose Customer Loss",
+      "Or choose Market Signals",
     ],
     idealFor: "Small stores that want one focused workflow first.",
   },
   GROWTH: {
     planName: "GROWTH",
     priceLabel: "$49/month",
-    summary: "Advanced competitor and pricing intelligence.",
+    summary: "Market signals and pricing, with deeper customer loss analysis.",
     featureBullets: [
-      "AI pricing recommendations (limited — full Profit Optimization is Pro-only)",
+      "Pricing recommendations (limited — full Product Profit is Pro-only)",
       "Automated competitor monitoring",
       "Product match detection",
       "Pricing change alerts",
-      "Enhanced fraud analysis",
+      "Deeper customer loss analysis",
     ],
     includedFeatureBullets: [
-      "Trust & Abuse",
-      "Competitor Intelligence",
-      "Pricing & Profit (limited)",
+      "Customer Loss",
+      "Market Signals",
+      "Pricing & Product Profit (limited)",
     ],
-    idealFor: "Stores that want competitor, pricing, and risk insights together.",
+    idealFor: "Stores that want market, pricing and customer loss findings together.",
     recommended: true,
   },
   PRO: {
     planName: "PRO",
     priceLabel: "$99/month",
-    summary: "Full AI commerce intelligence suite.",
+    summary: "The complete VedaSuite engine set.",
     featureBullets: [
-      "AI profit optimization",
+      "Product profit optimization",
       "Advanced shopper scoring",
       "Competitor trend analytics",
       "Multi-store insights",
       "Priority processing",
     ],
     includedFeatureBullets: [
-      "Trust & Abuse",
-      "Competitor Intelligence",
-      "Pricing & Profit (complete)",
+      "Customer Loss",
+      "Market Signals",
+      "Pricing & Product Profit (complete)",
       "Advanced Pro features",
     ],
     idealFor: "Stores that need pricing, risk, competitor, and profit insights in one app.",
@@ -188,9 +188,9 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
 
 function starterLabel(moduleKey: StarterModule | null) {
   return moduleKey === "fraud"
-    ? "Fraud Intelligence"
+    ? "Customer Loss"
     : moduleKey === "competitor"
-    ? "Competitor Intelligence"
+    ? "Market Signals"
     : "Not selected";
 }
 
@@ -781,7 +781,7 @@ export function PricingPage() {
                     : management.billing.lifecycle === "pending_approval"
                     ? "warning"
                     : management.billing.lifecycle === "cancelled"
-                    ? "attention"
+                    ? "warning"
                     : management.billing.lifecycle === "frozen" ||
                       management.billing.lifecycle === "unknown_error" ||
                       management.billing.lifecycle === "uninstalled"
@@ -872,14 +872,14 @@ export function PricingPage() {
                           Choose Starter feature
                         </Text>
                         <RadioButton
-                          label="Fraud Intelligence"
+                          label="Customer Loss"
                           id="starter-trust-abuse"
                           name="starter-module"
                           checked={starterModule === "fraud"}
                           onChange={() => setStarterModule("fraud")}
                         />
                         <RadioButton
-                          label="Competitor Intelligence"
+                          label="Market Signals"
                           id="starter-competitor"
                           name="starter-module"
                           checked={starterModule === "competitor"}

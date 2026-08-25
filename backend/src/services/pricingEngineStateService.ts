@@ -122,9 +122,9 @@ export function derivePricingEngineViewState(input: {
   ) {
     return {
       status: "empty_no_data",
-      title: "Pricing insights will appear automatically",
+      title: "No products or orders to analyse yet",
       description:
-        "More store activity is needed before advanced pricing recommendations are available.",
+        "VedaSuite checked your catalog and order history and found neither. Pricing and product profit are calculated per product from its price, its cost and how it actually sells, so all three need data before anything can be recommended.",
       nextAction: "Update store insights",
       emptyReason: "no_catalog_data",
       processingSummary,
@@ -137,9 +137,9 @@ export function derivePricingEngineViewState(input: {
   if (input.productsCount === 0) {
     return {
       status: "empty_no_data",
-      title: "More catalog activity is needed",
+      title: "No products synced yet",
       description:
-        "Pricing insights will appear after Shopify products are available.",
+        "VedaSuite has order activity but no Shopify products. A pricing recommendation is always about a specific product, so the catalog has to sync first.",
       nextAction: "Update product insights",
       emptyReason: "no_catalog_data",
       processingSummary,
@@ -152,9 +152,9 @@ export function derivePricingEngineViewState(input: {
   if (input.ordersCount === 0 && input.recommendationCount === 0) {
     return {
       status: "empty_no_data",
-      title: "More sales history is needed",
+      title: "No order history to price against",
       description:
-        "VedaSuite has product data, but it needs order history before it can make useful pricing recommendations.",
+        "VedaSuite has your products but no orders yet. Without sales it cannot tell a price that is working from one that is not, so it will not guess at a change.",
       nextAction: "Sync again after more sales activity",
       emptyReason: "no_sales_history",
       processingSummary,
@@ -184,9 +184,9 @@ export function derivePricingEngineViewState(input: {
   if (input.competitorCount === 0) {
     return {
       status: "empty_no_data",
-      title: "Competitor-informed pricing will appear later",
+      title: "No market comparison available",
       description:
-        "Baseline pricing is available. Add competitor websites when you want market comparisons.",
+        "Pricing here is based on your own product economics only. Add a competitor domain in Market Signals if you want your prices compared against the market as well.",
       nextAction: "Add competitor websites",
       emptyReason: "no_competitor_input",
       processingSummary,
@@ -198,10 +198,10 @@ export function derivePricingEngineViewState(input: {
 
   return {
     status: "empty_no_data",
-    title: "More activity is needed for pricing recommendations",
+    title: "Analysed, but nothing met the evidence bar",
     description:
-      "Pricing analysis completed, but no strong recommendations are available right now.",
-    nextAction: "Check again after more store activity",
+      "VedaSuite analysed your products and orders and found no price change it could defend. Exact targets and monetary gains need observed product cost and how many units each product actually sells; Shopify sends neither, so they stay unstated rather than estimated.",
+    nextAction: "Add product cost to unlock margin impact",
     emptyReason: "no_recommendations",
     processingSummary,
     timedOutSources: input.timedOutSources,
