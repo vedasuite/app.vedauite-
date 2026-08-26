@@ -12,6 +12,7 @@ import { competitorRouter } from "./competitorRoutes";
 import { pricingRouter } from "./pricingRoutes";
 import { pricingProfitRouter } from "./pricingProfitRoutes";
 import { reconciliationRouter } from "./reconciliationRoutes";
+import { syncDiagnosticsRouter } from "./syncDiagnosticsRoutes";
 import { publicRouter } from "./publicRoutes";
 import { creditScoreRouter } from "./creditScoreRoutes";
 import { profitRouter } from "./profitRoutes";
@@ -57,6 +58,8 @@ router.use("/api/competitor", competitorRouter);
 router.use("/api/pricing", pricingRouter);
 router.use("/api/pricing-profit", pricingProfitRouter);
 router.use("/api/reconciliation", reconciliationRouter);
+// READ-ONLY operational metadata. Session-scoped like every other /api route.
+router.use("/api/diagnostics", syncDiagnosticsRouter);
 router.use("/api/credit-score", creditScoreRouter);
 router.use("/api/profit", profitRouter);
 router.use("/api/reports", reportsRouter);

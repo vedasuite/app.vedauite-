@@ -50,6 +50,11 @@ import {
 } from "./reconciliationChecks";
 import { getActiveRateCard, loadRateCardEntries } from "./rateCardService";
 import { getCurrentSubscription } from "./subscriptionService";
+import {
+  describeInventoryAvailability,
+  describeSkuAvailability,
+  resolveProductResourceState,
+} from "./productResourceState";
 import type { Capability } from "../billing/capabilities";
 import {
   buildReconciliationFindings,
@@ -848,7 +853,19 @@ export async function getReconciliationWorkspace(shopDomain: string) {
   // refuse, and cannot hide one the endpoint would allow.
   const subscription = await getCurrentSubscription(shopDomain);
 
-  const [sources, runs, openFindings, variantCoverage, rateCards, inventoryProbe, lineItemCount] =
+  const [
+    sources,
+    runs,
+    openFindings,
+    variantCoverage,
+    rateCards,
+    inventoryProbe,
+    lineItemCount,
+    storeRow,
+    productsPersisted,
+    variantsPersisted,
+    variantsWithInventory,
+  ] =
     await Promise.all([
     prisma.reconciliationSource.findMany({
       where: { storeId },
@@ -922,6 +939,25 @@ export async function getReconciliationWorkspace(shopDomain: string) {
       orderBy: { updatedAt: "desc" },
     }),
     prisma.orderLineItem.count({ where: { storeId } }),
+    // WHY there are no products, not merely THAT there are none.
+    prisma.store.findUnique({
+      where: { id: storeId },
+      select: {
+        lastSyncAt: true,
+        lastConnectionStatus: true,
+        syncJobs: {
+          where: { jobType: "shopify_sync" },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { summaryJson: true },
+        },
+      },
+    }),
+    prisma.productSnapshot.count({ where: { storeId } }),
+    prisma.variantSnapshot.count({ where: { product: { storeId } } }),
+    prisma.variantSnapshot.count({
+      where: { product: { storeId }, NOT: { inventoryQuantity: null } },
+    }),
   ]);
 
   const latestRun = runs[0] ?? null;
@@ -978,33 +1014,59 @@ export async function getReconciliationWorkspace(shopDomain: string) {
     // Readiness, stated honestly. Inventory reconciliation is impossible
     // without SKUs on the Shopify side, and saying so up front beats a run that
     // matches nothing.
-    shopifyReadiness: {
-      variantsWithSku: variantCoverage,
-      ready: variantCoverage > 0,
-      reason:
-        variantCoverage > 0
-          ? null
-          : "None of your Shopify variants have a SKU set, so VedaSuite has nothing to match an inventory or shipment file against. Add SKUs in Shopify and run a sync.",
-      // WHY SHOPIFY INVENTORY IS ABSENT, stated rather than left as a blank.
+    shopifyReadiness: (() => {
+      // NO INFERRED ABSENCE.
       //
-      // Reading it needs the read_inventory scope, which this app does not
-      // request. That is a permission fact about VedaSuite, not a fact about
-      // the merchant's store, and the difference matters: without it a merchant
-      // would reasonably conclude their own inventory tracking was broken.
-      inventoryAvailable: inventoryProbe?.inventorySource === "ok",
-      inventoryReason:
-        inventoryProbe?.inventorySource === "scope_missing"
-          ? "VedaSuite does not have permission to read Shopify inventory levels, so an inventory file is compared on SKUs and quantities you supply rather than against Shopify stock. Enabling this needs an additional Shopify permission and a new app review."
-          : inventoryProbe?.inventorySource === "ok"
-          ? null
-          : "VedaSuite has no Shopify inventory figures for this store yet.",
-      // Line items unlock the three-way 3PL check.
-      orderLinesSynced: lineItemCount,
-      orderLinesReason:
-        lineItemCount > 0
-          ? null
-          : "No Shopify order lines are synced yet, so billed quantities cannot be checked against what your orders contained. Run a Shopify sync first.",
-    },
+      // This used to say "Your Shopify products have no SKUs yet" whenever
+      // the variant count was zero — a claim about the merchant's Shopify
+      // configuration, made without ever having looked. If the product sync
+      // failed, their products may well have SKUs and VedaSuite simply could
+      // not read them. The two are now distinguished at source.
+      const productResource = resolveProductResourceState({
+        productsPersisted,
+        productResourceStatus: readProductResourceStatus(
+          storeRow?.syncJobs[0]?.summaryJson ?? null
+        ),
+        everSynced: !!storeRow?.lastSyncAt,
+        authFailed: [
+          "SHOPIFY_AUTH_REQUIRED",
+          "SHOPIFY_RECONNECT_REQUIRED",
+          "MISSING_ACCESS_TOKEN",
+        ].includes(storeRow?.lastConnectionStatus ?? ""),
+      });
+
+      const sku = describeSkuAvailability({
+        product: productResource,
+        variantsInspected: variantsPersisted,
+        variantsWithSku: variantCoverage,
+      });
+
+      const inventory = describeInventoryAvailability({
+        product: productResource,
+        variantsWithInventory,
+        permissionMissingReason:
+          inventoryProbe?.inventorySource === "scope_missing"
+            ? "VedaSuite does not have permission to read Shopify stock levels location by location. Store-wide comparison is unaffected."
+            : null,
+      });
+
+      return {
+        variantsWithSku: variantCoverage,
+        ready: sku.ready,
+        reason: sku.reason,
+        // The resource state itself, so the UI never re-infers one.
+        productState: productResource.state,
+        productMessage: productResource.message,
+        productsInspected: productResource.inspected,
+        inventoryAvailable: inventory.ready,
+        inventoryReason: inventory.reason,
+        orderLinesSynced: lineItemCount,
+        orderLinesReason:
+          lineItemCount > 0
+            ? null
+            : "No Shopify order lines are synced yet, so billed quantities cannot be checked against what your orders contained. Run a Shopify sync first.",
+      };
+    })(),
     // Withheld entirely without the capability. A Growth merchant should not
     // even see the names of contract documents they cannot use.
     rateCards: (subscription.capabilities["reconciliation.rateCard"] === true
@@ -1063,4 +1125,17 @@ export async function deleteReconciliationSource(input: {
   if (deleted.count === 0) throw new HttpError(404, "That upload was not found.");
   logEvent("info", "reconciliation.source_deleted", { storeId, sourceId: input.sourceId });
   return { deleted: deleted.count };
+}
+
+/** Reads the product resource status a sync job recorded, if it has one. */
+function readProductResourceStatus(summaryJson: string | null): string | null {
+  if (!summaryJson) return null;
+  try {
+    const parsed = JSON.parse(summaryJson) as {
+      syncResult?: { resourceStatus?: { products?: { status?: string } } };
+    };
+    return parsed.syncResult?.resourceStatus?.products?.status ?? null;
+  } catch {
+    return null;
+  }
 }

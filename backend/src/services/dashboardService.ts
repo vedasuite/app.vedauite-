@@ -23,6 +23,7 @@
 // detail. Nothing was taken away from a merchant; a contradiction was.
 
 import { prisma } from "../db/prismaClient";
+import { getStoreHealthSafe } from "./storeHealthService";
 import { env } from "../config/env";
 import { getOnboardingState } from "./onboardingService";
 import { getUnifiedReadinessState } from "./readinessEngineService";
@@ -150,6 +151,11 @@ export async function getDashboardMetrics(shopDomain: string) {
   }
 
   const findings = await loadFindingsView({ storeId: store.id, shop: store.shop });
+  // ONE derivation, shared with Action Center. Not recomputed here.
+  const storeHealth = await getStoreHealthSafe({
+    storeId: store.id,
+    shopDomain: store.shop,
+  });
 
   const syncState = operational
     ? deriveSyncStatus({
@@ -190,10 +196,23 @@ export async function getDashboardMetrics(shopDomain: string) {
   const syncHealthReason = readiness?.setup.summaryDescription ?? syncState.reason;
   const dashboardState = {
     refreshedAt: lastRefreshedAt,
+    // THE CANONICAL VERDICT.
+    //
+    // Store Overview used to decide "Everything looks healthy right now" in
+    // the BROWSER, from whether any KPI number had changed since the last
+    // refresh. That is a question about diffs, not about whether the checks
+    // ran — so a store whose product sync delivered nothing looked healthy
+    // while Pricing said it had no products. The verdict is derived once,
+    // on the server, and every surface renders it.
+    health: storeHealth.global,
+    moduleHealth: storeHealth.modules,
     syncHealth: {
       status: readiness?.initialSync.syncStatus ?? syncState.status,
       title: readiness?.setup.summaryTitle ?? summaryTitle,
-      reason: syncHealthReason,
+      // The canonical headline wins. `syncHealthReason` describes the SYNC;
+      // this line is what the merchant reads as the state of their store.
+      reason: storeHealth.global.headline,
+      syncReason: syncHealthReason,
     },
     kpis: findings.kpis,
     // Everything the UI needs to render these tiles HONESTLY: whether the
@@ -263,6 +282,7 @@ export async function getDashboardMetrics(shopDomain: string) {
         }
       : null,
     moduleStates,
+    health: storeHealth.global,
     dashboardState,
     persistedCounts: operational?.counts ?? null,
     onboarding,

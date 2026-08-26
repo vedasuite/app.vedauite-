@@ -1171,6 +1171,28 @@ export async function syncShopifyStoreData(shopDomain: string) {
   });
 
   const data = { shop: { name: shopName } };
+  // A SYNC IS NOT ONE BOOLEAN.
+  //
+  // Orders persist BEFORE products in this function. A throw inside the
+  // product loop therefore left 75 committed orders and zero products, and
+  // every downstream reader saw a store with data. Nothing recorded that one
+  // resource had failed while another succeeded, so Pricing could only report
+  // "no products synced" without knowing whether that meant an empty
+  // catalogue or a broken sync.
+  //
+  // Each resource now carries its own outcome, and success in one can never
+  // stand for success in another.
+  const resourceStatus: Record<
+    string,
+    { status: string; count: number; errorClass?: string | null; safeMessage?: string | null }
+  > = {
+    products: { status: "NOT_ATTEMPTED", count: 0 },
+    orders: { status: "NOT_ATTEMPTED", count: 0 },
+    customers: { status: "NOT_ATTEMPTED", count: 0 },
+    lineItems: { status: "NOT_ATTEMPTED", count: 0 },
+    inventoryLevels: { status: "NOT_ATTEMPTED", count: 0 },
+  };
+
   const syncCounts = {
     fetched: {
       products: products.length,
@@ -1425,6 +1447,10 @@ export async function syncShopifyStoreData(shopDomain: string) {
   // every existing install the moment a scope is added.
   const inventoryAccess = inventoryCapability(store.grantedScopes);
 
+  // Products fetched successfully; persistence is what follows.
+  resourceStatus.products.status = "FETCHED";
+  resourceStatus.products.count = products.length;
+  try {
   for (const product of products) {
     const variants = product.variants.edges.map((edge) => edge.node);
     const firstVariant = variants[0];
@@ -1600,6 +1626,45 @@ export async function syncShopifyStoreData(shopDomain: string) {
       syncCounts.saved.priceRowsCreated += 1;
     }
   }
+    resourceStatus.products.status = "SUCCESS";
+    resourceStatus.products.count =
+      syncCounts.saved.productsCreated + syncCounts.saved.productsUpdated;
+  } catch (error) {
+    // PRODUCTS FAILED, ORDERS DID NOT.
+    //
+    // Orders are already committed at this point. Rethrowing would discard a
+    // successful order sync; swallowing silently would leave the store looking
+    // like it simply has no products. Neither is acceptable, so the failure is
+    // RECORDED against the product resource and the sync continues.
+    resourceStatus.products.status = "FAILED";
+    resourceStatus.products.errorClass =
+      error instanceof Error ? error.name : "UnknownError";
+    // Merchant-safe. The full error goes to the log, never to a client.
+    resourceStatus.products.safeMessage =
+      "Shopify product data could not be saved during the last sync.";
+    logEvent("error", "shopify.sync.products_failed", {
+      shop: normalizedShop,
+      productsFetched: products.length,
+      productsSavedBeforeFailure:
+        syncCounts.saved.productsCreated + syncCounts.saved.productsUpdated,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Orders and customers completed before the product loop began.
+  resourceStatus.orders.status = orders.length > 0 ? "SUCCESS" : "SUCCESS_EMPTY";
+  resourceStatus.orders.count =
+    syncCounts.saved.ordersCreated + syncCounts.saved.ordersUpdated;
+  resourceStatus.customers.status =
+    syncCounts.fetched.customers > 0 ? "SUCCESS" : "SUCCESS_EMPTY";
+  resourceStatus.customers.count =
+    syncCounts.saved.customersCreated + syncCounts.saved.customersUpdated;
+  resourceStatus.lineItems.status = lineItemsTruncated > 0
+    ? "PARTIAL"
+    : lineItemsSaved > 0
+    ? "SUCCESS"
+    : "SUCCESS_EMPTY";
+  resourceStatus.lineItems.count = lineItemsSaved;
 
   const savedTotal =
     syncCounts.saved.productsCreated +
@@ -1625,12 +1690,18 @@ export async function syncShopifyStoreData(shopDomain: string) {
     );
   }
 
-  const status =
-    syncCounts.fetched.products === 0 &&
-    syncCounts.fetched.orders === 0 &&
-    syncCounts.fetched.customers === 0
-      ? "SUCCEEDED_NO_DATA"
-      : "SUCCEEDED";
+  // A failed resource is never reported as an unqualified success. This is
+  // the line that stopped a broken product sync looking like a clean one.
+  const anyResourceFailed = Object.entries(resourceStatus).some(
+    ([key, value]) => value.status === "FAILED" && key !== "inventoryLevels"
+  );
+  const status = anyResourceFailed
+    ? "SUCCEEDED_PARTIAL"
+    : syncCounts.fetched.products === 0 &&
+      syncCounts.fetched.orders === 0 &&
+      syncCounts.fetched.customers === 0
+    ? "SUCCEEDED_NO_DATA"
+    : "SUCCEEDED";
 
   // PER-LOCATION STOCK, LAST AND OPTIONAL.
   //
@@ -1644,12 +1715,27 @@ export async function syncShopifyStoreData(shopDomain: string) {
     grantedScopes: store.grantedScopes,
   });
 
+  resourceStatus.inventoryLevels.status = !inventoryLevels.attempted
+    ? "PERMISSION_LIMITED"
+    : inventoryLevels.succeeded
+    ? "SUCCESS"
+    : "FAILED";
+  resourceStatus.inventoryLevels.count = inventoryLevels.levels;
+  resourceStatus.inventoryLevels.safeMessage = inventoryLevels.reason;
+
+  // THE OVERALL VERDICT IS AN AGGREGATE, not a single boolean. A resource
+  // that failed makes the job PARTIAL even when every other one succeeded.
+  const resourceFailed = Object.entries(resourceStatus).filter(
+    ([key, value]) => value.status === "FAILED" && key !== "inventoryLevels"
+  );
+
   logEvent("info", "shopify.sync.completed", {
     shop: normalizedShop,
     startedAt: syncStartedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     status,
     counts: syncCounts,
+    resourceStatus,
     lineItemsSaved,
     lineItemsTruncated,
     inventoryLevels: {
@@ -1668,6 +1754,10 @@ export async function syncShopifyStoreData(shopDomain: string) {
     ordersSynced: orders.length,
     customersSynced: orders.filter((order) => order.customer?.legacyResourceId).length,
     counts: syncCounts,
+    // Per-resource outcomes, so a caller never has to infer which part of
+    // the sync worked from the presence or absence of rows.
+    resourceStatus,
+    resourcesFailed: resourceFailed.map(([key]) => key),
     lineItemsSaved,
     lineItemsTruncated,
     inventoryLevels,

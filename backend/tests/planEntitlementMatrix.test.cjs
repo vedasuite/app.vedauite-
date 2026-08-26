@@ -871,5 +871,8 @@ test("SCOPES: the workspace explains the location limitation truthfully", () => 
   const src = read(path.join(SRC, "services/reconciliationService.ts"));
   assert.match(src, /inventoryAvailable:/);
   assert.match(src, /inventoryReason:/);
-  assert.match(src, /does not have permission to read Shopify inventory levels/);
+  // The wording now lives in productResourceState, because the reason a
+  // stock level is missing depends on whether the product sync ran at all.
+  assert.match(src, /does not have permission to read Shopify stock levels/);
+  assert.match(src, /describeInventoryAvailability\(\{/);
 });

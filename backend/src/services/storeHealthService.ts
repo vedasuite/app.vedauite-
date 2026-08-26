@@ -8,6 +8,7 @@
 // each decided readiness independently, and two of them were wrong.
 
 import { prisma } from "../db/prismaClient";
+import { logEvent } from "./observabilityService";
 import { CUSTOMER_LOSS } from "./customerLossCalc";
 import { isCurrentEvidence } from "./competitorFetchStatus";
 import {
@@ -163,4 +164,44 @@ export async function getStoreHealth(input: {
   });
 
   return { modules, global: deriveGlobalHealth(modules) };
+}
+
+/**
+ * getStoreHealth, but unable to take a page down with it.
+ *
+ * WHY THIS WRAPPER EXISTS. Store Overview and Action Center both render the
+ * canonical verdict, so a throw inside the derivation would blank the page a
+ * merchant uses to find out something is wrong — the worst possible moment for
+ * it to be unavailable.
+ *
+ * A failure degrades to an explicit UNKNOWN. It never degrades to HEALTHY:
+ * "VedaSuite could not work out your store's status" is a true statement, and
+ * "everything is fine" would be a guess in exactly the direction that hides
+ * problems.
+ */
+export async function getStoreHealthSafe(input: {
+  storeId: string;
+  shopDomain: string;
+}): Promise<StoreHealth> {
+  try {
+    return await getStoreHealth(input);
+  } catch (error) {
+    logEvent("error", "store_health.derivation_failed", {
+      storeId: input.storeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      modules: [],
+      global: {
+        health: "NOT_READY",
+        headline:
+          "VedaSuite could not work out the current status of your checks. Refresh in a moment.",
+        detail: [],
+        ran: [],
+        couldNotRun: [],
+        awaitingMerchant: [],
+        modules: [],
+      },
+    };
+  }
 }

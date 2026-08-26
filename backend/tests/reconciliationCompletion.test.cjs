@@ -885,8 +885,9 @@ test("AUDIT: inventoryQuantity IS requested — read_products covers it", () => 
 
 test("AUDIT: the missing inventory scope is explained, not left blank", () => {
   const src = read(path.join(SRC, "services/reconciliationService.ts"));
-  assert.match(src, /does not have permission to read Shopify inventory levels/);
-  assert.match(src, /needs an additional Shopify permission and a new app review/);
+  // Attribution is unchanged; only the sentence moved.
+  assert.match(src, /does not have permission to read Shopify stock levels/);
+  assert.match(src, /Store-wide comparison is unaffected/);
   // It must be attributed to VedaSuite, not to the merchant's setup.
   assert.doesNotMatch(
     src,

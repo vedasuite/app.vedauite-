@@ -892,7 +892,7 @@ export function CompetitorPage() {
                         selectable={false}
                         headings={[
                           { title: "Product" },
-                          { title: "Competitor" },
+                          { title: "Competitor site" },
                           { title: "Price" },
                           { title: "Confidence" },
                           { title: "Promotion" },

@@ -512,7 +512,7 @@ export function PricingProfitPage() {
                     Try again
                   </Button>
                   <Button onClick={() => navigateEmbedded("/app/dashboard")}>
-                    Open dashboard
+                    Open Store Overview
                   </Button>
                 </InlineStack>
               </BlockStack>
@@ -559,7 +559,7 @@ export function PricingProfitPage() {
                     Try again
                   </Button>
                   <Button onClick={() => navigateEmbedded("/app/dashboard")}>
-                    Open dashboard
+                    Open Store Overview
                   </Button>
                 </InlineStack>
               </BlockStack>

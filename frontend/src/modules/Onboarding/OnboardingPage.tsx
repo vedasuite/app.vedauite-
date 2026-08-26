@@ -867,7 +867,7 @@ export function OnboardingPage() {
                 </p>
                 <InlineStack gap="300">
                   <Button variant="primary" onClick={() => navigateEmbedded("/app/dashboard")}>
-                    Open dashboard
+                    Open Store Overview
                   </Button>
                   {onboarding.selectedModuleRoute ? (
                     <Button onClick={() => navigateEmbedded(onboarding.selectedModuleRoute!)}>

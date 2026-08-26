@@ -8,7 +8,7 @@
 // Shopify write, no store mutation, no automatic action of any kind.
 
 import { Router, type Request, type Response } from "express";
-import { getStoreHealth } from "../services/storeHealthService";
+import { getStoreHealthSafe } from "../services/storeHealthService";
 import { prisma } from "../db/prismaClient";
 import { HttpError } from "../lib/httpError";
 import { logEvent } from "./../services/observabilityService";
@@ -66,7 +66,7 @@ actionCenterRouter.get("/", async (req: Request, res: Response) => {
   // the brief can only describe the findings that exist, which is how
   // "All checks ran with the data available" appeared for a store whose
   // product sync had delivered nothing.
-  const health = await getStoreHealth({ storeId: store.id, shopDomain: store.shop });
+  const health = await getStoreHealthSafe({ storeId: store.id, shopDomain: store.shop });
 
   const { cards, summary } = await getActionCenter({
     storeId: store.id,

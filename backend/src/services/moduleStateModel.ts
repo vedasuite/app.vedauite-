@@ -38,6 +38,17 @@ export const MODULE_STATES = [
   "INSUFFICIENT_DATA",
   "PERMISSION_LIMITED",
   "NOT_RUN",
+  // WAITING FOR THE MERCHANT, not broken.
+  //
+  // Market Signals with no competitor domains, and Reconciliation with no
+  // uploaded file, are not failures — they are workflows that begin when the
+  // merchant supplies something. Reporting them as failed checks made a
+  // correctly-configured store look damaged, which is its own kind of lie.
+  //
+  // They still block HEALTHY, because a check that has not run cannot
+  // contribute to "everything is fine".
+  "AWAITING_CONFIGURATION",
+  "AWAITING_INPUT",
   "FEATURE_NOT_INCLUDED",
   "READY_NO_FINDINGS",
   "READY_WITH_FINDINGS",
@@ -84,6 +95,17 @@ export function didRun(state: ModuleState): boolean {
 /** Whether a state is a FAILURE the merchant should act on, not a limitation. */
 export function isFailure(state: ModuleState): boolean {
   return state === "AUTH_FAILED" || state === "SYNC_FAILED";
+}
+
+/**
+ * Whether the module is simply waiting for the merchant to supply something.
+ *
+ * Reported separately from things that could not run, because the remedy is
+ * entirely different: "add a competitor domain" is an invitation, whereas
+ * "no products synced" is a problem someone needs to look into.
+ */
+export function isAwaitingMerchant(state: ModuleState): boolean {
+  return state === "AWAITING_CONFIGURATION" || state === "AWAITING_INPUT";
 }
 
 /**
@@ -179,7 +201,18 @@ export function deriveModuleStates(input: {
 
   const resolve = (
     module: StateModule,
-    requirements: Array<{ met: boolean; missing: string }>
+    requirements: Array<{
+      met: boolean;
+      missing: string;
+      /**
+       * The state to report when this requirement is unmet.
+       *
+       * Defaults to INSUFFICIENT_DATA — "VedaSuite does not have enough to
+       * work with". A requirement the MERCHANT satisfies says so instead,
+       * so an unconfigured module is never described as a failed one.
+       */
+      unmetState?: ModuleState;
+    }>
   ): ModuleStateResult => {
     const blocking = base(module);
     if (blocking) {
@@ -192,12 +225,19 @@ export function deriveModuleStates(input: {
       };
     }
 
-    const missing = requirements.filter((r) => !r.met).map((r) => r.missing);
-    if (missing.length > 0) {
+    const unmet = requirements.filter((r) => !r.met);
+    if (unmet.length > 0) {
+      const missing = unmet.map((r) => r.missing);
+      // The FIRST unmet requirement decides the state, so a module blocked
+      // on merchant input is not relabelled as insufficient data merely
+      // because a later requirement is also unmet.
+      const state = unmet[0].unmetState ?? "INSUFFICIENT_DATA";
       return {
         module,
-        state: "INSUFFICIENT_DATA",
-        reason: `${MODULE_LABEL[module]} could not be evaluated: ${missing.join(", ")}.`,
+        state,
+        reason: isAwaitingMerchant(state)
+          ? `${MODULE_LABEL[module]} is waiting for you: ${missing.join(", ")}.`
+          : `${MODULE_LABEL[module]} could not be evaluated: ${missing.join(", ")}.`,
         missing,
         findingCount: 0,
       };
@@ -258,17 +298,19 @@ export function deriveModuleStates(input: {
     resolve("marketSignals", [
       {
         met: evidence.competitorDomainsConfigured > 0,
-        missing: "no competitor websites have been added",
+        missing: "add a competitor website to start tracking",
+        unmetState: "AWAITING_CONFIGURATION",
       },
       {
         met: evidence.competitorRowsFresh > 0,
-        missing: "no competitor domain has been refreshed successfully",
+        missing: "no competitor website could be checked successfully yet",
       },
     ]),
     resolve("reconciliation", [
       {
         met: evidence.reconciliationRuns > 0,
-        missing: "no reconciliation has been run yet",
+        missing: "upload a warehouse, supplier or 3PL file to check",
+        unmetState: "AWAITING_INPUT",
       },
     ]),
   ];
@@ -285,6 +327,9 @@ const REASONS: Record<ModuleState, (label: string) => string> = {
   PERMISSION_LIMITED: (label) =>
     `${label} is limited because VedaSuite does not have all the Shopify permissions it needs.`,
   NOT_RUN: (label) => `${label} has not run yet.`,
+  AWAITING_CONFIGURATION: (label) =>
+    `${label} is ready to run once you finish setting it up.`,
+  AWAITING_INPUT: (label) => `${label} runs when you upload a file to check.`,
   FEATURE_NOT_INCLUDED: (label) => `${label} is not included in your current plan.`,
   READY_NO_FINDINGS: (label) => `${label} ran and found nothing that needs attention.`,
   READY_WITH_FINDINGS: (label) => `${label} found items to review.`,
@@ -298,61 +343,82 @@ export type GlobalHealth =
   | "HEALTHY"
   | "ATTENTION_REQUIRED"
   | "PARTIAL"
+  | "AWAITING_SETUP"
   | "BLOCKED"
   | "NOT_READY";
 
 export interface GlobalHealthResult {
   health: GlobalHealth;
-  /** The headline. Never says "healthy" unless every check truly ran. */
+  /** The headline. Never says "healthy" unless every expected check ran. */
   headline: string;
   /** Named modules behind a non-healthy verdict. */
   detail: string[];
   /** Modules that genuinely ran. */
   ran: StateModule[];
-  /** Modules that could NOT run, and are therefore unaccounted for. */
+  /**
+   * Modules that could NOT run for a reason VedaSuite owns.
+   *
+   * Deliberately excludes modules waiting on the merchant — those are a
+   * different question with a different remedy, and lumping them together
+   * made a correctly-configured store read as broken.
+   */
   couldNotRun: StateModule[];
+  /** Modules waiting for the merchant to configure or supply something. */
+  awaitingMerchant: StateModule[];
+  /** Every module state, so a consumer never re-derives one. */
+  modules: ModuleStateResult[];
+}
+
+/**
+ * THE INVARIANT.
+ *
+ * If ANY entitled module is not READY_NO_FINDINGS or READY_WITH_FINDINGS,
+ * global health is NOT HEALTHY. Exported so the rule is testable directly
+ * rather than inferred from the branches below.
+ */
+export function healthyIsPermitted(states: ModuleStateResult[]): boolean {
+  return states
+    .filter((s) => !isExpectedExclusion(s.state))
+    .every(
+      (s) => s.state === "READY_NO_FINDINGS" || s.state === "READY_WITH_FINDINGS"
+    );
 }
 
 /**
  * Aggregates module states into one honest verdict.
  *
- * THE ONE RULE. HEALTHY requires that every module which was EXPECTED to run
- * did run. A module the merchant is not entitled to is excluded from the
- * expectation, because its absence is a plan boundary rather than a problem.
- * Anything else that did not run makes the verdict PARTIAL and is named.
+ * HEALTHY requires that every EXPECTED module actually ran and found nothing.
+ * A module the merchant is not entitled to is excluded from the expectation,
+ * because its absence is a plan boundary rather than a problem. Everything
+ * else is named, and separated by WHOSE move it is.
  */
 export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthResult {
   const expected = states.filter((s) => !isExpectedExclusion(s.state));
   const ran = expected.filter((s) => didRun(s.state));
-  const couldNotRun = expected.filter((s) => !didRun(s.state));
+  const awaiting = expected.filter((s) => isAwaitingMerchant(s.state));
+  const couldNotRun = expected.filter(
+    (s) => !didRun(s.state) && !isAwaitingMerchant(s.state)
+  );
   const failed = expected.filter((s) => isFailure(s.state));
   const withFindings = expected.filter((s) => s.state === "READY_WITH_FINDINGS");
   const partial = expected.filter((s) => s.state === "PARTIAL_DATA");
 
-  const names = (list: ModuleStateResult[]) =>
-    list.map((s) => MODULE_LABEL[s.module]);
+  const names = (list: ModuleStateResult[]) => list.map((s) => MODULE_LABEL[s.module]);
+  const base = {
+    ran: ran.map((s) => s.module),
+    couldNotRun: couldNotRun.map((s) => s.module),
+    awaitingMerchant: awaiting.map((s) => s.module),
+    modules: states,
+  };
 
   if (failed.length > 0) {
     return {
       health: "BLOCKED",
-      headline:
-        failed.some((s) => s.state === "AUTH_FAILED")
-          ? "VedaSuite cannot reach Shopify. Reconnect the app to resume analysis."
-          : "The last Shopify sync failed, so your results are out of date.",
+      headline: failed.some((s) => s.state === "AUTH_FAILED")
+        ? "VedaSuite cannot reach Shopify. Reconnect the app to resume analysis."
+        : "The last Shopify sync failed, so your results are out of date.",
       detail: failed.map((s) => s.reason),
-      ran: ran.map((s) => s.module),
-      couldNotRun: couldNotRun.map((s) => s.module),
-    };
-  }
-
-  if (ran.length === 0) {
-    return {
-      health: "NOT_READY",
-      headline:
-        "No checks have been able to run yet. VedaSuite needs more of your Shopify data first.",
-      detail: couldNotRun.map((s) => s.reason),
-      ran: [],
-      couldNotRun: couldNotRun.map((s) => s.module),
+      ...base,
     };
   }
 
@@ -360,28 +426,50 @@ export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthRes
     const total = withFindings.reduce((sum, s) => sum + s.findingCount, 0);
     return {
       health: "ATTENTION_REQUIRED",
-      headline: `${total} ${total === 1 ? "item needs" : "items need"} your attention across ${names(
-        withFindings
-      ).join(", ")}.`,
+      headline: `${total} ${total === 1 ? "item needs" : "items need"} your attention across ${names(withFindings).join(", ")}.`,
       detail: [
         ...withFindings.map((s) => s.reason),
         ...couldNotRun.map((s) => s.reason),
+        ...awaiting.map((s) => s.reason),
       ],
-      ran: ran.map((s) => s.module),
-      couldNotRun: couldNotRun.map((s) => s.module),
+      ...base,
     };
   }
 
-  if (couldNotRun.length > 0 || partial.length > 0) {
+  if (ran.length === 0) {
+    // Nothing has produced an answer. Whether that is because the merchant
+    // has not set anything up yet, or because VedaSuite could not evaluate,
+    // changes what they should do next.
+    if (couldNotRun.length === 0 && awaiting.length > 0) {
+      return {
+        health: "AWAITING_SETUP",
+        headline: `${names(awaiting).join(", ")} ${awaiting.length === 1 ? "is" : "are"} ready when you are.`,
+        detail: awaiting.map((s) => s.reason),
+        ...base,
+      };
+    }
+    return {
+      health: "NOT_READY",
+      headline: "No checks have been able to run yet. VedaSuite needs more of your Shopify data first.",
+      detail: [...couldNotRun, ...awaiting].map((s) => s.reason),
+      ...base,
+    };
+  }
+
+  if (couldNotRun.length > 0 || partial.length > 0 || awaiting.length > 0) {
     // THE CASE THAT USED TO SAY "EVERYTHING LOOKS HEALTHY".
+    const clauses: string[] = [];
+    if (couldNotRun.length > 0) {
+      clauses.push(`${names(couldNotRun).join(", ")} could not be evaluated`);
+    }
+    if (awaiting.length > 0) {
+      clauses.push(`${names(awaiting).join(", ")} ${awaiting.length === 1 ? "is" : "are"} waiting for you`);
+    }
     return {
       health: "PARTIAL",
-      headline: `${ran.length} of ${expected.length} checks ran and found nothing. ${names(
-        couldNotRun
-      ).join(", ")} could not be evaluated.`,
-      detail: couldNotRun.map((s) => s.reason),
-      ran: ran.map((s) => s.module),
-      couldNotRun: couldNotRun.map((s) => s.module),
+      headline: `${names(ran).join(", ")} ran and found nothing. ${clauses.join("; ")}.`,
+      detail: [...couldNotRun, ...awaiting].map((s) => s.reason),
+      ...base,
     };
   }
 
@@ -389,7 +477,6 @@ export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthRes
     health: "HEALTHY",
     headline: `All ${ran.length} checks ran successfully and found nothing that needs attention.`,
     detail: [],
-    ran: ran.map((s) => s.module),
-    couldNotRun: [],
+    ...base,
   };
 }

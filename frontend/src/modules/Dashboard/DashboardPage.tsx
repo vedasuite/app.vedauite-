@@ -256,6 +256,28 @@ type DashboardRefreshResult = {
   summary: string;
 };
 
+/**
+ * The backend's canonical store verdict.
+ *
+ * Rendered, never re-derived: the moment a surface computes its own version
+ * of this it can contradict every other surface, which is exactly what
+ * happened.
+ */
+type CanonicalHealth = {
+  health:
+    | "HEALTHY"
+    | "ATTENTION_REQUIRED"
+    | "PARTIAL"
+    | "AWAITING_SETUP"
+    | "BLOCKED"
+    | "NOT_READY";
+  headline: string;
+  detail: string[];
+  ran: string[];
+  couldNotRun: string[];
+  awaitingMerchant: string[];
+};
+
 type DashboardVisibleSnapshot = {
   kpis: {
     storeHealth: number;
@@ -573,6 +595,10 @@ function deriveRefreshResult(args: {
 }): DashboardRefreshResult {
   const previousSnapshot = buildDashboardSnapshot(args.previous);
   const nextSnapshot = buildDashboardSnapshot(args.next)!;
+  // The server's verdict, carried on the payload. Never recomputed here.
+  const canonicalHealth =
+    (args.next?.metrics?.dashboardState as { health?: CanonicalHealth } | undefined)
+      ?.health ?? null;
   const kpiChanged =
     !previousSnapshot || !equalJson(previousSnapshot.kpis, nextSnapshot.kpis);
   const recentInsightsChanged =
@@ -722,10 +748,29 @@ function deriveRefreshResult(args: {
       ? `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Updated ${changedSections
           .filter((section) => section !== "Last refreshed")
           .join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} remained unchanged.` : ""}`
-      : `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Everything looks healthy right now.`;
+      // THE CONTRADICTION THIS REMOVES.
+      //
+      // This said "Everything looks healthy right now" whenever no KPI number
+      // had changed since the last refresh — a question about DIFFS, not about
+      // whether the checks ran. A store whose product sync delivered nothing
+      // showed it while Pricing said it had no products and Action Center
+      // correctly reported that three checks could not be evaluated.
+      //
+      // The backend verdict is authoritative. The diff-based wording survives
+      // only for the case where something genuinely changed.
+      : canonicalHealth
+      ? `Analysis completed. ${canonicalHealth.headline}`
+      : `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. No changes were detected.`;
+  // Only offered when the canonical verdict actually IS healthy. Previously
+  // this asserted health from the sync's own no-change reasons, which know
+  // nothing about whether a module could run.
   const noChangeExplanation =
-    !kpiChanged && activitySummary?.noChangeReasons?.length
-      ? `Everything looks healthy because ${activitySummary.noChangeReasons.join(", ")}.`
+    canonicalHealth?.health === "HEALTHY" &&
+    !kpiChanged &&
+    activitySummary?.noChangeReasons?.length
+      ? `Nothing changed because ${activitySummary.noChangeReasons.join(", ")}.`
+      : canonicalHealth && canonicalHealth.detail.length > 0
+      ? canonicalHealth.detail[0]
       : null;
 
   return {
@@ -1481,7 +1526,7 @@ export function DashboardPage() {
                       <List.Item>
                         {refreshResult.visibleDataChanged
                           ? "New findings are ready."
-                          : "Everything looks healthy right now."}
+                          : refreshResult.summary}
                       </List.Item>
                     </List>
                   </BlockStack>

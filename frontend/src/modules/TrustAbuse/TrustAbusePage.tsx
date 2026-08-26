@@ -408,22 +408,54 @@ export function TrustAbusePage() {
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
                   <BlockStack gap="100">
-                    <Text as="h2" variant="headingLg">Actions that need attention now</Text>
-                    <Text as="p" tone="subdued">Review the highest-priority orders first, then confirm the recommended action inside Shopify.</Text>
+                    {/*
+                      "Actions that need attention now — 4 open" sat on the
+                      same page as "No open findings for this module", and
+                      Action Center correctly reported nothing to do. All
+                      three were true: these are individual ORDERS carrying
+                      risk signals, not findings. One risky order is
+                      deliberately not a finding — Customer Loss requires
+                      repeated behaviour before it claims a pattern.
+
+                      So the heading names what this list actually is, and
+                      the line below states the relationship rather than
+                      leaving the merchant to reconcile two counts.
+                    */}
+                    <Text as="h2" variant="headingLg">Orders to review</Text>
+                    <Text as="p" tone="subdued">
+                      Individual orders carrying refund, return or risk
+                      signals. These are not findings: they appear here for
+                      you to look at, and they do not go to your Action
+                      Center unless they add up to a pattern.
+                    </Text>
                   </BlockStack>
-                  <Badge tone="attention">{actionQueue.length > 0 ? `${actionQueue.length} open` : "Queue clear"}</Badge>
+                  <Badge tone={actionQueue.length > 0 ? "attention" : "success"}>
+                    {actionQueue.length > 0
+                      ? `${actionQueue.length} to review`
+                      : "None to review"}
+                  </Badge>
                 </InlineStack>
                 {actionQueue.length === 0 ? (
                   <Banner title="No orders need your review" tone="success">
                     <p>
                       VedaSuite checked your synced orders for refund, return and
                       risk signals and found none currently needing a decision.
-                      Repeat loss patterns, when they build up, appear in the open
-                      findings above.
                     </p>
                   </Banner>
                 ) : (
                   <BlockStack gap="200">
+                    <Banner tone="info">
+                      <p>
+                        {`${actionQueue.length} ${
+                          actionQueue.length === 1 ? "order is" : "orders are"
+                        } worth a look. None of them add up to a finding yet — 
+                        VedaSuite raises a finding, and puts it in your Action
+                        Center, when it can show repeated refund or return
+                        behaviour across several of the same customer's orders.
+                        That is why your Action Center can be empty while this
+                        list is not.`}
+                      </p>
+                    </Banner>
                     {actionQueue.map((order) => (
                       <div key={order.id} className="vs-action-card">
                         <InlineStack align="space-between" blockAlign="start" gap="300">

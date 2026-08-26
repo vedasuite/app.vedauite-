@@ -565,7 +565,9 @@ test("F: with everything genuinely healthy the brief still says so", () => {
 
 test("F: the canonical health is derived ONCE and passed to the feed", () => {
   const route = read(path.join(SRC, "routes/actionCenterRoutes.ts"));
-  assert.match(route, /const health = await getStoreHealth\(\{ storeId: store\.id/);
+  // The SAFE wrapper: a health-derivation failure must never blank the
+  // page a merchant opens to find out something is wrong.
+  assert.match(route, /const health = await getStoreHealthSafe\(\{ storeId: store\.id/);
   assert.match(route, /moduleHealth: health\.global/);
   // And exposed, so no surface has to recompute it.
   assert.match(route, /health: \{\s*\n?\s*global: health\.global/);
@@ -656,4 +658,405 @@ test("L: store health reads are scoped to one store", () => {
       `a store-health query is not scoped: ${query.slice(0, 80)}`
     );
   }
+});
+
+// ===========================================================================
+// PART TWO — the contradictions from the SECOND round of screenshots
+// ===========================================================================
+
+const productResource = require(d("services/productResourceState.js"));
+const vocabulary = require(d("services/findingVocabulary.js"));
+
+test("TEST A: 75 orders + product sync FAILED is PARTIAL, never healthy", () => {
+  const states = derive(
+    { orders: 75, eligibleOrders: 75, customers: 9, products: 0, syncPartial: true },
+    ALL_ENTITLED,
+    { customerLoss: 0 }
+  );
+  const health = stateModel.deriveGlobalHealth(states);
+  assert.notEqual(health.health, "HEALTHY");
+  assert.equal(stateModel.healthyIsPermitted(states), false);
+
+  // Pricing must say the sync FAILED, not that the store has no products.
+  const resource = productResource.resolveProductResourceState({
+    productsPersisted: 0,
+    productResourceStatus: "FAILED",
+    everSynced: true,
+    authFailed: false,
+  });
+  assert.equal(resource.state, "PRODUCT_SYNC_FAILED");
+  assert.equal(resource.inspected, false, "VedaSuite never saw the catalogue");
+  assert.match(resource.message, /not the same as your store having no products/);
+
+  // Reconciliation must NOT claim the products have no SKUs.
+  const sku = productResource.describeSkuAvailability({
+    product: resource,
+    variantsInspected: 0,
+    variantsWithSku: 0,
+  });
+  assert.equal(sku.ready, false);
+  assert.match(sku.reason, /could not evaluate Shopify SKUs/);
+  assert.doesNotMatch(sku.reason, /have no SKUs/, "that would be an invented fact");
+
+  const inventory = productResource.describeInventoryAvailability({
+    product: resource,
+    variantsWithInventory: 0,
+    permissionMissingReason: null,
+  });
+  assert.match(inventory.reason, /could not evaluate Shopify stock levels/);
+});
+
+test("TEST B: a genuinely empty catalogue is NOT reported as a failure", () => {
+  const resource = productResource.resolveProductResourceState({
+    productsPersisted: 0,
+    productResourceStatus: "SUCCESS_EMPTY",
+    everSynced: true,
+    authFailed: false,
+  });
+  assert.equal(resource.state, "NO_PRODUCTS");
+  assert.equal(resource.inspected, true, "VedaSuite did look");
+  assert.match(resource.message, /Shopify returned no products/);
+  assert.doesNotMatch(resource.message, /did not complete|failed/i);
+
+  const sku = productResource.describeSkuAvailability({
+    product: resource,
+    variantsInspected: 0,
+    variantsWithSku: 0,
+  });
+  assert.match(sku.reason, /catalogue is empty/);
+});
+
+test("TEST B: the four causes of zero products are all distinguishable", () => {
+  const cases = [
+    [{ productResourceStatus: "FAILED", everSynced: true }, "PRODUCT_SYNC_FAILED"],
+    [{ productResourceStatus: "SUCCESS_EMPTY", everSynced: true }, "NO_PRODUCTS"],
+    [{ productResourceStatus: null, everSynced: false }, "PRODUCT_SYNC_NOT_RUN"],
+    [{ productResourceStatus: null, everSynced: true }, "UNKNOWN"],
+  ];
+  const seen = new Set();
+  for (const [input, expected] of cases) {
+    const result = productResource.resolveProductResourceState({
+      productsPersisted: 0,
+      authFailed: false,
+      ...input,
+    });
+    assert.equal(result.state, expected, JSON.stringify(input));
+    seen.add(result.message);
+  }
+  assert.equal(seen.size, 4, "each cause must have its own explanation");
+
+  // And auth failure outranks all of them.
+  assert.equal(
+    productResource.resolveProductResourceState({
+      productsPersisted: 0,
+      productResourceStatus: "FAILED",
+      everSynced: true,
+      authFailed: true,
+    }).state,
+    "AUTH_FAILED"
+  );
+});
+
+test("TEST B: SKUs are only ever declared absent after actually looking", () => {
+  const present = productResource.resolveProductResourceState({
+    productsPersisted: 20,
+    productResourceStatus: "SUCCESS",
+    everSynced: true,
+    authFailed: false,
+  });
+  const sku = productResource.describeSkuAvailability({
+    product: present,
+    variantsInspected: 20,
+    variantsWithSku: 0,
+  });
+  // THIS is the only case where the claim is legitimate.
+  assert.match(sku.reason, /checked 20 product variants and none of them have a SKU/);
+});
+
+test("TEST C: 4 review items + 0 findings is coherent, not contradictory", () => {
+  const explanation = vocabulary.explainReviewItemsVersusFindings({
+    reviewItems: 4,
+    findings: 0,
+    findingThresholdDescription: vocabulary.CUSTOMER_LOSS_THRESHOLD_DESCRIPTION,
+  });
+  assert.match(explanation, /4 orders are worth a look/);
+  assert.match(explanation, /none of them add up to a finding/);
+  assert.match(explanation, /why Action Center is empty while this list is not/);
+
+  // Only findings reach Action Center. Stated as code.
+  assert.equal(vocabulary.appearsInActionCenter("finding"), true);
+  assert.equal(vocabulary.appearsInActionCenter("review_item"), false);
+  assert.equal(vocabulary.appearsInActionCenter("signal"), false);
+});
+
+test("TEST C: the page no longer calls review items actions needing attention", () => {
+  const page = read(path.join(FRONTEND, "modules/TrustAbuse/TrustAbusePage.tsx"));
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.doesNotMatch(code, /Actions that need attention now/);
+  assert.match(code, /Orders to review/);
+  assert.match(code, /to review/);
+  // And it explains the relationship rather than leaving two counts to clash.
+  assert.match(code, /None of them add up to a finding yet/);
+});
+
+test("TEST D: a qualifying finding is counted identically everywhere", () => {
+  const states = derive(
+    { orders: 75, eligibleOrders: 75, customers: 9 },
+    ALL_ENTITLED,
+    { customerLoss: 1 }
+  );
+  const customerLoss = states.find((s) => s.module === "customerLoss");
+  assert.equal(customerLoss.state, "READY_WITH_FINDINGS");
+  assert.equal(customerLoss.findingCount, 1);
+
+  const health = stateModel.deriveGlobalHealth(states);
+  assert.equal(health.health, "ATTENTION_REQUIRED");
+  assert.match(health.headline, /1 item needs your attention/);
+
+  const healthSrc = read(path.join(SRC, "services/storeHealthService.ts"));
+  assert.match(healthSrc, /new/);
+  assert.match(healthSrc, /in_review/);
+});
+
+test("TEST E: no competitor domains is AWAITING_CONFIGURATION, not failed", () => {
+  const states = derive({
+    orders: 75,
+    eligibleOrders: 75,
+    customers: 9,
+    competitorDomainsConfigured: 0,
+  });
+  const market = states.find((s) => s.module === "marketSignals");
+  assert.equal(market.state, "AWAITING_CONFIGURATION");
+  assert.match(market.reason, /waiting for you/);
+  assert.match(market.reason, /add a competitor website/);
+  assert.equal(stateModel.isFailure(market.state), false, "not a failure");
+  assert.equal(stateModel.isAwaitingMerchant(market.state), true);
+});
+
+test("TEST F: reconciliation never run is AWAITING_INPUT, not failed", () => {
+  const states = derive({ orders: 75, eligibleOrders: 75, customers: 9 });
+  const recon = states.find((s) => s.module === "reconciliation");
+  assert.equal(recon.state, "AWAITING_INPUT");
+  assert.match(recon.reason, /upload a warehouse, supplier or 3PL file/);
+  assert.equal(stateModel.isFailure(recon.state), false);
+});
+
+test("TEST E+F: awaiting modules are reported separately from broken ones", () => {
+  const states = derive(
+    { orders: 75, eligibleOrders: 75, customers: 9, products: 0 },
+    ALL_ENTITLED,
+    { customerLoss: 0 }
+  );
+  const health = stateModel.deriveGlobalHealth(states);
+  assert.ok(health.couldNotRun.includes("pricing"));
+  assert.ok(health.awaitingMerchant.includes("marketSignals"));
+  assert.ok(health.awaitingMerchant.includes("reconciliation"));
+  assert.ok(!health.couldNotRun.includes("marketSignals"));
+  assert.match(health.headline, /could not be evaluated/);
+  assert.match(health.headline, /waiting for you/);
+});
+
+test("a store where everything is merely awaiting setup is not broken", () => {
+  const states = derive(
+    {
+      orders: 75,
+      eligibleOrders: 75,
+      customers: 9,
+      products: 20,
+      priceRows: 20,
+      profitRowsWithObservedCost: 3,
+    },
+    { ...ALL_ENTITLED, pricing: false, productProfit: false, customerLoss: false }
+  );
+  const health = stateModel.deriveGlobalHealth(states);
+  assert.equal(health.health, "AWAITING_SETUP");
+  assert.match(health.headline, /ready when you are/);
+});
+
+test("INVARIANT: HEALTHY is impossible while any entitled module is not READY", () => {
+  const blocking = [
+    "AUTH_FAILED",
+    "SYNC_FAILED",
+    "PARTIAL_DATA",
+    "INSUFFICIENT_DATA",
+    "PERMISSION_LIMITED",
+    "NOT_RUN",
+    "AWAITING_CONFIGURATION",
+    "AWAITING_INPUT",
+  ];
+  for (const state of blocking) {
+    const states = [
+      {
+        module: "customerLoss",
+        state: "READY_NO_FINDINGS",
+        reason: "",
+        missing: [],
+        findingCount: 0,
+      },
+      { module: "pricing", state, reason: "x", missing: [], findingCount: 0 },
+    ];
+    assert.equal(
+      stateModel.healthyIsPermitted(states),
+      false,
+      `${state} must block HEALTHY`
+    );
+    assert.notEqual(
+      stateModel.deriveGlobalHealth(states).health,
+      "HEALTHY",
+      `${state} must block HEALTHY`
+    );
+  }
+
+  // FEATURE_NOT_INCLUDED is the ONLY state that does not block it.
+  const excluded = [
+    {
+      module: "customerLoss",
+      state: "READY_NO_FINDINGS",
+      reason: "",
+      missing: [],
+      findingCount: 0,
+    },
+    {
+      module: "pricing",
+      state: "FEATURE_NOT_INCLUDED",
+      reason: "",
+      missing: [],
+      findingCount: 0,
+    },
+  ];
+  assert.equal(stateModel.healthyIsPermitted(excluded), true);
+  assert.equal(stateModel.deriveGlobalHealth(excluded).health, "HEALTHY");
+});
+
+test("Store Overview renders the canonical verdict, not a diff-derived one", () => {
+  const page = read(path.join(FRONTEND, "modules/Dashboard/DashboardPage.tsx"));
+  const code = page.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  assert.doesNotMatch(code, /Everything looks healthy right now/);
+  assert.match(code, /canonicalHealth/);
+  assert.match(code, /Analysis completed/);
+});
+
+test("the dashboard payload carries the canonical verdict", () => {
+  const service = read(path.join(SRC, "services/dashboardService.ts"));
+  assert.match(service, /const storeHealth = await getStoreHealthSafe\(\{/);
+  assert.match(service, /health: storeHealth\.global/);
+  assert.match(service, /reason: storeHealth\.global\.headline/);
+  // It does NOT derive its own.
+  assert.doesNotMatch(service, /deriveModuleStates|deriveGlobalHealth/);
+});
+
+test("a product failure cannot be masked by order success", () => {
+  const src = read(path.join(SRC, "services/shopifyAdminService.ts"));
+  assert.match(src, /A SYNC IS NOT ONE BOOLEAN/);
+  assert.match(src, /const resourceStatus: Record</);
+  assert.match(src, /shopify\.sync\.products_failed/);
+  assert.match(src, /const status = anyResourceFailed/);
+  assert.match(src, /SUCCEEDED_PARTIAL/);
+});
+
+test("each resource reports its own outcome", () => {
+  const src = read(path.join(SRC, "services/shopifyAdminService.ts"));
+  for (const resource of [
+    "products",
+    "orders",
+    "customers",
+    "lineItems",
+    "inventoryLevels",
+  ]) {
+    assert.match(
+      src,
+      new RegExp(`resourceStatus\\.${resource}\\.status`),
+      `${resource} must carry its own status`
+    );
+  }
+  assert.match(src, /resourcesFailed: resourceFailed\.map/);
+});
+
+test("diagnostics answer the 75-orders/0-products question without a database", () => {
+  const src = read(path.join(SRC, "routes/syncDiagnosticsRoutes.ts"));
+  for (const field of [
+    "productsPersisted",
+    "variantsPersisted",
+    "variantsWithSku",
+    "variantsWithInventoryQuantity",
+    "ordersPersisted",
+    "lineItemsPersisted",
+    "customersPersisted",
+    "productDiagnosis",
+    "resourceStatus",
+    "missingRequired",
+  ]) {
+    assert.ok(src.includes(field), `diagnostics must expose ${field}`);
+  }
+  for (const code of [
+    "PRODUCT_SYNC_NOT_RUN",
+    "PRODUCT_SYNC_FAILED",
+    "PRODUCTS_PRESENT",
+    "NO_PRODUCTS_IN_SHOPIFY",
+    "PRODUCT_STATUS_UNKNOWN",
+  ]) {
+    assert.ok(src.includes(code), `diagnostics must be able to report ${code}`);
+  }
+});
+
+test("diagnostics expose NO sensitive data", () => {
+  const src = read(path.join(SRC, "routes/syncDiagnosticsRoutes.ts"));
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const forbidden of [
+    "accessToken",
+    "refreshToken",
+    "email",
+    "phone",
+    "defaultAddress",
+    "firstName",
+    "apiSecret",
+  ]) {
+    assert.doesNotMatch(
+      code,
+      new RegExp(forbidden),
+      `${forbidden} must never be returned`
+    );
+  }
+  assert.match(code, /function sessionShop/);
+  assert.doesNotMatch(code, /req\.query\.shop|req\.body\.shop/);
+});
+
+test("diagnostics are store-scoped", () => {
+  const src = read(path.join(SRC, "routes/syncDiagnosticsRoutes.ts"));
+  const queries = src.match(/prisma\.\w+\.count\(\{[\s\S]*?\}\)/g) ?? [];
+  assert.ok(queries.length >= 8);
+  for (const query of queries) {
+    assert.ok(/storeId/.test(query), `unscoped: ${query.slice(0, 60)}`);
+  }
+});
+
+test("no active surface uses retired vocabulary", () => {
+  const offenders = [];
+  const scan = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scan(full);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const code = read(full)
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const [pattern, label] of [
+        [/Open dashboard/, "Open dashboard"],
+        [/Everything looks healthy/, "Everything looks healthy"],
+        [/Fraud Intelligence/, "Fraud Intelligence"],
+        [/Trust & Abuse/, "Trust & Abuse"],
+      ]) {
+        if (pattern.test(code)) {
+          offenders.push(`${path.relative(FRONTEND, full)}: ${label}`);
+        }
+      }
+    }
+  };
+  scan(FRONTEND);
+  assert.deepEqual(offenders, [], offenders.join("\n"));
 });
