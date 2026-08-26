@@ -274,13 +274,52 @@ function buildOrderRisk(order: StoreSnapshot["orders"][number]) {
   return { score, riskLevel };
 }
 
+/**
+ * Which terms actually moved a recommended price, and whether the resulting
+ * number is defensible as an EXACT target.
+ *
+ * PRODUCTION SHOWED "$32.00 -> $34.20" on a card whose own sentence read "May
+ * have room to increase — evidence needed to say how much". Both statements
+ * came from the same row: the direction was evidence-gated, the exact number
+ * was not. The number was not a measurement of anything.
+ *
+ * Of the four terms below, exactly one is an observation of the market:
+ *
+ *   biasLift        (pricingBias - 50) / 180   — a MERCHANT PREFERENCE SLIDER
+ *   competitorGap   gap * 0.35                 — real gap, ARBITRARY 0.35 blend
+ *   returnPenalty   rate * price * 0.12 * 0.08 — two magic constants
+ *   salesLift       min(4, velocity / 6)       — real ONLY if velocity observed
+ *
+ * An exact target is therefore claimable only when the number is the sum of
+ * observed terms alone. Any heuristic weighting means VedaSuite can support the
+ * DIRECTION but not the DESTINATION, and it must say so.
+ *
+ * Note this is derived, not asserted: if a future engine computes a target from
+ * observed cost, observed velocity and a matched competitor price with no
+ * invented weighting, `exactTargetSupported` becomes true on its own.
+ */
+export interface PriceTargetProvenance {
+  /** The merchant's bias slider moved the number away from the evidence. */
+  biasApplied: boolean;
+  /** A real competitor gap was blended in using an arbitrary weight. */
+  heuristicCompetitorBlend: boolean;
+  /** A return-rate penalty was applied using magic constants. */
+  heuristicReturnPenalty: boolean;
+  /** Velocity was OBSERVED, so its term is a measurement rather than a guess. */
+  velocityObserved: boolean;
+  /** True only when every contributing term is an observation. */
+  exactTargetSupported: boolean;
+  /** Which unsupported terms contributed, for the explanation shown. */
+  assumptionTerms: string[];
+}
+
 function baselinePriceRecommendation(args: {
   currentPrice: number;
   pricingBias: number;
   competitorAveragePrice?: number | null;
   returnRate?: number | null;
   salesVelocity?: number | null;
-}) {
+}): { recommendedPrice: number; provenance: PriceTargetProvenance } {
   const competitorGap =
     args.competitorAveragePrice != null
       ? args.competitorAveragePrice - args.currentPrice
@@ -289,10 +328,11 @@ function baselinePriceRecommendation(args: {
   // No observed velocity means no velocity term at all. Substituting 8 added a
   // constant ~1.33 to every recommended price for no measured reason, and that
   // constant was visible in the merchant-facing target.
-  const salesLift =
-    args.salesVelocity != null && Number.isFinite(args.salesVelocity)
-      ? Math.min(4, args.salesVelocity / 6)
-      : 0;
+  const velocityObserved =
+    args.salesVelocity != null && Number.isFinite(args.salesVelocity);
+  const salesLift = velocityObserved
+    ? Math.min(4, (args.salesVelocity as number) / 6)
+    : 0;
   const biasLift = (args.pricingBias - 50) / 180;
   const recommendedPrice = roundMoney(
     Math.max(
@@ -305,7 +345,28 @@ function baselinePriceRecommendation(args: {
     )
   );
 
-  return recommendedPrice;
+  // A term only counts against the target if it actually MOVED the number.
+  // A bias of exactly 50 contributes zero and is not held against it.
+  const biasApplied = biasLift !== 0;
+  const heuristicCompetitorBlend = competitorGap !== 0;
+  const heuristicReturnPenalty = returnPenalty !== 0;
+
+  const assumptionTerms: string[] = [];
+  if (biasApplied) assumptionTerms.push("pricing_bias");
+  if (heuristicCompetitorBlend) assumptionTerms.push("competitor_blend_weight");
+  if (heuristicReturnPenalty) assumptionTerms.push("return_rate_penalty");
+
+  return {
+    recommendedPrice,
+    provenance: {
+      biasApplied,
+      heuristicCompetitorBlend,
+      heuristicReturnPenalty,
+      velocityObserved,
+      exactTargetSupported: assumptionTerms.length === 0,
+      assumptionTerms,
+    },
+  };
 }
 
 function buildTimelineEvents(store: StoreSnapshot) {
@@ -570,16 +631,17 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
           )
         : latestProfit?.competitorAveragePrice ?? null;
 
-    const recommendedPrice = baselinePriceRecommendation({
-      currentPrice,
-      pricingBias: store.pricingBias,
-      competitorAveragePrice,
-      returnRate: latestProfit?.returnRate ?? storeReturnRate,
-      // NULL when unobserved. baselinePriceRecommendation omits its velocity
-      // term entirely rather than substituting 8, so a displayed target is
-      // never partly an assumption.
-      salesVelocity: observedSalesVelocity,
-    });
+    const { recommendedPrice, provenance: targetProvenance } =
+      baselinePriceRecommendation({
+        currentPrice,
+        pricingBias: store.pricingBias,
+        competitorAveragePrice,
+        returnRate: latestProfit?.returnRate ?? storeReturnRate,
+        // NULL when unobserved. baselinePriceRecommendation omits its velocity
+        // term entirely rather than substituting 8, so a displayed target is
+        // never partly an assumption.
+        salesVelocity: observedSalesVelocity,
+      });
     const expectedMarginDelta = roundMoney(((recommendedPrice - currentPrice) / currentPrice) * 100);
     // NULL unless velocity was observed. This figure is delta x velocity x 6;
     // with an assumed velocity it is fiction, and it must not be persisted for
@@ -604,6 +666,10 @@ export async function recomputeStoreDerivedData(shopDomain: string) {
             expectedProfitGain,
             rationaleJson: JSON.stringify({
               source: "core_engine",
+              // Recorded WITH the number so any later reader can tell whether
+              // the target is a measurement or a preference. Without this the
+              // only way to judge a stored recommendedPrice was to guess.
+              targetProvenance,
               syncedAt: new Date().toISOString(),
               fallbackUsed: competitorAveragePrice == null,
               // demandScore is NULL when velocity was never observed.

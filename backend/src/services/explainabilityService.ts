@@ -11,6 +11,9 @@ import { prisma } from "../db/prismaClient";
 import { logEvent } from "./observabilityService";
 import { resolveEntitlements } from "./subscriptionService";
 import * as calc from "./explainabilityCalc";
+// Readiness copy is derived from the detector's own thresholds so the two can
+// never drift apart again.
+import { CUSTOMER_LOSS } from "./customerLossCalc";
 import {
   classifyMonetaryClaim,
   storedProfitValueIsObserved,
@@ -417,12 +420,25 @@ export async function getDashboardInsights(
   // ---------- Data coverage (allowed modules only) ----------
   const dataCoverage: calc.DataCoverage[] = [];
   const lastSyncAt = store.lastSyncAt ? store.lastSyncAt.toISOString() : null;
+  // The number here MUST be the detector's own, not a second opinion.
+  //
+  // This said "Needs at least 5 synced orders before refund and return
+  // behaviour can be compared to a store baseline". The detector's actual
+  // store-baseline requirement is CUSTOMER_LOSS.minStoreOrders = 50, so a store
+  // with 6 orders was told it was ready and then correctly produced nothing —
+  // the readiness copy was wrong by an order of magnitude, and it was wrong
+  // because it was a hardcoded literal rather than the real constant.
   if (allowedCaps.has("fraud"))
     dataCoverage.push({
-      module: "fraud", rowsAvailable: orderTotalCount, lastSyncAt, sufficient: orderTotalCount >= 5,
+      module: "fraud",
+      rowsAvailable: orderTotalCount,
+      lastSyncAt,
+      sufficient: orderTotalCount >= CUSTOMER_LOSS.minStoreOrders,
       note: returnAbuseTruncated
         ? "Order volume exceeds the analysis bound for this period; return-abuse exposure not quantified."
-        : orderTotalCount < 5 ? "Needs at least 5 synced orders before refund and return behaviour can be compared to a store baseline." : undefined,
+        : orderTotalCount < CUSTOMER_LOSS.minStoreOrders
+        ? `Needs at least ${CUSTOMER_LOSS.minStoreOrders} synced orders before refund and return behaviour can be compared to a store baseline. ${orderTotalCount} so far.`
+        : undefined,
     });
   if (allowedCaps.has("competitor"))
     dataCoverage.push({ module: "competitor", rowsAvailable: competitorTotalCount, lastSyncAt, sufficient: competitorTotalCount > 0, note: competitorTotalCount === 0 ? "No competitor rows collected. Add a competitor domain in Market Signals, then run a sync." : undefined });

@@ -49,6 +49,8 @@ import {
   summariseStagingSeedPlan,
 } from "../services/stagingSeedPlan";
 import { readSeedState, runSeedBatch } from "../services/stagingSeedService";
+// The console quotes the detector's real bar, never a second copy of it.
+import { CUSTOMER_LOSS } from "../services/customerLossCalc";
 
 export const stagingSeedRouter = Router();
 
@@ -211,8 +213,8 @@ stagingSeedRouter.get("/", async (req: Request, res: Response) => {
   ${rows}
 </table>
 <p class="sub">Store baseline: ${summary.totalOrders} orders, ${summary.totalRefunds} refunded
-(${Math.round(summary.storeRefundRate * 100)}%). Customer Loss needs at least 50 store
-orders before it will compute a baseline at all.</p>
+(${Math.round(summary.storeRefundRate * 100)}%). Customer Loss needs at least
+${CUSTOMER_LOSS.minStoreOrders} store orders before it will compute a baseline at all.</p>
 
 ${stores.length === 0 ? noStores : controls}
 <div id="out">Click "Check what exists" to see the current state.</div>

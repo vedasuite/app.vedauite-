@@ -191,6 +191,41 @@ export function classifySuccess(domain: string, partial: boolean): FetchOutcome 
       };
 }
 
+/**
+ * Rebuilds a merchant-safe explanation from a PERSISTED status.
+ *
+ * The original FetchOutcome carries both a merchantMessage and a
+ * technicalDetail; only the status survives into the database on a column the
+ * UI reads. This turns that status back into the same merchant-facing sentence,
+ * so a raw Node code such as "CERT_HAS_EXPIRED: fetch failed" has no path to a
+ * merchant's screen — the column holding it is never serialised to the client.
+ *
+ * Never rewrites or "corrects" the domain the merchant typed.
+ */
+export function describeDomainFailure(
+  domain: string,
+  status: string | null | undefined
+): string {
+  switch (status) {
+    case "dns_unresolvable":
+      return `${domain} could not be found. Check the spelling of the domain and try again.`;
+    case "tls_error":
+      return `${domain} has a security certificate problem, so VedaSuite could not read it safely.`;
+    case "timeout":
+      return `${domain} did not respond in time. VedaSuite will try again on the next sync.`;
+    case "http_blocked":
+      return `${domain} is blocking automated access, so VedaSuite cannot read its prices.`;
+    case "unparseable":
+      return `${domain} was reached, but VedaSuite could not find product prices in a format it understands.`;
+    case "never_collected":
+    case null:
+    case undefined:
+      return `${domain} has not been checked yet.`;
+    default:
+      return `${domain} could not be checked on the last run.`;
+  }
+}
+
 /** Whether a status means VedaSuite currently holds usable CURRENT evidence. */
 export function isCurrentEvidence(status: string | null | undefined): boolean {
   return status === "fresh_success" || status === "partial_success";
