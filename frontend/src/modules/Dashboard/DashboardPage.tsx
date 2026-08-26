@@ -119,6 +119,7 @@ type DashboardState = {
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+    reconciliation: number;
   };
   /**
    * PHASE F. Every tile above is now a projection of the OPEN findings Action
@@ -285,6 +286,7 @@ type DashboardVisibleSnapshot = {
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+    reconciliation: number;
   };
   recentInsightKeys: string[];
   quickAccess: {
@@ -526,6 +528,9 @@ function buildDashboardSnapshot(
       profitOpportunities:
         dashboardState?.kpis.profitOpportunities ??
         payload.metrics.profitOptimizationOpportunities,
+      // No legacy `metrics` fallback: reconciliation postdates that shape, and
+      // inventing a zero here would be a claim rather than a reading.
+      reconciliation: dashboardState?.kpis.reconciliation ?? 0,
     },
     recentInsightKeys:
       (
@@ -656,7 +661,7 @@ function deriveRefreshResult(args: {
   ) {
     metricDiffs.push(
       describeMetric(
-        "Fraud alerts",
+        "Customer Loss",
         previousSnapshot?.kpis.fraudAlerts,
         nextSnapshot.kpis.fraudAlerts
       )
@@ -669,7 +674,7 @@ function deriveRefreshResult(args: {
   ) {
     metricDiffs.push(
       describeMetric(
-        "Competitor changes",
+        "Market Signals",
         previousSnapshot?.kpis.competitorChanges,
         nextSnapshot.kpis.competitorChanges
       )
@@ -698,6 +703,18 @@ function deriveRefreshResult(args: {
         "Profit opportunities",
         previousSnapshot?.kpis.profitOpportunities,
         nextSnapshot.kpis.profitOpportunities
+      )
+    );
+  }
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.reconciliation !== nextSnapshot.kpis.reconciliation
+  ) {
+    metricDiffs.push(
+      describeMetric(
+        "Reconciliation",
+        previousSnapshot?.kpis.reconciliation,
+        nextSnapshot.kpis.reconciliation
       )
     );
   }
@@ -1134,6 +1151,7 @@ export function DashboardPage() {
               competitorChanges: 0,
               pricingOpportunities: 0,
               profitOpportunities: 0,
+              reconciliation: 0,
             },
             recentInsightKeys: [],
             quickAccess: {
@@ -1197,14 +1215,14 @@ export function DashboardPage() {
         note: "Connection and sync issues",
       },
       {
-        title: "Fraud alerts",
+        title: "Customer Loss",
         value: kpiValue(
           dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0
         ),
         note: "Open refund-abuse and risky-order findings",
       },
       {
-        title: "Competitor changes",
+        title: "Market Signals",
         value: kpiValue(
           dashboardState?.kpis.competitorChanges ??
             metrics?.competitorPriceChanges ??
@@ -1229,6 +1247,14 @@ export function DashboardPage() {
             0
         ),
         note: "Open product-profit findings",
+      },
+      {
+        // Without this tile a reconciliation finding was counted in the total
+        // but shown on no tile, so the Dashboard read as zero while the
+        // Reconciliation workspace read as one.
+        title: "Reconciliation",
+        value: kpiValue(dashboardState?.kpis.reconciliation ?? 0),
+        note: "Open inventory, invoice and shipment mismatches",
       },
     ],
     [dashboardState, metrics, findingsAvailable]

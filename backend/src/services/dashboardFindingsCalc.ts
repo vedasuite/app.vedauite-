@@ -50,7 +50,8 @@ export type DashboardKpiKey =
   | "fraudAlerts"
   | "competitorChanges"
   | "pricingOpportunities"
-  | "profitOpportunities";
+  | "profitOpportunities"
+  | "reconciliation";
 
 /**
  * Module -> tile mapping.
@@ -67,7 +68,30 @@ export const KPI_MODULES: Record<DashboardKpiKey, readonly string[]> = {
   competitorChanges: ["competitor"],
   pricingOpportunities: ["pricing"],
   profitOpportunities: ["profit"],
+  reconciliation: ["reconciliation"],
 };
+
+/**
+ * Every module that can produce a finding must land on a tile.
+ *
+ * Reconciliation was missing here, and the effect was precisely the
+ * contradiction this file exists to prevent: the Reconciliation workspace
+ * counted one open finding, Action Center listed it, and the Dashboard tiles
+ * summed to zero because the finding had nowhere to land. A merchant reading
+ * the tiles concluded nothing was wrong. Adding a module to `IntelligenceFinding`
+ * without adding it here is a silent under-report, so the guard below turns it
+ * into a startup failure instead.
+ */
+const FINDING_MODULES = [
+  "operational",
+  "fraud",
+  "trust",
+  "return_abuse",
+  "competitor",
+  "pricing",
+  "profit",
+  "reconciliation",
+] as const;
 
 export const DASHBOARD_KPI_KEYS = Object.keys(KPI_MODULES) as DashboardKpiKey[];
 
@@ -77,6 +101,14 @@ for (const key of DASHBOARD_KPI_KEYS) {
   for (const module of KPI_MODULES[key]) {
     MODULE_TO_KPI.set(module, key);
   }
+}
+
+const unmapped = FINDING_MODULES.filter((m) => !MODULE_TO_KPI.has(m));
+if (unmapped.length > 0) {
+  throw new Error(
+    `Finding modules with no Store Overview tile: ${unmapped.join(", ")}. ` +
+      "Add them to KPI_MODULES or Store Overview will under-report findings."
+  );
 }
 
 /** How many findings the Dashboard previews before deferring to Action Center. */
@@ -132,6 +164,7 @@ const EMPTY_KPIS = (): Record<DashboardKpiKey, number> => ({
   competitorChanges: 0,
   pricingOpportunities: 0,
   profitOpportunities: 0,
+  reconciliation: 0,
 });
 
 /**

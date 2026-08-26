@@ -116,6 +116,7 @@ async function loadFindingsView(input: {
         competitorChanges: 0,
         pricingOpportunities: 0,
         profitOpportunities: 0,
+        reconciliation: 0,
       },
       totalOpen: 0,
       bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
