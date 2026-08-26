@@ -66,10 +66,25 @@ point of the fourth test case.
 2. **Store Overview → Refresh**. Wait for the sync to finish.
 3. Confirm the products arrived: open
    `https://vedasuite-staging.onrender.com/api/diagnostics/sync` in the same
-   browser tab and check `persisted.variantsWithSku` is at least 3.
+   browser tab and find the **`productPipeline`** block.
 
-   If it is 0, stop — the products did not sync, and every reconciliation result
-   after this would be a false positive. Send me that JSON page.
+   Read it top to bottom — it follows a product from Shopify to the database,
+   so a zero tells you which stage it happened at:
+
+   | Field | If it is 0 |
+   |---|---|
+   | `shopifyProductsFetched` | Shopify returned nothing — check the products are saved and Active |
+   | `productsCreated` + `productsUpdated` | Shopify returned them, VedaSuite stored none — read `skippedReasons` |
+   | `variantsWithSku` | Stored, but no SKU — the SKU field was left blank in Shopify |
+   | `variantsWithInventoryQuantity` | Stored, but no stock — **Track quantity** was not ticked |
+
+   Then read `productDiagnosis.code`. `PRODUCTS_PRESENT` means go on.
+   `PRODUCTS_FETCHED_BUT_NOT_STORED` is a VedaSuite problem, not an empty
+   catalogue — send me the page. `NO_PRODUCTS_IN_SHOPIFY` now genuinely means
+   Shopify returned nothing.
+
+   If products did not reach the database, stop — every reconciliation result
+   after this would be a false positive.
 
 4. Open **Reconciliation**.
 5. Upload your inventory `.xlsx`, containing:
