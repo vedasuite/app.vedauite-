@@ -346,6 +346,19 @@ export function resolveEntitlements(input: {
   const enabledModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
     (moduleKey) => moduleAccess[moduleKey]
   );
+  // THE PLAN DECIDES ACCESS, AND IT DECIDES IT ONCE.
+  //
+  // `NONE` unlocks nothing, so any caller that believes access is active while
+  // the plan is NONE holds a contradiction: one surface reads the access flag
+  // and says the merchant's features are active, another reads these
+  // capabilities and offers an Upgrade button. Stating it here means a future
+  // path cannot reintroduce it quietly — `entitlementsContradictAccess` is
+  // asserted by the billing tests and by resolveBillingState's caller.
+  if (input.plan === "NONE" && enabledModules.length > 0) {
+    throw new Error(
+      "Plan NONE unlocked modules: " + enabledModules.join(", ")
+    );
+  }
   const lockedModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
     (moduleKey) => !moduleAccess[moduleKey]
   );

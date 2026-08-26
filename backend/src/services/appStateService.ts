@@ -39,6 +39,8 @@ export type MerchantAppState = {
       endsAt: string | null;
       trialEndsAt: string | null;
       trialActive: boolean;
+      /** Paid features actually usable. Never inferred from accessActive. */
+      featuresActive: boolean;
       trialDaysRemaining: number;
       /**
        * Whether this shop may still be offered its one free trial. The ONLY
@@ -265,6 +267,11 @@ export async function getMerchantAppState(shopDomain: string): Promise<MerchantA
       status: billing.lifecycle,
       active: billing.lifecycle === "active",
       accessActive: billing.accessActive,
+      // Whether the paid features are actually usable. `accessActive` only
+      // means "inside a paid-or-trial window" and stays true for a trial
+      // window that outlived its plan, which is what let Onboarding claim
+      // active features while every module showed Upgrade.
+      featuresActive: billing.featuresActive,
       endsAt: billing.showRenewalDate ? billing.renewalAt : null,
       // Read directly from the canonical billing state (resolveBillingState)
       // — the same source Billing itself uses — instead of a separate

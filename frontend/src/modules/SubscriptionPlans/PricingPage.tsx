@@ -555,7 +555,11 @@ export function PricingPage() {
                   {`${
                     currentSummary.planName && currentSummary.planName !== "NONE"
                       ? `Your ${currentSummary.planName} features are active`
-                      : "Your selected features are active"
+                      : // No plan means no selected features and nothing
+                        // active. Reachable after uninstall/reinstall, where
+                        // the trial window is preserved but the Shopify
+                        // subscription is cancelled.
+                        "Choose a plan to activate your features"
                   } until ${formatDate(currentSummary.trialEndsAt)} · ${
                     currentSummary.trialDaysRemaining
                   } day${currentSummary.trialDaysRemaining === 1 ? "" : "s"} left.`}

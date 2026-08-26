@@ -54,7 +54,16 @@ export type ResolvedBillingState = {
   planTier: "none" | "trial" | "starter" | "growth" | "pro";
   normalizedBillingStatus: string | null;
   active: boolean;
+  /** Inside a paid-or-trial WINDOW. Says nothing about what is unlocked. */
   accessActive: boolean;
+  /**
+   * Whether the merchant's paid features are actually usable right now.
+   *
+   * Distinct from `accessActive`: entitlements come from the PLAN, and an open
+   * trial window can outlive its plan (uninstall does exactly that). Any
+   * surface making a claim about FEATURES must read this, not `accessActive`.
+   */
+  featuresActive: boolean;
   verified: boolean;
   status: SubscriptionLifeCycleStatus;
   starterModule: StarterModule | null;
@@ -784,9 +793,34 @@ export async function resolveBillingState(
     ? subscription!.billingStatus
     : null;
 
+  // `trialActive` is a DATE-ONLY fact about the window, deliberately. It stays
+  // true for an open window with no plan, because the window really is open —
+  // that is what makes reinstall resume the remaining days instead of granting
+  // a second trial. Entitlements refuse access separately, from the plan.
   const trialActive = trial.trialActive;
   const accessActive =
     trialActive || (hasActivePaidSubscription && subscription!.active);
+
+  /**
+   * Whether any of the merchant's paid features are actually usable.
+   *
+   * `accessActive` does NOT mean this, and the difference is the whole bug.
+   * It means "inside a paid-or-trial window"; entitlements are granted by the
+   * PLAN, and `NONE` grants nothing. The two come apart whenever a trial
+   * window outlives its plan — which uninstall causes, because the webhook
+   * deactivates StoreSubscription (the Shopify subscription really is gone)
+   * while deliberately preserving `trialStartedAt`/`trialEndsAt` so a
+   * reinstall cannot mint a second trial. Reinstall clears `uninstalledAt`,
+   * and the shop is left with an open window and `selectedPlanName: "NONE"`.
+   *
+   * Onboarding was rendering `accessActive` as "Your selected features are
+   * active" — a claim about FEATURES made from a flag about WINDOWS. The
+   * sidebar read the entitlements and offered Upgrade on every module. Both
+   * were faithful; the claim was built from the wrong fact.
+   *
+   * This is that fact, stated once, so no surface has to infer it.
+   */
+  const featuresActive = hasActivePaidSubscription && subscription!.active;
 
   const planSource: ResolvedBillingState["planSource"] = hasActivePaidSubscription
     ? reconciledFromShopify
@@ -840,6 +874,7 @@ export async function resolveBillingState(
     selectedPlanName,
     planTier: normalizeTier(selectedPlanName),
     normalizedBillingStatus: subscriptionBillingStatus,
+    featuresActive,
     active: lifecycle === "active",
     accessActive,
     verified: lifecycle !== "unknown_error",
