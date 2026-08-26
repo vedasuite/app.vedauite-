@@ -547,7 +547,7 @@ export function CompetitorPage() {
     }
     if (primaryState === "CHANGES_DETECTED") {
       setSelectedTab(1);
-      setToast("Competitor changes loaded — scroll down to 'Move feed & signals' tab.");
+      setToast("Market Signals loaded — scroll down to 'Move feed & signals' tab.");
       window.setTimeout(() => {
         tabsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 50);

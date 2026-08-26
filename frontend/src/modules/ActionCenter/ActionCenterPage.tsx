@@ -19,6 +19,7 @@ import {
 } from "@shopify/polaris";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import "./action-center.css";
 
 /**
  * PART 4 — Unified Action Center.
@@ -115,11 +116,17 @@ type ActionCenterResponse = {
   };
 };
 
-const SEVERITY_TONE: Record<Severity, "critical" | "warning" | "attention" | "info"> = {
-  critical: "critical",
-  high: "warning",
-  medium: "attention",
-  low: "info",
+/**
+ * Priority as a word, for the metric strip.
+ *
+ * The severity rail carries the colour; this carries the same fact in text, so
+ * the card does not depend on colour alone to communicate urgency.
+ */
+const SEVERITY_WORD: Record<Severity, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
 };
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -453,60 +460,113 @@ export function ActionCenterPage() {
         {visibleCards.map((card) => (
           <Layout.Section key={card.id}>
             <Card padding="400">
+              <div className="vs-finding-card">
               <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="start" wrap={false} gap="200">
-                  <BlockStack gap="100">
-                    <Text as="h3" variant="headingMd">
-                      {card.title}
-                    </Text>
-                    <InlineStack gap="200" wrap>
-                      <Badge tone={SEVERITY_TONE[card.severity]}>{card.severity}</Badge>
-                      <Badge>{CONFIDENCE_LABEL[card.confidence]}</Badge>
-                      <Badge tone={card.status === "new" ? "attention" : undefined}>
-                        {STATUS_LABEL[card.status]}
-                      </Badge>
-                      {card.degraded ? (
-                        <Badge tone="warning">Details unavailable</Badge>
-                      ) : !card.dataComplete ? (
-                        <Badge tone="warning">Incomplete data</Badge>
-                      ) : null}
-                      {card.isStale ? <Badge tone="warning">May be stale</Badge> : null}
-                    </InlineStack>
-                  </BlockStack>
+                {/* ---- 1. WHAT HAPPENED ---------------------------------- */}
+                <InlineStack align="space-between" blockAlign="start" wrap={false} gap="300">
+                  <InlineStack gap="300" blockAlign="start" wrap={false}>
+                    {/* Colour before text: urgency legible before a word is read. */}
+                    <span
+                      className={`vs-finding-card__rail vs-rail--${card.severity}`}
+                      aria-hidden="true"
+                    />
+                    <BlockStack gap="100">
+                      <Text as="h3" variant="headingMd">
+                        {card.title}
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        {card.whatHappened}
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                  <InlineStack gap="100" wrap={false}>
+                    <Badge tone={card.status === "new" ? "attention" : undefined}>
+                      {STATUS_LABEL[card.status]}
+                    </Badge>
+                  </InlineStack>
                 </InlineStack>
 
-                <BlockStack gap="200">
-                  <Text as="p" variant="bodyMd">{card.whatHappened}</Text>
-                  {card.whyItMatters ? (
-                    <Text as="p" variant="bodyMd" tone="subdued">{card.whyItMatters}</Text>
-                  ) : null}
-                </BlockStack>
+                {/* Caveats stay visible — they change how far the finding can
+                    be trusted, so they are never folded away. */}
+                {card.degraded || !card.dataComplete || card.isStale ? (
+                  <InlineStack gap="200" wrap>
+                    {card.degraded ? (
+                      <Badge tone="warning">Details unavailable</Badge>
+                    ) : !card.dataComplete ? (
+                      <Badge tone="warning">Incomplete data</Badge>
+                    ) : null}
+                    {card.isStale ? <Badge tone="warning">May be stale</Badge> : null}
+                  </InlineStack>
+                ) : null}
 
-                <Text as="p" variant="bodyMd">
-                  <strong>Estimated impact:</strong> {impactText(card.impact)}
-                </Text>
+                {/* ---- 2. IMPACT   3. PRIORITY --------------------------- */}
+                <div className="vs-finding-metrics">
+                  <div className="vs-finding-metric">
+                    <span className="vs-finding-metric__label">Impact</span>
+                    <span
+                      className={
+                        card.impact.status === "quantified"
+                          ? "vs-finding-metric__value"
+                          : "vs-finding-metric__value vs-finding-metric__value--muted"
+                      }
+                    >
+                      {impactText(card.impact)}
+                    </span>
+                  </div>
+                  <div className="vs-finding-metric">
+                    <span className="vs-finding-metric__label">Priority</span>
+                    <span className="vs-finding-metric__value">
+                      {SEVERITY_WORD[card.severity]} · {card.rank.score}
+                    </span>
+                  </div>
+                  <div className="vs-finding-metric">
+                    <span className="vs-finding-metric__label">Confidence</span>
+                    <span className="vs-finding-metric__value">
+                      {CONFIDENCE_LABEL[card.confidence]}
+                    </span>
+                  </div>
+                </div>
 
-                <Text as="p" variant="bodyMd">
-                  <strong>What to do:</strong> {card.recommendedAction}
-                </Text>
+                {/* ---- 4. WHAT TO DO ------------------------------------- */}
+                <div className="vs-finding-action">
+                  <span className="vs-finding-action__arrow" aria-hidden="true">
+                    →
+                  </span>
+                  <Text as="p" variant="bodyMd">
+                    {card.recommendedAction}
+                  </Text>
+                </div>
 
-                <Text as="p" variant="bodySm" tone="subdued">
-                  First seen {formatDate(card.firstDetectedAt)} · last confirmed{" "}
-                  {formatDate(card.lastSeenAt)} · detected {card.detectionCount}×
-                </Text>
-
-                {/* ---- Evidence / calculation detail ---------------------- */}
-                <Button
-                  variant="plain"
-                  ariaExpanded={expanded === card.id}
-                  ariaControls={`evidence-${card.id}`}
-                  onClick={() => setExpanded(expanded === card.id ? null : card.id)}
-                >
-                  {expanded === card.id ? "Hide evidence" : "Show evidence and calculation"}
-                </Button>
+                {/* ---- Everything that SUPPORTS the answer, not the answer */}
+                <InlineStack gap="150" blockAlign="center">
+                  <span
+                    className={`vs-disclosure-chevron${
+                      expanded === card.id ? " vs-disclosure-chevron--open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    ›
+                  </span>
+                  <Button
+                    variant="plain"
+                    ariaExpanded={expanded === card.id}
+                    ariaControls={`evidence-${card.id}`}
+                    onClick={() => setExpanded(expanded === card.id ? null : card.id)}
+                  >
+                    {expanded === card.id ? "Hide details" : "Why this matters & evidence"}
+                  </Button>
+                </InlineStack>
                 <Collapsible open={expanded === card.id} id={`evidence-${card.id}`}>
                   <BlockStack gap="200">
                     <Divider />
+                    {card.whyItMatters ? (
+                      <BlockStack gap="100">
+                        <Text as="h4" variant="headingSm">Why this matters</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {card.whyItMatters}
+                        </Text>
+                      </BlockStack>
+                    ) : null}
                     {card.evidence.length > 0 ? (
                       <BlockStack gap="100">
                         <Text as="h4" variant="headingSm">What proves it</Text>
@@ -549,12 +609,60 @@ export function ActionCenterPage() {
                       Priority score {card.rank.score} — from severity, confidence, freshness,
                       impact and data completeness.
                     </Text>
+
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      First seen {formatDate(card.firstDetectedAt)} · last confirmed{" "}
+                      {formatDate(card.lastSeenAt)} · detected {card.detectionCount}×
+                    </Text>
+
+                    <Divider />
+
+                    {/* Lifecycle actions other than the two the merchant
+                        reaches for first. Kept together, and kept out of the
+                        collapsed card, where five buttons competed with the
+                        one recommended action. */}
+                    <InlineStack gap="200" wrap>
+                      {card.status === "new" ? (
+                        <Button
+                          loading={busyId === card.id}
+                          onClick={() => act(card, "seen", "seen")}
+                        >
+                          Mark as seen
+                        </Button>
+                      ) : null}
+                      {card.status !== "in_review" && card.status !== "resolved" ? (
+                        <Button
+                          loading={busyId === card.id}
+                          onClick={() => act(card, "in_review", "in review")}
+                        >
+                          Start review
+                        </Button>
+                      ) : null}
+                      <Button
+                        tone="critical"
+                        variant="tertiary"
+                        loading={busyId === card.id}
+                        onClick={() => act(card, "dismissed", "dismissed")}
+                      >
+                        Dismiss
+                      </Button>
+                    </InlineStack>
+
+                    <InlineStack gap="200" blockAlign="center" wrap>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Was this useful?
+                      </Text>
+                      <Button variant="plain" onClick={() => sendFeedback(card, true)}>
+                        Yes
+                      </Button>
+                      <Button variant="plain" onClick={() => sendFeedback(card, false)}>
+                        No
+                      </Button>
+                    </InlineStack>
                   </BlockStack>
                 </Collapsible>
 
-                <Divider />
-
-                {/* ---- Merchant actions ---------------------------------- */}
+                {/* The two actions a merchant actually reaches for. */}
                 <InlineStack gap="200" wrap>
                   <Button
                     variant="primary"
@@ -562,41 +670,15 @@ export function ActionCenterPage() {
                   >
                     Open details
                   </Button>
-                  {card.status === "new" ? (
-                    <Button loading={busyId === card.id} onClick={() => act(card, "seen", "seen")}>
-                      Mark as seen
-                    </Button>
-                  ) : null}
-                  {card.status !== "in_review" && card.status !== "resolved" ? (
-                    <Button
-                      loading={busyId === card.id}
-                      onClick={() => act(card, "in_review", "in review")}
-                    >
-                      Start review
-                    </Button>
-                  ) : null}
                   <Button
                     loading={busyId === card.id}
                     onClick={() => act(card, "resolved", "resolved")}
                   >
                     Resolve
                   </Button>
-                  <Button
-                    tone="critical"
-                    variant="tertiary"
-                    loading={busyId === card.id}
-                    onClick={() => act(card, "dismissed", "dismissed")}
-                  >
-                    Dismiss
-                  </Button>
-                </InlineStack>
-
-                <InlineStack gap="200" blockAlign="center" wrap>
-                  <Text as="span" variant="bodySm" tone="subdued">Was this useful?</Text>
-                  <Button variant="plain" onClick={() => sendFeedback(card, true)}>Yes</Button>
-                  <Button variant="plain" onClick={() => sendFeedback(card, false)}>No</Button>
                 </InlineStack>
               </BlockStack>
+              </div>
             </Card>
           </Layout.Section>
         ))}

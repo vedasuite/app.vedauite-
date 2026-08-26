@@ -101,7 +101,7 @@ test("REGRESSION: one open finding makes the store need attention", () => {
     "ATTENTION_REQUIRED",
     "a store holding an open finding is not PARTIAL-and-fine"
   );
-  assert.match(health.headline, /1 item needs your attention/);
+  assert.match(health.headline, /1 open finding needs your attention/);
   assert.match(health.headline, /Reconciliation/);
 });
 
@@ -119,7 +119,7 @@ test("the count Store Overview shows equals the count Reconciliation holds", () 
     assert.equal(total, count, `Store Overview total must be ${count}`);
     assert.match(
       health.headline,
-      new RegExp(`${count} items? needs? your attention`)
+      new RegExp(`${count} open findings? needs? your attention`)
     );
   }
 });
@@ -129,7 +129,7 @@ test("incomplete data is still disclosed, not hidden by the finding", () => {
   const recon = states.find((s) => s.module === "reconciliation");
 
   // The finding leads, and the incompleteness qualifies it. Neither is dropped.
-  assert.match(recon.reason, /found 1 item to review/);
+  assert.match(recon.reason, /found 1 open finding/);
   assert.match(recon.reason, /did not deliver all of your Shopify data/);
 });
 

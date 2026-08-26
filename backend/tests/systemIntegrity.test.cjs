@@ -605,7 +605,7 @@ test("F: a module with findings can never report READY_NO_FINDINGS", () => {
   assert.equal(customerLoss.findingCount, 4);
   const health = stateModel.deriveGlobalHealth(states);
   assert.equal(health.health, "ATTENTION_REQUIRED");
-  assert.match(health.headline, /4 items need your attention/);
+  assert.match(health.headline, /4 open findings need your attention/);
 });
 
 // ===========================================================================
@@ -811,7 +811,7 @@ test("TEST D: a qualifying finding is counted identically everywhere", () => {
 
   const health = stateModel.deriveGlobalHealth(states);
   assert.equal(health.health, "ATTENTION_REQUIRED");
-  assert.match(health.headline, /1 item needs your attention/);
+  assert.match(health.headline, /1 open finding needs your attention/);
 
   const healthSrc = read(path.join(SRC, "services/storeHealthService.ts"));
   assert.match(healthSrc, /new/);

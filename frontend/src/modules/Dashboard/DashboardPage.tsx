@@ -14,9 +14,11 @@ import {
   Spinner,
   Text,
   Toast,
+  Tooltip,
 } from "@shopify/polaris";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import "./dashboard.css";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 import { useAppBridge } from "../../shopifyAppBridge";
@@ -1658,7 +1660,15 @@ export function DashboardPage() {
         ) : null}
 
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, sm: 2, md: 5 }} gap="300">
+          {/*
+            Six tiles, each previously carrying an explanatory sentence: six
+            sentences of chrome above the findings the merchant came for. The
+            number is the fact; the sentence explains what it counts, which is
+            worth reading once, not on every visit. It moves into a tooltip on
+            the label, and a dot marks the tiles that are non-zero so the eye
+            lands on them without reading a digit.
+          */}
+          <InlineGrid columns={{ xs: 2, sm: 3, md: 6 }} gap="300">
             {syncing
               ? metricsCards.map((item) => (
                   <Card key={item.title}>
@@ -1667,23 +1677,30 @@ export function DashboardPage() {
                         {item.title}
                       </Text>
                       <SkeletonDisplayText size="medium" />
-                      <SkeletonBodyText lines={1} />
                     </BlockStack>
                   </Card>
                 ))
               : metricsCards.map((item) => (
                   <Card key={item.title}>
-                    <BlockStack gap="150">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {item.title}
-                      </Text>
-                      <Text as="p" variant="heading2xl">
-                        {item.value}
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        {item.note}
-                      </Text>
-                    </BlockStack>
+                    <div className="vs-kpi">
+                      <BlockStack gap="100">
+                        <Tooltip content={item.note} dismissOnMouseOut>
+                          <span className="vs-kpi__label">{item.title}</span>
+                        </Tooltip>
+                        <InlineStack gap="150" blockAlign="center" wrap={false}>
+                          <Text as="p" variant="heading2xl">
+                            {item.value}
+                          </Text>
+                          {typeof item.value === "number" && item.value > 0 ? (
+                            <span
+                              className="vs-kpi__dot"
+                              aria-label="Needs attention"
+                              role="img"
+                            />
+                          ) : null}
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
                   </Card>
                 ))}
           </InlineGrid>

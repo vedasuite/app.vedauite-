@@ -164,8 +164,12 @@ test("a store health finding is surfaced ahead of the rest", () => {
     ],
     ...OPEN,
   });
-  assert.match(view.attentionTitle, /store health/i);
-  assert.match(view.attentionDetail, /Resolve these first/i);
+  // The TITLE carries the canonical total — the same number Action Center and
+  // Reconciliation show. Store health still leads, in the first clause of the
+  // detail, because a title counting a subset contradicted the line beneath it.
+  assert.equal(view.attentionTitle, "2 open findings");
+  assert.match(view.attentionDetail, /store health issue/i);
+  assert.match(view.attentionDetail, /resolve those first/i);
 });
 
 test("without store health issues, critical/high leads", () => {
@@ -176,8 +180,9 @@ test("without store health issues, critical/high leads", () => {
     ],
     ...OPEN,
   });
-  assert.match(view.attentionTitle, /1 finding needs attention/i);
-  assert.match(view.attentionDetail, /Open findings: 2/);
+  // Priority is a QUALIFIER on the total, never a second count beside it.
+  assert.equal(view.attentionTitle, "2 open findings");
+  assert.match(view.attentionDetail, /1 of them is high priority/i);
 });
 
 test("only low/medium findings are not overstated as urgent", () => {

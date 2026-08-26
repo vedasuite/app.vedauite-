@@ -279,30 +279,50 @@ function buildAttentionHeadline(input: {
     };
   }
 
+  // ONE NUMBER IN THE HEADLINE, AND IT IS ALWAYS THE TOTAL.
+  //
+  // The title used to count `criticalOrHigh` while the line directly beneath it
+  // counted `totalOpen`. Both were correct and they measured different things,
+  // but stacked together, both called "findings", they read as
+  //
+  //     1 finding needs attention
+  //     Open findings: 3
+  //
+  // — a contradiction to anyone who has not read this file, and disagreeing
+  // with the 3 that Reconciliation, Action Center and the tiles all showed.
+  //
+  // The headline now states the same total every other surface states. Priority
+  // becomes a QUALIFIER inside the detail line rather than a second count
+  // competing with it.
+  const openLabel =
+    input.totalOpen === 1 ? "1 open finding" : `${input.totalOpen} open findings`;
+
   if (input.storeHealth > 0) {
+    const health =
+      input.storeHealth === 1 ? "1 is a store health issue" : `${input.storeHealth} are store health issues`;
     return {
-      attentionTitle:
-        input.storeHealth === 1
-          ? "1 store health issue needs attention first"
-          : `${input.storeHealth} store health issues need attention first`,
-      attentionDetail:
-        "Store health affects how much of the rest of this page VedaSuite can stand behind. Resolve these first.",
+      attentionTitle: openLabel,
+      attentionDetail: `${health} — resolve those first, because store health affects how much of the rest of this page VedaSuite can stand behind.`,
     };
   }
 
   if (input.criticalOrHigh > 0) {
+    const priority =
+      input.criticalOrHigh === input.totalOpen
+        ? input.totalOpen === 1
+          ? "It is high priority."
+          : "All of them are high priority."
+        : `${input.criticalOrHigh} of them ${
+            input.criticalOrHigh === 1 ? "is" : "are"
+          } high priority.`;
     return {
-      attentionTitle:
-        input.criticalOrHigh === 1
-          ? "1 finding needs attention"
-          : `${input.criticalOrHigh} findings need attention`,
-      attentionDetail: `Open findings: ${input.totalOpen}. The highest-priority ones are listed below.`,
+      attentionTitle: openLabel,
+      attentionDetail: `${priority} The highest-priority ones are listed below.`,
     };
   }
 
   return {
-    attentionTitle:
-      input.totalOpen === 1 ? "1 open finding" : `${input.totalOpen} open findings`,
+    attentionTitle: openLabel,
     attentionDetail: "None are critical or high priority. Review them when convenient.",
   };
 }

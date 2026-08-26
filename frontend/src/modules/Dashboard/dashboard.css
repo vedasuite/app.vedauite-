@@ -1,0 +1,42 @@
+/*
+ * Store Overview presentation.
+ *
+ * The page carried six KPI tiles, each with an explanatory sentence under the
+ * number — six sentences of chrome above the findings the merchant opened the
+ * page for. The number is the fact. The sentence says what it counts, which is
+ * worth reading once rather than on every visit, so it moved to a tooltip.
+ *
+ * A dot marks the non-zero tiles. It is a redundant cue, not the only one: the
+ * digit still says the same thing, so nothing depends on colour or on seeing
+ * the dot at all.
+ */
+
+.vs-kpi__label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6d7175;
+  /* Signals the tooltip without the noise of an info icon in six tiles. */
+  border-bottom: 1px dotted rgba(109, 113, 117, 0.5);
+  cursor: help;
+}
+
+.vs-kpi__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #e06c00;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+
+/*
+ * A tile whose number is a dash means findings are not being recorded — the
+ * count is unknown, not zero. Nothing may draw the eye to it as if it were a
+ * result.
+ */
+.vs-kpi__value--unknown {
+  color: #8c9196;
+}

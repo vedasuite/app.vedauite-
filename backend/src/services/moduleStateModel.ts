@@ -255,7 +255,7 @@ export function deriveModuleStates(input: {
         // finding, it does not erase it.
         reason:
           partialCount > 0
-            ? `${MODULE_LABEL[module]} found ${partialCount} ${partialCount === 1 ? "item" : "items"} to review, but the last sync did not deliver all of your Shopify data, so there may be more.`
+            ? `${MODULE_LABEL[module]} found ${partialCount} open ${partialCount === 1 ? "finding" : "findings"}, but the last sync did not deliver all of your Shopify data, so there may be more.`
             : `${MODULE_LABEL[module]} ran, but the last sync did not deliver all of your Shopify data, so this result may be incomplete.`,
         missing: [],
         findingCount: partialCount,
@@ -268,7 +268,7 @@ export function deriveModuleStates(input: {
       state: count > 0 ? "READY_WITH_FINDINGS" : "READY_NO_FINDINGS",
       reason:
         count > 0
-          ? `${MODULE_LABEL[module]} found ${count} ${count === 1 ? "item" : "items"} to review.`
+          ? `${MODULE_LABEL[module]} found ${count} open ${count === 1 ? "finding" : "findings"}.`
           : `${MODULE_LABEL[module]} ran and found nothing that needs attention.`,
       missing: [],
       findingCount: count,
@@ -339,7 +339,7 @@ const REASONS: Record<ModuleState, (label: string) => string> = {
   AWAITING_INPUT: (label) => `${label} runs when you upload a file to check.`,
   FEATURE_NOT_INCLUDED: (label) => `${label} is not included in your current plan.`,
   READY_NO_FINDINGS: (label) => `${label} ran and found nothing that needs attention.`,
-  READY_WITH_FINDINGS: (label) => `${label} found items to review.`,
+  READY_WITH_FINDINGS: (label) => `${label} found open findings.`,
 };
 
 // ---------------------------------------------------------------------------
@@ -447,7 +447,7 @@ export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthRes
     const total = withFindings.reduce((sum, s) => sum + s.findingCount, 0);
     return {
       health: "ATTENTION_REQUIRED",
-      headline: `${total} ${total === 1 ? "item needs" : "items need"} your attention across ${names(withFindings).join(", ")}.`,
+      headline: `${total} open ${total === 1 ? "finding needs" : "findings need"} your attention across ${names(withFindings).join(", ")}.`,
       detail: [
         ...withFindings.map((s) => s.reason),
         ...couldNotRun.map((s) => s.reason),
