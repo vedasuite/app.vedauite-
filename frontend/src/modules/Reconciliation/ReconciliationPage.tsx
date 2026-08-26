@@ -18,6 +18,7 @@ import {
   Toast,
 } from "@shopify/polaris";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
+import { clearModuleCache } from "../../lib/moduleCache";
 
 /**
  * ONE workspace, three checks.
@@ -467,6 +468,11 @@ export function ReconciliationPage() {
           ? "Reconciliation completed. Nothing differed between the two sets of records."
           : `Reconciliation completed. ${response.result.discrepancyCount} differences found across ${response.result.findingsCreated} findings.`
       );
+      // A reconciliation run creates and closes findings WITHOUT a Shopify
+      // sync, so nothing else invalidates Store Overview's cached payload. Left
+      // alone, that page could paint a pre-run count for up to the cache TTL
+      // while Action Center already showed the new findings.
+      clearModuleCache("dashboard-overview");
       setUpload(null);
       setPreview(null);
       fileRef.current = null;

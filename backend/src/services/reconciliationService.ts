@@ -60,7 +60,11 @@ import {
   buildReconciliationFindings,
   RECONCILIATION_MODULE,
 } from "./reconciliationFindingCalc";
-import { computeFindingFingerprint, recordFinding } from "./intelligenceFindingService";
+import {
+  closeSupersededFindings,
+  computeFindingFingerprint,
+  recordFinding,
+} from "./intelligenceFindingService";
 import { computeOpportunityScore } from "./explainabilityCalc";
 
 /** Rows of a single upload that are persisted. Bounds one merchant's blast radius. */
@@ -650,6 +654,12 @@ export async function runReconciliation(input: {
 
     // --- persist discrepancies with their finding back-reference -----------
     const fingerprintByDiscrepancy = new Map<Discrepancyish, string>();
+    // Every fingerprint THIS run produced. Derived from the findings, not from
+    // the discrepancy map: discrepancies are truncated at
+    // MAX_PERSISTED_DISCREPANCIES, and a finding whose rows all fell outside
+    // that slice is still a finding this run produced. Closing it as superseded
+    // because its rows were truncated would be a bug caused by a display cap.
+    const producedFingerprints = new Set<string>();
     for (const finding of findings) {
       const fingerprint = computeFindingFingerprint({
         storeId,
@@ -657,6 +667,7 @@ export async function runReconciliation(input: {
         findingType: finding.findingType,
         subjectKey: finding.subjectKey,
       });
+      producedFingerprints.add(fingerprint);
       for (const discrepancy of finding.discrepancies) {
         fingerprintByDiscrepancy.set(discrepancy, fingerprint);
       }
@@ -742,6 +753,33 @@ export async function runReconciliation(input: {
       });
       findingsCreated += 1;
     }
+
+    // THIS RUN IS THE CURRENT TRUTH FOR THIS CHECK.
+    //
+    // A reconciliation finding describes a difference that exists right now
+    // between Shopify and the file. Nothing closed the previous run's findings,
+    // so two things accumulated and stayed open forever:
+    //
+    //   - a mismatch the merchant had already fixed, because the kind that
+    //     produced it was no longer emitted and no code ever revisited it;
+    //   - findings written by an earlier grouping rule, whose fingerprints no
+    //     run can produce again, so `recordFinding` could never touch them.
+    //
+    // The second is why Store Overview kept presenting an older combined
+    // finding as the current state of the store.
+    //
+    // Scoped to THIS check type: an inventory run must never close a 3PL
+    // invoice finding, and the insight-id prefix is the identity both the
+    // current and the older code wrote.
+    const findingsClosed = await closeSupersededFindings({
+      storeId,
+      module: RECONCILIATION_MODULE,
+      sourceInsightIdPrefix: `reconciliation:${checkType}:`,
+      stillDetected: producedFingerprints,
+      note: `Automatically closed: the ${CHECK_TYPE_LABEL[
+        checkType
+      ].toLowerCase()} check re-ran and this difference is no longer present.`,
+    });
 
     const quantifiedCount = discrepancies.filter(
       (discrepancy) => discrepancy.impact.status === "quantified"

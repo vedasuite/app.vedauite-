@@ -152,6 +152,56 @@ type DashboardState = {
   };
 };
 
+/**
+ * Strips finding COUNTS from a cache-seeded payload.
+ *
+ * A cached number and a current number look identical on screen, and Store
+ * Overview is the one surface that can be opened minutes after a
+ * reconciliation run created findings on another page — no sync involved, so
+ * nothing invalidated the entry. That is how Store Overview showed one older
+ * finding as the current state while Action Center, which has no cache, showed
+ * the three the latest run produced.
+ *
+ * The cached payload still seeds the page shell so the layout does not flash.
+ * Only the numbers are withheld, and the existing `available: false` path
+ * renders them as "—" until the live fetch lands. Nothing here invents a value.
+ */
+function withheldFindings(payload: DashboardPayload | null): DashboardPayload | null {
+  if (!payload) return null;
+  const state = payload.metrics.dashboardState;
+  if (!state) return payload;
+
+  return {
+    ...payload,
+    metrics: {
+      ...payload.metrics,
+      recentInsights: [],
+      dashboardState: {
+        ...state,
+        kpis: {
+          storeHealth: 0,
+          fraudAlerts: 0,
+          competitorChanges: 0,
+          pricingOpportunities: 0,
+          profitOpportunities: 0,
+          reconciliation: 0,
+        },
+        findings: state.findings
+          ? {
+              ...state.findings,
+              available: false,
+              unavailableReason:
+                "Checking for the latest findings — these counts are not current yet.",
+              totalOpen: 0,
+              bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+            }
+          : state.findings,
+        recentInsights: [],
+      },
+    },
+  };
+}
+
 type Diagnostics = {
   connection: {
     healthy: boolean;
@@ -838,7 +888,7 @@ export function DashboardPage() {
   const { appState } = useAppState();
   const { host, shop } = useAppBridge();
   const cachedDashboard = useMemo(
-    () => readModuleCache<DashboardPayload>("dashboard-overview") ?? null,
+    () => withheldFindings(readModuleCache<DashboardPayload>("dashboard-overview") ?? null),
     []
   );
   const { subscription } = useSubscriptionPlan();
@@ -1204,6 +1254,14 @@ export function DashboardPage() {
   // When findings are not being recorded, the counts are all zero but say
   // nothing about the store. A "0" would be read as "no problems found", which
   // is a claim VedaSuite has not earned, so the tiles show a dash instead.
+  //
+  // The same reasoning applies to a count restored from the session cache: on
+  // screen it is indistinguishable from a current one. A reconciliation run
+  // happens on another page and creates findings without a sync, so the cached
+  // payload could be minutes out of date while Action Center — which has no
+  // cache — showed the new findings. `withheldFindings` marks a cache-seeded
+  // payload unavailable, so the tiles read "—" until the live fetch lands
+  // rather than presenting a stale number as the state of the store.
   const findingsAvailable = dashboardFindings ? dashboardFindings.available : true;
   const kpiValue = (n: number) => (findingsAvailable ? n : "—");
 
@@ -1216,36 +1274,22 @@ export function DashboardPage() {
       },
       {
         title: "Customer Loss",
-        value: kpiValue(
-          dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0
-        ),
+        value: kpiValue(dashboardState?.kpis.fraudAlerts ?? 0),
         note: "Open refund-abuse and risky-order findings",
       },
       {
         title: "Market Signals",
-        value: kpiValue(
-          dashboardState?.kpis.competitorChanges ??
-            metrics?.competitorPriceChanges ??
-            0
-        ),
+        value: kpiValue(dashboardState?.kpis.competitorChanges ?? 0),
         note: "Open findings from monitored competitors",
       },
       {
         title: "Pricing opportunities",
-        value: kpiValue(
-          dashboardState?.kpis.pricingOpportunities ??
-            metrics?.aiPricingSuggestions ??
-            0
-        ),
+        value: kpiValue(dashboardState?.kpis.pricingOpportunities ?? 0),
         note: "Open pricing findings to review",
       },
       {
         title: "Profit opportunities",
-        value: kpiValue(
-          dashboardState?.kpis.profitOpportunities ??
-            metrics?.profitOptimizationOpportunities ??
-            0
-        ),
+        value: kpiValue(dashboardState?.kpis.profitOpportunities ?? 0),
         note: "Open product-profit findings",
       },
       {
