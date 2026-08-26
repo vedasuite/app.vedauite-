@@ -176,9 +176,29 @@ export function deriveSyncStatus(input: {
     };
   }
 
+  // SUMMING THESE WAS THE BUG.
+  //
+  // `products + orders + customers > 0` made a store with 75 orders and ZERO
+  // products READY_WITH_DATA. Products being entirely absent — which makes
+  // Pricing, Product Profit and Inventory Reconciliation unrunnable — was
+  // invisible, so Store Overview said "Everything looks healthy" while three
+  // workspaces said they had nothing to work with.
+  //
+  // The total is still used to answer "has anything at all arrived", which is
+  // a fair question. What it must NOT do is stand in for "is every module's
+  // input present" — that is per-module, and lives in moduleStateModel.ts.
   const rawResourceCount = input.products + input.orders + input.customers;
   const processedResourceCount =
     input.priceRows + input.profitRows + input.timelineEvents;
+
+  // One dimension entirely absent while another has data is a PARTIAL sync,
+  // not a complete one. Reported here so the status itself carries the fact.
+  const dimensionsPresent = [
+    input.products > 0,
+    input.orders > 0,
+    input.customers > 0,
+  ].filter(Boolean).length;
+  const partiallyPopulated = rawResourceCount > 0 && dimensionsPresent < 3;
 
   if (latestStatus === "SUCCEEDED_NO_DATA" || rawResourceCount === 0) {
     return {
@@ -204,7 +224,14 @@ export function deriveSyncStatus(input: {
   if (rawResourceCount > 0 && processedResourceCount > 0) {
     return {
       status: "READY_WITH_DATA" as StoreSyncStatus,
-      reason: "Your store is connected and insights are ready.",
+      // The reason NAMES the gap when one exists. READY_WITH_DATA is still
+      // correct — analysis can proceed on what arrived — but a merchant
+      // reading "insights are ready" with no products synced was being
+      // told something the rest of the app immediately contradicted.
+      reason: partiallyPopulated
+        ? `Your store is connected, but ${describeMissingDimensions(input)} synced. Some checks cannot run until that arrives.`
+        : "Your store is connected and insights are ready.",
+      partiallyPopulated,
     };
   }
 
@@ -295,4 +322,28 @@ export function deriveModuleReadiness(input: {
     failureReason: null,
     reason: "Insights are ready from available store activity.",
   };
+}
+
+/**
+ * Names the Shopify dimensions that did not arrive.
+ *
+ * Written for a merchant: "no products have" rather than "products: 0". A
+ * store that synced 75 orders and no products should be told exactly that,
+ * because it is the difference between "my catalogue is empty" and "VedaSuite
+ * is broken", and only the merchant can tell which.
+ */
+export function describeMissingDimensions(input: {
+  products: number;
+  orders: number;
+  customers: number;
+}): string {
+  const missing = [
+    input.products === 0 ? "no products" : null,
+    input.orders === 0 ? "no orders" : null,
+    input.customers === 0 ? "no customers" : null,
+  ].filter((value): value is string => value !== null);
+
+  if (missing.length === 0) return "everything";
+  if (missing.length === 1) return `${missing[0]} have`;
+  return `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]} have`;
 }

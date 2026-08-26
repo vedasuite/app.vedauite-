@@ -729,8 +729,9 @@ test("IMPORT XLSX: the reader opens only the parts it needs", () => {
   const src = readCode(path.join(SRC, "services/spreadsheetParsing.ts"));
   assert.match(src, /name === "xl\/sharedStrings\.xml"/);
   // Sheet SELECTION replaced the hardcoded sheet1: the part is resolved from
-  // workbook.xml, because part filenames do not reliably match tab order.
-  assert.match(src, /name === wantedPart/, "the chosen sheet is read, not sheet1 by name");
+  // workbook.xml, because part filenames do not reliably match tab order, and
+  // readWorksheet opens only the ONE part it was asked for.
+  assert.match(src, /name === "xl\/sharedStrings\.xml" \|\| name === part/);
   assert.match(src, /name === "xl\/workbook\.xml"/, "the sheet list comes from the workbook");
   assert.doesNotMatch(src, /vbaProject/, "macros are never opened");
   // Formula elements are never parsed out of a cell body.

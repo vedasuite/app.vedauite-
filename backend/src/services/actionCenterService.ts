@@ -13,6 +13,7 @@
 // value. No LLM is involved in any of it.
 
 import { prisma } from "../db/prismaClient";
+import type { GlobalHealthResult } from "./moduleStateModel";
 import { logEvent } from "./observabilityService";
 import { HttpError } from "../lib/httpError";
 import {
@@ -162,6 +163,14 @@ export interface ActionCenterSummary {
   degradedCount: number;
   /** True when the feed hit MAX_CARDS and may therefore be truncated. */
   capReached: boolean;
+  /**
+   * The canonical per-module verdict, from moduleStateModel.
+   *
+   * Carried on the summary so the brief and every consumer answer
+   * "did the checks run?" from ONE derivation. Optional only so callers
+   * that cannot supply it degrade to saying less, never to claiming more.
+   */
+  moduleHealth?: GlobalHealthResult;
   generatedAt: string;
 }
 
@@ -225,6 +234,14 @@ export async function getActionCenter(input: {
   module?: string;
   /** Only findings seen since this ISO date. */
   since?: string;
+  /**
+   * The canonical verdict from moduleStateModel, supplied by the caller.
+   *
+   * Passed in rather than derived here: this service reads findings, and a
+   * second readiness derivation is exactly the duplication that let Action
+   * Center claim "all checks ran" while Pricing said it had no products.
+   */
+  moduleHealth?: GlobalHealthResult;
   now?: Date;
 }): Promise<{ cards: ActionCard[]; summary: ActionCenterSummary }> {
   const now = input.now ?? new Date();
@@ -397,10 +414,14 @@ export async function getActionCenter(input: {
     return a.id < b.id ? -1 : 1;
   });
 
-  return { cards, summary: buildSummary(cards, now) };
+  return { cards, summary: buildSummary(cards, now, input.moduleHealth) };
 }
 
-export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummary {
+export function buildSummary(
+  cards: ActionCard[],
+  now: Date,
+  moduleHealth?: GlobalHealthResult
+): ActionCenterSummary {
   const bySeverity: Record<Urgency, number> = { critical: 0, high: 0, medium: 0, low: 0 };
   const byStatus = Object.fromEntries(
     FINDING_STATUSES.map((s) => [s, 0])
@@ -472,6 +493,7 @@ export function buildSummary(cards: ActionCard[], now: Date): ActionCenterSummar
     incompleteDataCount,
     degradedCount,
     capReached: cards.length >= MAX_CARDS,
+    moduleHealth,
     generatedAt: now.toISOString(),
   };
 }

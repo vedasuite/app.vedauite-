@@ -8,6 +8,7 @@
 // Shopify write, no store mutation, no automatic action of any kind.
 
 import { Router, type Request, type Response } from "express";
+import { getStoreHealth } from "../services/storeHealthService";
 import { prisma } from "../db/prismaClient";
 import { HttpError } from "../lib/httpError";
 import { logEvent } from "./../services/observabilityService";
@@ -61,10 +62,16 @@ async function enabledModulesFor(shop: string): Promise<string[]> {
 actionCenterRouter.get("/", async (req: Request, res: Response) => {
   const store = await resolveStore(req);
   const enabledModules = await enabledModulesFor(store.shop);
+  // The canonical verdict, derived ONCE and handed to the feed. Without it
+  // the brief can only describe the findings that exist, which is how
+  // "All checks ran with the data available" appeared for a store whose
+  // product sync had delivered nothing.
+  const health = await getStoreHealth({ storeId: store.id, shopDomain: store.shop });
 
   const { cards, summary } = await getActionCenter({
     storeId: store.id,
     enabledModules,
+    moduleHealth: health.global,
     status: typeof req.query.status === "string" ? req.query.status : undefined,
     severity: typeof req.query.severity === "string" ? req.query.severity : undefined,
     module: typeof req.query.module === "string" ? req.query.module : undefined,
@@ -98,6 +105,12 @@ actionCenterRouter.get("/", async (req: Request, res: Response) => {
     cards,
     summary,
     brief,
+    // The canonical per-module verdict, exposed so every surface renders the
+    // SAME answer instead of computing its own.
+    health: {
+      global: health.global,
+      modules: health.modules,
+    },
     meta: {
       lastSyncAt: store.lastSyncAt ? store.lastSyncAt.toISOString() : null,
       availableStatuses: FINDING_STATUSES,
