@@ -24,6 +24,8 @@ export interface ImportedRow {
   receivedQuantity: number | null;
   unitCost: number | null;
   currency: string | null;
+  /** Charge type as the merchant wrote it, for rate-card matching. */
+  chargeType: string | null;
   observedAtIso: string | null;
   /** Set when the row cannot be used. Shown to the merchant verbatim. */
   invalidReason: string | null;
@@ -152,6 +154,7 @@ export function buildImportPreview(input: {
       expectedQuantity: parseNumeric(cell(raw, "expectedQuantity")),
       receivedQuantity: parseNumeric(cell(raw, "receivedQuantity")),
       unitCost: parseNumeric(cell(raw, "unitCost")),
+      chargeType: cell(raw, "chargeType"),
       currency: normalizeCurrency(cell(raw, "currency")),
       observedAtIso: parseObservedAt(cell(raw, "observedAt")),
       invalidReason: null,
@@ -248,6 +251,8 @@ export function consequenceOfMissing(field: FieldKey): string {
       return "VedaSuite will not comment on whether this snapshot is old, because the file does not say when it was taken.";
     case "expectedAmount":
       return "VedaSuite will report charges it cannot match, but never that an amount is wrong — that needs your agreed rate.";
+    case "chargeType":
+      return "VedaSuite cannot tell which fee each line is for, so it cannot check any amount against your saved rate card.";
     case "expectedQuantity":
       return "Shipment shortfalls will only be detectable where another quantity column allows a comparison.";
     case "receivedQuantity":

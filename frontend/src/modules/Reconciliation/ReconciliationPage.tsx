@@ -14,6 +14,7 @@ import {
   Select,
   Spinner,
   Text,
+  TextField,
   Toast,
 } from "@shopify/polaris";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
@@ -66,6 +67,8 @@ type UploadResult = {
   needsConfirmation: boolean;
   totalRows: number;
   truncated: boolean;
+  availableSheets: string[];
+  sheetName: string | null;
 };
 
 type MappingPreview = {
@@ -91,6 +94,8 @@ type RunSummary = {
   quantifiedCount: number;
   startedAt: string;
   finishedAt: string | null;
+  rateCardName?: string | null;
+  rateCardVersion?: number | null;
 };
 
 type Discrepancy = {
@@ -133,7 +138,37 @@ type Workspace = {
   openFindings: number;
   latestRun: RunSummary | null;
   discrepancies: Discrepancy[];
-  shopifyReadiness: { variantsWithSku: number; ready: boolean; reason: string | null };
+  shopifyReadiness: {
+    variantsWithSku: number;
+    ready: boolean;
+    reason: string | null;
+    inventoryAvailable?: boolean;
+    inventoryReason?: string | null;
+    orderLinesSynced?: number;
+    orderLinesReason?: string | null;
+  };
+  rateCards?: RateCardSummary[];
+};
+
+type RateCardSummary = {
+  id: string;
+  name: string;
+  version: number;
+  status: string;
+  currency: string | null;
+  entryCount: number;
+  createdAt: string;
+};
+
+type RateCardInspection = {
+  fileName: string;
+  headers: string[];
+  sampleRows: string[][];
+  availableSheets: string[];
+  sheetName: string | null;
+  totalRows: number;
+  suggestions: Suggestion[];
+  needsConfirmation: boolean;
 };
 
 /** Certainty drives the badge, so a guess never looks like a fact. */
@@ -163,6 +198,14 @@ export function ReconciliationPage() {
   const [preview, setPreview] = useState<MappingPreview | null>(null);
   const [busy, setBusy] = useState<null | "uploading" | "mapping" | "running">(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [rateCardId, setRateCardId] = useState<string>("");
+  const [rateCard, setRateCard] = useState<RateCardInspection | null>(null);
+  const [rateCardMapping, setRateCardMapping] = useState<Record<string, string>>({});
+  const [rateCardName, setRateCardName] = useState("");
+  const [rateCardBusy, setRateCardBusy] = useState(false);
+  const [rateCardError, setRateCardError] = useState<string | null>(null);
+  const rateCardFileRef = useRef<{ name: string; base64: string } | null>(null);
+  const rateCardInputRef = useRef<HTMLInputElement | null>(null);
 
   // The raw file is re-sent when the mapping is confirmed: the backend
   // deliberately does not retain uploaded bytes between requests.
@@ -237,6 +280,46 @@ export function ReconciliationPage() {
     [checkType]
   );
 
+  /** Re-reads the already-selected file from a different worksheet. */
+  const onSheetChange = useCallback(
+    async (sheetName: string) => {
+      if (!fileRef.current) return;
+      setActionError(null);
+      setPreview(null);
+      setBusy("uploading");
+      try {
+        const response = await embeddedShopRequest<{ result: UploadResult }>(
+          "/api/reconciliation/upload",
+          {
+            method: "POST",
+            body: {
+              checkType,
+              fileName: fileRef.current.name,
+              contentBase64: fileRef.current.base64,
+              sheetName,
+            },
+            timeoutMs: 60000,
+          }
+        );
+        setUpload(response.result);
+        const initial: Record<string, string> = {};
+        for (const suggestion of response.result.suggestions) {
+          if (suggestion.confidence === "confident" && suggestion.suggestedHeader) {
+            initial[suggestion.field] = suggestion.suggestedHeader;
+          }
+        }
+        setMapping(initial);
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "That sheet could not be read."
+        );
+      } finally {
+        setBusy(null);
+      }
+    },
+    [checkType]
+  );
+
   const confirmMapping = useCallback(async () => {
     if (!upload || !fileRef.current) return;
     setActionError(null);
@@ -251,6 +334,7 @@ export function ReconciliationPage() {
           mapping,
           fileName: fileRef.current.name,
           contentBase64: fileRef.current.base64,
+          ...(upload.sheetName ? { sheetName: upload.sheetName } : {}),
         },
         timeoutMs: 60000,
       });
@@ -264,6 +348,97 @@ export function ReconciliationPage() {
     }
   }, [mapping, upload]);
 
+  /** Reads a file to base64 without blowing the call stack on a big one. */
+  const toBase64 = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return btoa(binary);
+  };
+
+  const onRateCardSelected = useCallback(
+    async (file: File | null, sheetName?: string) => {
+      if (!file && !rateCardFileRef.current) return;
+      setRateCardError(null);
+      setRateCardBusy(true);
+      try {
+        const payload = file
+          ? { name: file.name, base64: await toBase64(file) }
+          : (rateCardFileRef.current as { name: string; base64: string });
+        rateCardFileRef.current = payload;
+
+        const response = await embeddedShopRequest<{ result: RateCardInspection }>(
+          "/api/reconciliation/rate-card/inspect",
+          {
+            method: "POST",
+            body: {
+              fileName: payload.name,
+              contentBase64: payload.base64,
+              ...(sheetName ? { sheetName } : {}),
+            },
+            timeoutMs: 60000,
+          }
+        );
+        setRateCard(response.result);
+        // Only CONFIDENT suggestions are pre-selected, exactly as with an
+        // upload. An uncertain guess stays blank so it has to be looked at.
+        const initial: Record<string, string> = {};
+        for (const suggestion of response.result.suggestions) {
+          if (suggestion.confidence === "confident" && suggestion.suggestedHeader) {
+            initial[suggestion.field] = suggestion.suggestedHeader;
+          }
+        }
+        setRateCardMapping(initial);
+        if (!rateCardName) setRateCardName(payload.name.replace(/.[^.]+$/, ""));
+      } catch (error) {
+        setRateCardError(
+          error instanceof Error ? error.message : "That rate card could not be read."
+        );
+      } finally {
+        setRateCardBusy(false);
+        if (rateCardInputRef.current) rateCardInputRef.current.value = "";
+      }
+    },
+    [rateCardName]
+  );
+
+  const saveRateCard = useCallback(async () => {
+    if (!rateCard || !rateCardFileRef.current) return;
+    setRateCardError(null);
+    setRateCardBusy(true);
+    try {
+      const response = await embeddedShopRequest<{
+        result: { name: string; version: number; entryCount: number; supersededVersion: number | null };
+      }>("/api/reconciliation/rate-card", {
+        method: "POST",
+        body: {
+          name: rateCardName || "Rate card",
+          fileName: rateCardFileRef.current.name,
+          contentBase64: rateCardFileRef.current.base64,
+          mapping: rateCardMapping,
+          ...(rateCard.sheetName ? { sheetName: rateCard.sheetName } : {}),
+        },
+        timeoutMs: 60000,
+      });
+      setToast(
+        response.result.supersededVersion
+          ? `Saved as version ${response.result.version}. Version ${response.result.supersededVersion} is kept, so earlier reconciliations still show the rates they used.`
+          : `Saved as version ${response.result.version} with ${response.result.entryCount} rates.`
+      );
+      setRateCard(null);
+      rateCardFileRef.current = null;
+      await loadWorkspace();
+    } catch (error) {
+      setRateCardError(
+        error instanceof Error ? error.message : "That rate card could not be saved."
+      );
+    } finally {
+      setRateCardBusy(false);
+    }
+  }, [loadWorkspace, rateCard, rateCardMapping, rateCardName]);
+
   const runReconciliation = useCallback(async () => {
     if (!upload) return;
     setActionError(null);
@@ -273,7 +448,7 @@ export function ReconciliationPage() {
         result: { discrepancyCount: number; status: string; findingsCreated: number };
       }>("/api/reconciliation/run", {
         method: "POST",
-        body: { sourceId: upload.sourceId },
+        body: { sourceId: upload.sourceId, ...(rateCardId ? { rateCardId } : {}) },
         timeoutMs: 120000,
       });
       setToast(
@@ -292,7 +467,7 @@ export function ReconciliationPage() {
     } finally {
       setBusy(null);
     }
-  }, [loadWorkspace, upload]);
+  }, [loadWorkspace, rateCardId, upload]);
 
   const requiredUnmapped = useMemo(
     () =>
@@ -335,6 +510,27 @@ export function ReconciliationPage() {
           <Layout.Section>
             <Banner tone="warning" title="Your Shopify products have no SKUs yet">
               <p>{workspace.shopifyReadiness.reason}</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
+        {/*
+          A missing permission is a fact about VedaSuite, not about the
+          merchant's store. Saying so plainly stops them concluding their own
+          inventory tracking is broken.
+        */}
+        {workspace?.shopifyReadiness.inventoryReason ? (
+          <Layout.Section>
+            <Banner tone="info" title="Shopify stock levels are not available">
+              <p>{workspace.shopifyReadiness.inventoryReason}</p>
+            </Banner>
+          </Layout.Section>
+        ) : null}
+
+        {checkType === "3pl_invoice" && workspace?.shopifyReadiness.orderLinesReason ? (
+          <Layout.Section>
+            <Banner tone="warning" title="Order details are not synced yet">
+              <p>{workspace.shopifyReadiness.orderLinesReason}</p>
             </Banner>
           </Layout.Section>
         ) : null}
@@ -406,6 +602,153 @@ export function ReconciliationPage() {
           </Card>
         </Layout.Section>
 
+        {/* ---------------- rate card (3PL only) ---------------- */}
+        {checkType === "3pl_invoice" ? (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">
+                  Your agreed 3PL rates
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Without these, VedaSuite can show you what you were billed but
+                  cannot tell you whether an amount is wrong. Upload your rate
+                  card and it will compare each charge against what you agreed
+                  and what your orders actually contained.
+                </Text>
+
+                {(workspace?.rateCards ?? []).length > 0 ? (
+                  <BlockStack gap="200">
+                    <Select
+                      label="Rate card to use for this reconciliation"
+                      options={[
+                        { label: "Latest active version", value: "" },
+                        ...(workspace?.rateCards ?? []).map((card) => ({
+                          label: `${card.name} v${card.version}${
+                            card.status === "active" ? " (active)" : ""
+                          } — ${card.entryCount} rates`,
+                          value: card.id,
+                        })),
+                      ]}
+                      value={rateCardId}
+                      onChange={setRateCardId}
+                    />
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Earlier versions are kept. A reconciliation you ran last
+                      month still shows the rates that were agreed then, even
+                      after you upload new pricing.
+                    </Text>
+                  </BlockStack>
+                ) : (
+                  <Banner tone="info">
+                    <p>
+                      No rate card saved yet. Charges will be listed as unchecked
+                      rather than compared.
+                    </p>
+                  </Banner>
+                )}
+
+                <input
+                  ref={rateCardInputRef}
+                  type="file"
+                  accept=".csv,.xlsx"
+                  onChange={(event) =>
+                    void onRateCardSelected(event.target.files?.[0] ?? null)
+                  }
+                  style={{ display: "block" }}
+                />
+                {rateCardBusy ? (
+                  <InlineStack gap="200" blockAlign="center">
+                    <Spinner size="small" />
+                    <Text as="p">Working...</Text>
+                  </InlineStack>
+                ) : null}
+                {rateCardError ? (
+                  <Banner tone="critical" title="That did not work">
+                    <p>{rateCardError}</p>
+                  </Banner>
+                ) : null}
+
+                {rateCard ? (
+                  <BlockStack gap="300">
+                    {rateCard.availableSheets.length > 1 ? (
+                      <Select
+                        label="Worksheet"
+                        options={rateCard.availableSheets.map((name) => ({
+                          label: name,
+                          value: name,
+                        }))}
+                        value={rateCard.sheetName ?? rateCard.availableSheets[0]}
+                        onChange={(value) => void onRateCardSelected(null, value)}
+                      />
+                    ) : null}
+                    <TextField
+                      label="Name this rate card"
+                      helpText="Upload again with the same name later and it becomes the next version."
+                      value={rateCardName}
+                      onChange={setRateCardName}
+                      autoComplete="off"
+                    />
+                    {rateCard.suggestions.map((suggestion) => (
+                      <BlockStack gap="100" key={suggestion.field}>
+                        <Select
+                          label={`${suggestion.label}${
+                            suggestion.required ? " (required)" : ""
+                          }`}
+                          options={[
+                            { label: "Not in this file", value: "" },
+                            ...rateCard.headers.map((header) => ({
+                              label: header,
+                              value: header,
+                            })),
+                          ]}
+                          value={rateCardMapping[suggestion.field] ?? ""}
+                          onChange={(value) =>
+                            setRateCardMapping((previous) => ({
+                              ...previous,
+                              [suggestion.field]: value,
+                            }))
+                          }
+                        />
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {suggestion.purpose}
+                        </Text>
+                        {suggestion.reason ? (
+                          <Text as="p" variant="bodySm" tone="caution">
+                            {suggestion.reason}
+                          </Text>
+                        ) : null}
+                      </BlockStack>
+                    ))}
+                    <InlineStack gap="200">
+                      <Button
+                        variant="primary"
+                        loading={rateCardBusy}
+                        disabled={
+                          rateCardBusy ||
+                          !rateCardMapping.chargeType ||
+                          !rateCardMapping.rate
+                        }
+                        onClick={() => void saveRateCard()}
+                      >
+                        Save rate card
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setRateCard(null);
+                          rateCardFileRef.current = null;
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </InlineStack>
+                  </BlockStack>
+                ) : null}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        ) : null}
+
         {/* ---------------- mapping ---------------- */}
         {upload ? (
           <Layout.Section>
@@ -428,6 +771,31 @@ export function ReconciliationPage() {
                       rows will be reconciled.
                     </p>
                   </Banner>
+                ) : null}
+
+                {/*
+                  A workbook with more than one sheet must never have the
+                  others silently ignored. The list is shown and the merchant
+                  can switch, which re-reads the file.
+                */}
+                {upload.availableSheets.length > 1 ? (
+                  <BlockStack gap="100">
+                    <Select
+                      label="Worksheet"
+                      options={upload.availableSheets.map((name) => ({
+                        label: name,
+                        value: name,
+                      }))}
+                      value={upload.sheetName ?? upload.availableSheets[0]}
+                      onChange={(value) => void onSheetChange(value)}
+                      disabled={busy !== null}
+                    />
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {`This workbook has ${upload.availableSheets.length} sheets. VedaSuite is reading "${
+                        upload.sheetName ?? upload.availableSheets[0]
+                      }" and ignoring the rest.`}
+                    </Text>
+                  </BlockStack>
                 ) : null}
 
                 <BlockStack gap="300">
@@ -585,6 +953,11 @@ export function ReconciliationPage() {
                     {runStatusBadge(latest.status).label}
                   </Badge>
                 </InlineStack>
+                {latest.rateCardName ? (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {`Compared against rate card ${latest.rateCardName} v${latest.rateCardVersion}. Later versions do not change this result.`}
+                  </Text>
+                ) : null}
                 {latest.statusReason ? (
                   <Banner tone="warning" title="This run was not fully conclusive">
                     <p>{latest.statusReason}</p>
@@ -661,13 +1034,21 @@ export function ReconciliationPage() {
                   History
                 </Text>
                 <DataTable
-                  columnContentTypes={["text", "text", "numeric", "numeric", "text"]}
-                  headings={["Check", "Status", "Differences", "Valued", "Started"]}
+                  columnContentTypes={["text", "text", "numeric", "numeric", "text", "text"]}
+                  headings={[
+                    "Check",
+                    "Status",
+                    "Differences",
+                    "Valued",
+                    "Rate card",
+                    "Started",
+                  ]}
                   rows={workspace.runs.map((run) => [
                     CHECK_LABEL[run.checkType],
                     runStatusBadge(run.status).label,
                     String(run.discrepancyCount),
                     String(run.quantifiedCount),
+                    run.rateCardName ? `${run.rateCardName} v${run.rateCardVersion}` : "—",
                     new Date(run.startedAt).toLocaleString(),
                   ])}
                 />

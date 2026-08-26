@@ -19,10 +19,12 @@ import type {
   MatchConfidence,
   NormalizedRecord,
 } from "./reconciliationModel";
+import { expectedAmountFor, matchRate, type RateEntry } from "./rateCardCalc";
 import {
   certaintyFor,
   describeQuantityDifference,
   matchRecords,
+  normalizeOrderRef,
   quantifyByAmountDifference,
   quantifyByUnitCost,
   round2,
@@ -70,6 +72,20 @@ export interface ExternalRow {
   currency: string | null;
   observedAtIso: string | null;
   duplicateOf: number | null;
+  /** Charge type as the merchant wrote it, for rate-card matching. */
+  chargeType?: string | null;
+}
+
+/** One Shopify order line, as reconciliation sees it. */
+export interface ShopifyLineRecord {
+  orderRef: string | null;
+  sku: string | null;
+  /** Quantity ORIGINALLY ordered. */
+  quantity: number;
+  /** Quantity remaining after refunds. NULL when Shopify did not report one. */
+  currentQuantity: number | null;
+  refundedQuantity: number | null;
+  fulfilledQuantity: number | null;
 }
 
 export interface CheckResult {
@@ -370,11 +386,13 @@ export function runInventoryCheck(input: {
       certainty: certaintyFor("unmatched"),
       matchConfidence: "unmatched",
       subjectKey: key,
-      summary: `SKU ${key} appears in your file with ${
-        row?.quantity ?? 0
-      } units but no Shopify variant carries that SKU.`,
+      // `?? 0` here would print "0 units" for a row VedaSuite could not read
+      // back, which is indistinguishable from a file that genuinely said zero.
+      summary: `SKU ${key} appears in your file${
+        row?.quantity == null ? "" : ` with ${row.quantity} units`
+      } but no Shopify variant carries that SKU.`,
       shopifyValue: null,
-      externalValue: String(row?.quantity ?? 0),
+      externalValue: row?.quantity == null ? null : String(row.quantity),
       difference: null,
       impact: {
         status: "not_quantified",
@@ -382,7 +400,10 @@ export function runInventoryCheck(input: {
       },
       evidence: [
         { label: "SKU", value: key },
-        { label: "In uploaded file", value: `${row?.quantity ?? 0} units` },
+        {
+          label: "In uploaded file",
+          value: row?.quantity == null ? "Quantity not readable" : `${row.quantity} units`,
+        },
         { label: "In Shopify", value: "No variant with this SKU" },
         fileRow(record.rowNumber),
       ],
@@ -409,6 +430,10 @@ export const INVOICE_KINDS = {
   refundedOrderCharge: "invoice_refunded_order_charge",
   amountDifference: "invoice_amount_difference",
   unverifiedCharge: "invoice_unverified_charge",
+  rateDifference: "invoice_rate_difference",
+  quantityMismatch: "invoice_quantity_mismatch",
+  unmappedChargeType: "invoice_unmapped_charge_type",
+  cancelledOrderActivity: "invoice_billed_without_activity",
 } as const;
 
 const CANCELLED_STATUSES = new Set(["cancelled", "canceled", "voided", "expired"]);
@@ -426,14 +451,48 @@ export function runInvoiceCheck(input: {
   shopifyOrders: ShopifyOrderRecord[];
   external: ExternalRow[];
   nowIso: string;
+  /** Shopify order lines. Empty when none are synced yet. */
+  shopifyLines?: ShopifyLineRecord[];
+  /** The pinned rate-card version, when the merchant has one. */
+  rateCard?: { name: string; version: number; entries: RateEntry[] } | null;
 }): CheckResult {
   const discrepancies: Discrepancy[] = [];
   const warnings = snapshotWarnings(input.external, input.nowIso);
 
   const hasAnyExpectedRate = input.external.some((row) => row.expectedAmount != null);
-  if (!hasAnyExpectedRate) {
+  const hasRateCard = (input.rateCard?.entries.length ?? 0) > 0;
+  if (!hasAnyExpectedRate && !hasRateCard) {
     warnings.push(
-      "This file contains no expected or contracted rate, so VedaSuite can report charges it cannot match to an order, but not whether any amount is too high."
+      "This file contains no expected or contracted rate, and no rate card is saved, so VedaSuite can report charges it cannot match to an order, but not whether any amount is too high."
+    );
+  }
+
+  // --- THE THIRD LEG: proven Shopify activity per order --------------------
+  //
+  // Only counted from ACTUAL synced line items. With no line items there is no
+  // proven quantity, and every quantity-dependent claim is withheld rather than
+  // estimated from the order total.
+  const shopifyLines = input.shopifyLines ?? [];
+  // AUDIT: a refundedUnits accumulator used to live here, summing
+  // `line.refundedQuantity ?? 0`. Nothing read it, and a NULL - meaning
+  // Shopify did not report a refunded count - was being folded in as a zero.
+  // An unread total built from nulls-as-zeros is exactly the kind of number
+  // that becomes a merchant-facing claim in six months, so it is gone.
+  const activityByOrder = new Map<string, { units: number; lines: number }>();
+  for (const line of shopifyLines) {
+    const key = normalizeOrderRef(line.orderRef);
+    if (!key) continue;
+    const current = activityByOrder.get(key) ?? { units: 0, lines: 0 };
+    // currentQuantity is what remains on the order; it is the honest basis for
+    // "how much should have been handled". Falling back to the original
+    // quantity when Shopify did not report one keeps a null from becoming 0.
+    current.units += line.currentQuantity ?? line.quantity;
+    current.lines += 1;
+    activityByOrder.set(key, current);
+  }
+  if (shopifyLines.length === 0) {
+    warnings.push(
+      "No Shopify order lines are synced yet, so VedaSuite cannot check billed quantities against what your orders actually contained. Run a Shopify sync and reconcile again."
     );
   }
 
@@ -584,6 +643,174 @@ export function runInvoiceCheck(input: {
               fileRow(row.rowNumber),
             ],
           });
+        }
+      }
+
+      // --- THREE-WAY: agreed rate vs Shopify activity vs invoice ----------
+      //
+      // AGREED RATE          what the merchant's saved rate card says
+      //      vs
+      // SHOPIFY ACTIVITY     units proven from actual synced order lines
+      //      vs
+      // 3PL INVOICE          what the file billed
+      //
+      // Every leg must be present before any money is claimed. A missing rate
+      // gives "unmapped"; a missing activity count gives "quantity not proven".
+      // Neither becomes an overcharge.
+      if (hasRateCard) {
+        const match = matchRate({
+          billedChargeType: row.chargeType,
+          quantity: row.quantity,
+          entries: input.rateCard?.entries ?? [],
+        });
+
+        if (!match.entry) {
+          discrepancies.push({
+            kind: INVOICE_KINDS.unmappedChargeType,
+            // Nothing is claimed to be wrong. VedaSuite is saying it cannot
+            // check this line, which is a different statement entirely.
+            certainty: "insufficient_data",
+            matchConfidence: pair.confidence,
+            subjectKey: pair.key,
+            summary: `Order ${pair.key} carries a charge of ${
+              row.amount ?? "an unreadable amount"
+            } for "${row.chargeType ?? "an unnamed charge type"}", which VedaSuite could not match to your rate card.`,
+            shopifyValue: null,
+            externalValue: row.amount == null ? null : String(row.amount),
+            expectedValue: null,
+            chargeType: row.chargeType ?? null,
+            rateCardVersion: input.rateCard?.version ?? null,
+            difference: null,
+            impact: {
+              status: "not_quantified",
+              reason: match.reason,
+            },
+            evidence: [
+              matchedOn("order", pair.key),
+              { label: "Charge type on the invoice", value: String(row.chargeType ?? "not stated") },
+              { label: "Billed", value: String(row.amount ?? "unreadable") },
+              { label: "Rate card", value: `${input.rateCard?.name} v${input.rateCard?.version}` },
+              { label: "Why it could not be checked", value: match.reason },
+              fileRow(row.rowNumber),
+            ],
+          });
+        } else {
+          const activity = activityByOrder.get(pair.key) ?? null;
+          // Which quantity the agreed rate is charged against depends on the
+          // unit the merchant recorded. Per-order rates apply once; per-item
+          // rates apply to proven units.
+          const unit = (match.entry.unit ?? "").toLowerCase();
+          const provenQuantity =
+            unit === "order" || unit === "shipment"
+              ? activity
+                ? 1
+                : null
+              : activity
+              ? activity.units
+              : null;
+
+          const expected = expectedAmountFor({
+            match,
+            provenQuantity,
+            billedCurrency: row.currency ?? order?.currency ?? null,
+          });
+
+          // Billed quantity vs proven Shopify activity, independent of money.
+          if (row.quantity != null && activity && row.quantity !== provenQuantity) {
+            const quantityDifference = round2(row.quantity - (provenQuantity ?? 0));
+            discrepancies.push({
+              kind: INVOICE_KINDS.quantityMismatch,
+              certainty: certaintyFor(pair.confidence),
+              matchConfidence: pair.confidence,
+              subjectKey: pair.key,
+              // States both counts. Says nothing about which side is wrong —
+              // the invoice may be right and the order may have changed.
+              summary: `Order ${pair.key} was billed for ${row.quantity} units of "${match.entry.chargeType}", while its Shopify order lines account for ${provenQuantity}.`,
+              shopifyValue: String(provenQuantity),
+              externalValue: String(row.quantity),
+              expectedValue: null,
+              chargeType: row.chargeType ?? null,
+              rateCardVersion: input.rateCard?.version ?? null,
+              difference: quantityDifference,
+              impact: {
+                status: "not_quantified",
+                reason:
+                  "VedaSuite is not assuming which side is correct, so it does not put a value on the difference. Confirm the quantity with your 3PL first.",
+              },
+              evidence: [
+                matchedOn("order", pair.key),
+                { label: "Billed quantity", value: String(row.quantity) },
+                { label: "Shopify order lines account for", value: String(provenQuantity) },
+                { label: "Difference", value: `${quantityDifference > 0 ? "+" : ""}${quantityDifference} units` },
+                fileRow(row.rowNumber),
+              ],
+            });
+          }
+
+          if (expected.status === "computed" && row.amount != null) {
+            const difference = round2(row.amount - expected.amount);
+            if (difference !== 0) {
+              discrepancies.push({
+                kind: INVOICE_KINDS.rateDifference,
+                certainty: certaintyFor(pair.confidence),
+                matchConfidence: pair.confidence,
+                subjectKey: pair.key,
+                summary: `Order ${pair.key} was billed ${row.amount} for "${match.entry.chargeType}". Your rate card and your Shopify order lines give ${expected.amount}, a difference of ${
+                  difference > 0 ? "+" : ""
+                }${difference}.`,
+                shopifyValue: String(provenQuantity),
+                externalValue: String(row.amount),
+                expectedValue: String(expected.amount),
+                chargeType: row.chargeType ?? null,
+                rateCardVersion: input.rateCard?.version ?? null,
+                difference,
+                // The one place in the 3PL check where money IS claimed, and
+                // only because all three legs were present and agreed.
+                impact: {
+                  status: "quantified",
+                  amount: round2(Math.abs(difference)),
+                  currency: expected.currency,
+                  basis: `${expected.basis} Billed ${row.amount} ${expected.currency}.`,
+                },
+                evidence: [
+                  matchedOn("order", pair.key),
+                  { label: "Charge type", value: match.entry.chargeType },
+                  { label: "Agreed rate", value: `${match.entry.rate} ${expected.currency} per ${match.entry.unit ?? "unit"}` },
+                  { label: "Shopify order lines account for", value: String(provenQuantity) },
+                  { label: "Expected", value: `${expected.amount} ${expected.currency}` },
+                  { label: "Billed", value: `${row.amount} ${expected.currency}` },
+                  { label: "Difference", value: `${difference > 0 ? "+" : ""}${difference} ${expected.currency}` },
+                  { label: "Rate card", value: `${input.rateCard?.name} v${input.rateCard?.version}` },
+                  fileRow(row.rowNumber),
+                ],
+              });
+            }
+          } else if (expected.status === "not_computed" && row.amount != null) {
+            // A matched rate that still cannot produce an expected amount —
+            // usually because activity could not be proven. Reported as
+            // needing information, never as a wrong charge.
+            discrepancies.push({
+              kind: INVOICE_KINDS.unverifiedCharge,
+              certainty: "insufficient_data",
+              matchConfidence: pair.confidence,
+              subjectKey: pair.key,
+              summary: `Order ${pair.key} was billed ${row.amount} for "${match.entry.chargeType}", but VedaSuite could not work out what it should have been.`,
+              shopifyValue: null,
+              externalValue: String(row.amount),
+              expectedValue: null,
+              chargeType: row.chargeType ?? null,
+              rateCardVersion: input.rateCard?.version ?? null,
+              difference: null,
+              impact: { status: "not_quantified", reason: expected.reason },
+              evidence: [
+                matchedOn("order", pair.key),
+                { label: "Charge type", value: match.entry.chargeType },
+                { label: "Billed", value: String(row.amount) },
+                { label: "Why it could not be checked", value: expected.reason },
+                fileRow(row.rowNumber),
+              ],
+            });
+          }
         }
       }
     }
@@ -884,6 +1111,10 @@ export interface CheckInput {
   checkType: string;
   shopifyInventory: ShopifyInventoryRecord[];
   shopifyOrders: ShopifyOrderRecord[];
+  /** Synced Shopify order lines. Empty until a sync has run. */
+  shopifyLines?: ShopifyLineRecord[];
+  /** The pinned rate-card version, when the merchant has one saved. */
+  rateCard?: { name: string; version: number; entries: RateEntry[] } | null;
   external: ExternalRow[];
   nowIso: string;
 }
@@ -900,6 +1131,8 @@ export function runCheck(input: CheckInput): CheckResult {
     case "3pl_invoice":
       return runInvoiceCheck({
         shopifyOrders: input.shopifyOrders,
+        shopifyLines: input.shopifyLines,
+        rateCard: input.rateCard,
         external: input.external,
         nowIso: input.nowIso,
       });

@@ -318,6 +318,18 @@ export interface Discrepancy {
   summary: string;
   shopifyValue: string | null;
   externalValue: string | null;
+  /**
+   * The AGREED leg of a three-way comparison: what the rate card said.
+   *
+   * Absent for two-way checks, and absent for any charge with no confidently
+   * mapped rate — which is precisely the case where no overcharge may be
+   * claimed, so its absence is load-bearing rather than incidental.
+   */
+  expectedValue?: string | null;
+  /** Charge type as the merchant wrote it, when the check has one. */
+  chargeType?: string | null;
+  /** Rate-card version that supplied expectedValue, pinned at run time. */
+  rateCardVersion?: number | null;
   difference: number | null;
   impact: DiscrepancyImpact;
   evidence: DiscrepancyEvidence[];

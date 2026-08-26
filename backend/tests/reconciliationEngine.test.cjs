@@ -725,10 +725,13 @@ test("IMPORT XLSX: a FORMULA is never evaluated — only its cached value is rea
   }
 });
 
-test("IMPORT XLSX: the reader opens only the two parts it needs", () => {
+test("IMPORT XLSX: the reader opens only the parts it needs", () => {
   const src = readCode(path.join(SRC, "services/spreadsheetParsing.ts"));
   assert.match(src, /name === "xl\/sharedStrings\.xml"/);
-  assert.match(src, /name === "xl\/worksheets\/sheet1\.xml"/);
+  // Sheet SELECTION replaced the hardcoded sheet1: the part is resolved from
+  // workbook.xml, because part filenames do not reliably match tab order.
+  assert.match(src, /name === wantedPart/, "the chosen sheet is read, not sheet1 by name");
+  assert.match(src, /name === "xl\/workbook\.xml"/, "the sheet list comes from the workbook");
   assert.doesNotMatch(src, /vbaProject/, "macros are never opened");
   // Formula elements are never parsed out of a cell body.
   assert.doesNotMatch(src, /<f>\(\[\\s\\S\]/, "no formula extraction may exist");

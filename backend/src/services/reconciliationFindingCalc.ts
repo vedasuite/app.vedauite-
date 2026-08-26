@@ -154,6 +154,36 @@ const KIND_COPY: Record<
     action: "Add an expected rate column to your file to have these amounts checked.",
     urgency: "low",
   },
+  invoice_rate_difference: {
+    headline: (count) =>
+      `${count} 3PL ${count === 1 ? "charge differs" : "charges differ"} from your saved rate card`,
+    why: "The amount billed and the amount your agreed rate gives for the same proven activity do not match.",
+    action:
+      "Raise these lines with your 3PL against your rate card. Each one shows the agreed rate, the activity it was applied to, and the difference.",
+    urgency: "high",
+  },
+  invoice_quantity_mismatch: {
+    headline: (count) =>
+      `${count} 3PL ${count === 1 ? "charge was" : "charges were"} billed for a different quantity than your Shopify orders contain`,
+    why: "The billed quantity and the quantity on your Shopify order lines disagree. Either could be right - VedaSuite is not assuming which.",
+    action: "Confirm the quantities with your 3PL before paying these lines.",
+    urgency: "high",
+  },
+  invoice_unmapped_charge_type: {
+    headline: (count) =>
+      `${count} 3PL ${count === 1 ? "charge could" : "charges could"} not be matched to your rate card`,
+    why: "VedaSuite has no agreed rate for these charge types, so it cannot check the amounts. They are not being called wrong - they are unchecked.",
+    action:
+      "Add these charge types to your rate card, or add an alias so VedaSuite knows which existing entry they mean.",
+    urgency: "medium",
+  },
+  invoice_billed_without_activity: {
+    headline: (count) =>
+      `${count} 3PL ${count === 1 ? "charge has" : "charges have"} no matching Shopify activity`,
+    why: "You are being billed for work VedaSuite cannot find in your synced orders.",
+    action: "Check these lines against your 3PL portal.",
+    urgency: "high",
+  },
   supplier_quantity_shortfall: {
     headline: (count) =>
       `${count} shipment ${count === 1 ? "line is" : "lines are"} short against what was expected`,

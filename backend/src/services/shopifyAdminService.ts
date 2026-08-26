@@ -724,7 +724,66 @@ type OrderNode = {
     // read again by a later change.
   } | null;
   tags: string[];
+  lineItems?: {
+    pageInfo: { hasNextPage: boolean };
+    edges: Array<{
+      node: {
+        id: string;
+        sku?: string | null;
+        title?: string | null;
+        quantity: number;
+        /** Quantity remaining after refunds/removals. */
+        currentQuantity?: number | null;
+        refundableQuantity?: number | null;
+        unfulfilledQuantity?: number | null;
+        variant?: { id: string } | null;
+        product?: { id: string } | null;
+        originalUnitPriceSet?: {
+          shopMoney: { amount: string; currencyCode: string };
+        } | null;
+      };
+    }>;
+  } | null;
 };
+
+/**
+ * Line items fetched per order, inside the order page.
+ *
+ * Nested rather than paged separately, so the order sync's existing pagination
+ * and page ceilings continue to bound the whole operation — there is no second
+ * cursor to get wrong and no extra round trip per order. An order with more
+ * lines than this is reported as truncated, never silently under-counted.
+ */
+export const LINE_ITEM_PAGE_SIZE = 50;
+
+/**
+ * INVENTORY SCOPE.
+ *
+ * Why Shopify inventory is absent, in a form the UI can explain.
+ *
+ * `ProductVariant.inventoryQuantity` requires the `read_inventory` access
+ * scope. VedaSuite requests read_products, read_orders, write_orders and
+ * read_customers, so it cannot read inventory at all — and per-location
+ * inventory would additionally need `read_locations`.
+ *
+ * This is recorded rather than worked around. A NULL inventory column would
+ * otherwise be indistinguishable from "the merchant does not track stock for
+ * this variant", and reconciliation would report a store with no permission
+ * exactly as it reports a store with no tracking.
+ */
+export type InventorySource =
+  | "ok"
+  | "scope_missing"
+  | "not_tracked"
+  | "unavailable";
+
+/** True when the configured scopes permit reading inventory at all. */
+export function hasInventoryScope(scopes: string): boolean {
+  return scopes
+    .split(",")
+    .map((scope) => scope.trim().toLowerCase())
+    .includes("read_inventory");
+}
 
 type ProductPageResponse = {
   shop: { name: string };
@@ -955,6 +1014,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 handle
                 title
                 status
+                # NO inventoryQuantity HERE — see INVENTORY SCOPE above this
+                # file's sync function. Reading it requires read_inventory,
+                # which this app does not hold, and a denied field fails the
+                # WHOLE query rather than degrading. Requesting it here would
+                # break the entire product sync, exactly as the email field
+                # broke order sync in production.
                 variants(first: 25) {
                   edges {
                     node {
@@ -962,7 +1027,6 @@ export async function syncShopifyStoreData(shopDomain: string) {
                       title
                       price
                       sku
-                      inventoryQuantity
                     }
                   }
                 }
@@ -1015,6 +1079,9 @@ export async function syncShopifyStoreData(shopDomain: string) {
   let orderCursor: string | null = null;
   let orderPages = 0;
   let ordersTruncated = false;
+  let lineItemsSaved = 0;
+  /** Orders carrying more than LINE_ITEM_PAGE_SIZE lines. Reported, not hidden. */
+  let lineItemsTruncated = 0;
 
   for (;;) {
     const page: OrderPageResponse = await shopifyGraphQL<OrderPageResponse>(
@@ -1045,6 +1112,37 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 }
                 tags
                 displayFulfillmentStatus
+                # LINE ITEMS. Needed so a 3PL invoice claiming "4 items picked"
+                # can be compared against what the order actually contained —
+                # an order total says nothing about how many things were in it.
+                #
+                # Nested inside the order page, so this adds NO extra round
+                # trips and no separate cursor. 50 covers essentially every
+                # real order; LINE_ITEM_PAGE_SIZE documents the bound, and a
+                # longer order is reported as truncated rather than silently
+                # under-counted.
+                #
+                # Every field here is order data. There is no customer field of
+                # any kind, protected or otherwise.
+                lineItems(first: 50) {
+                  pageInfo { hasNextPage }
+                  edges {
+                    node {
+                      id
+                      sku
+                      title
+                      quantity
+                      currentQuantity
+                      refundableQuantity
+                      unfulfilledQuantity
+                      variant { id }
+                      product { id }
+                      originalUnitPriceSet {
+                        shopMoney { amount currencyCode }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -1214,6 +1312,73 @@ export async function syncShopifyStoreData(shopDomain: string) {
     } else {
       syncCounts.saved.ordersCreated += 1;
     }
+
+    // --- LINE ITEMS ------------------------------------------------------
+    //
+    // UPSERT on [storeId, shopifyLineItemId], so a repeat sync updates the
+    // same rows rather than accumulating duplicates - the same discipline the
+    // order write above already follows.
+    //
+    // REFUND SEMANTICS ARE PRESERVED, NOT REINTERPRETED. Order.refunded stays
+    // exactly as it was; these columns add the per-line detail an order-level
+    // boolean cannot express, which is what makes a partial refund visible to
+    // reconciliation. Nothing here feeds Customer Loss.
+    const savedOrder =
+      existingOrder ??
+      (await prisma.order.findFirst({
+        where: { storeId: store.id, shopifyOrderGid: orderNode.id },
+        select: { id: true },
+      }));
+
+    if (savedOrder && orderNode.lineItems) {
+      if (orderNode.lineItems.pageInfo?.hasNextPage) {
+        lineItemsTruncated += 1;
+      }
+      for (const edge of orderNode.lineItems.edges) {
+        const line = edge.node;
+        const unitPrice = line.originalUnitPriceSet?.shopMoney;
+        const data = {
+          orderId: savedOrder.id,
+          storeId: store.id,
+          shopifyLineItemId: line.id,
+          shopifyVariantId: line.variant?.id ?? null,
+          shopifyProductId: line.product?.id ?? null,
+          sku: normalizeSku(line.sku),
+          title: line.title ?? null,
+          quantity: shopifyInt(line.quantity),
+          currentQuantity:
+            typeof line.currentQuantity === "number" ? line.currentQuantity : null,
+          // Shopify reports what remains refundable and what remains
+          // unfulfilled. The refunded and fulfilled counts are DERIVED from
+          // the original quantity, and only when the source figure exists -
+          // a missing figure stays NULL rather than becoming zero.
+          refundedQuantity:
+            typeof line.refundableQuantity === "number"
+              ? Math.max(0, shopifyInt(line.quantity) - line.refundableQuantity)
+              : null,
+          fulfilledQuantity:
+            typeof line.unfulfilledQuantity === "number"
+              ? Math.max(0, shopifyInt(line.quantity) - line.unfulfilledQuantity)
+              : null,
+          fulfillableQuantity:
+            typeof line.unfulfilledQuantity === "number" ? line.unfulfilledQuantity : null,
+          price: unitPrice ? shopifyFloat(unitPrice.amount) : null,
+          currency: unitPrice?.currencyCode ?? null,
+          syncedAt: new Date(),
+        };
+        await prisma.orderLineItem.upsert({
+          where: {
+            storeId_shopifyLineItemId: {
+              storeId: store.id,
+              shopifyLineItemId: line.id,
+            },
+          },
+          create: data,
+          update: data,
+        });
+        lineItemsSaved += 1;
+      }
+    }
   }
 
   const customers = await prisma.customer.findMany({
@@ -1258,6 +1423,12 @@ export async function syncShopifyStoreData(shopDomain: string) {
       },
     });
   }
+
+  // Why every variant's inventory figure will be NULL, recorded once rather
+  // than inferred later. See INVENTORY SCOPE.
+  const inventoryAvailability: InventorySource = hasInventoryScope(env.shopifyScopes)
+    ? "unavailable"
+    : "scope_missing";
 
   for (const product of products) {
     const variants = product.variants.edges.map((edge) => edge.node);
@@ -1342,21 +1513,21 @@ export async function syncShopifyStoreData(shopDomain: string) {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
-          // Reconciliation needs both. An empty SKU stays NULL rather than
-          // becoming "", so an unset SKU is unmatchable instead of matching
-          // every other unset SKU. A null inventoryQuantity means Shopify does
-          // not track stock for this variant - it never means zero.
+          // An empty SKU stays NULL rather than becoming "", so an unset SKU
+          // is unmatchable instead of matching every other unset SKU.
           sku: normalizeSku(variant.sku),
-          inventoryQuantity:
-            typeof variant.inventoryQuantity === "number" ? variant.inventoryQuantity : null,
+          // NULL, with the REASON recorded beside it. inventoryQuantity is not
+          // requested at all (read_inventory is not held), so this is not a
+          // store that fails to track stock - it is VedaSuite that may not look.
+          inventoryQuantity: null,
+          inventorySource: inventoryAvailability,
         },
         update: {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
           sku: normalizeSku(variant.sku),
-          inventoryQuantity:
-            typeof variant.inventoryQuantity === "number" ? variant.inventoryQuantity : null,
+          inventorySource: inventoryAvailability,
         },
       });
 

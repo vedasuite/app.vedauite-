@@ -26,6 +26,7 @@ export type FieldKey =
   | "expectedQuantity"
   | "receivedQuantity"
   | "unitCost"
+  | "chargeType"
   | "currency"
   | "observedAt";
 
@@ -247,6 +248,30 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
     numeric: true,
   },
   {
+    key: "chargeType",
+    label: "Charge type",
+    purpose:
+      "Which fee each invoice line is for. Matched against your saved rate card so VedaSuite can check the amount against what you agreed.",
+    aliases: [
+      "charge",
+      "charge type",
+      "chargetype",
+      "fee",
+      "fee type",
+      "service",
+      "service type",
+      "service level",
+      "activity",
+      "activity type",
+      "description",
+      "charge description",
+      "line description",
+      "item",
+      "line item",
+    ],
+    numeric: false,
+  },
+  {
     key: "currency",
     label: "Currency",
     purpose: "Currency of the amounts on this row.",
@@ -302,7 +327,15 @@ export const CHECK_TYPE_FIELDS: Record<
   },
   "3pl_invoice": {
     required: ["orderRef", "amount"],
-    optional: ["expectedAmount", "currency", "tracking", "observedAt", "quantity"],
+    optional: [
+      // Unlocks the three-way check against a saved rate card.
+      "chargeType",
+      "expectedAmount",
+      "currency",
+      "tracking",
+      "observedAt",
+      "quantity",
+    ],
   },
   supplier_shipment: {
     required: ["sku"],

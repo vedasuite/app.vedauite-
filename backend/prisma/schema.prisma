@@ -61,6 +61,7 @@ model Store {
   intelligenceFindings IntelligenceFinding[]
   reconciliationRuns   ReconciliationRun[]
   reconciliationSources ReconciliationSource[]
+  rateCards            RateCard[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -130,6 +131,11 @@ model VariantSnapshot {
   /// a tracked quantity, NOT zero. The distinction matters: a null must never
   /// be reconciled against a warehouse count as though Shopify had said 0.
   inventoryQuantity Int?
+  /// Why inventoryQuantity is NULL: "ok" | "scope_missing" | "not_tracked" |
+  /// "unavailable". Reading inventoryQuantity needs the read_inventory scope,
+  /// which this app does not hold, so "we are not allowed to look" must be
+  /// distinguishable from "the merchant does not track this variant".
+  inventorySource   String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
@@ -257,6 +263,7 @@ model Order {
 
   fraudSignals   FraudSignal[]
   timelineEvents TimelineEvent[]
+  lineItems      OrderLineItem[]
 
   @@index([shopifyOrderGid])
   @@index([storeId, shopifyLegacyOrderId])
@@ -548,6 +555,12 @@ model ReconciliationSource {
   /// Merchant-facing explanation when status is failed or needs_mapping.
   statusReason String?
 
+  /// For XLSX: every worksheet found, and which one was actually read.
+  /// A workbook with more than one sheet must never have the others silently
+  /// ignored — the merchant is shown the list and picks.
+  availableSheetsJson String?
+  sheetName           String?
+
   /// Headers exactly as they appeared in the file.
   headersJson String?
   /// Confirmed column mapping: { sku: "Item SKU", quantity: "Available" }.
@@ -601,6 +614,30 @@ model ReconciliationRecord {
   /// that actually carry a date.
   observedAt DateTime?
 
+  /// MERCHANT-SUPPLIED REFERENCE VALUES.
+  ///
+  /// These previously existed only in a process-lifetime cache, so a restart
+  /// silently downgraded every historical run: the checks that need them
+  /// stopped running while the run still displayed as complete. They are
+  /// columns now, and a run is reproducible from the database alone.
+  ///
+  /// Every one comes from a column the MERCHANT mapped. None is derived,
+  /// defaulted or inferred — see valueSource.
+  expectedAmount   Float?
+  expectedQuantity Float?
+  receivedQuantity Float?
+  unitCost         Float?
+  /// Charge type as the merchant wrote it, for rate-card matching.
+  chargeType       String?
+
+  /// Provenance for the values above. "merchant_file" is the only value any
+  /// code writes: an assumed number must never become authoritative simply by
+  /// being stored in the same column as an observed one.
+  valueSource String @default("merchant_file")
+
+  /// Row number this row repeats, when an earlier row shared its identity.
+  duplicateOfRow Int?
+
   /// Why a row was rejected during validation. NULL for accepted rows.
   invalidReason String?
 
@@ -619,6 +656,17 @@ model ReconciliationRun {
 
   source   ReconciliationSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
   sourceId String?
+
+  /// The rate card VERSION this run was reconciled against.
+  ///
+  /// Pinned, not looked up. A merchant who updates their rate card must not
+  /// change what an earlier run found — the old run was correct about the rates
+  /// that were agreed at the time, and rewriting it would destroy the evidence.
+  rateCard        RateCard? @relation(fields: [rateCardId], references: [id], onDelete: SetNull)
+  rateCardId      String?
+  /// Denormalized so the version and name survive even if the card is deleted.
+  rateCardVersion Int?
+  rateCardName    String?
 
   checkType String
 
@@ -675,7 +723,17 @@ model ReconciliationDiscrepancy {
 
   shopifyValue  String?
   externalValue String?
+  /// The AGREED leg of a three-way comparison: what the rate card said.
+  /// NULL for two-way checks, and for any charge with no mapped rate — which
+  /// is exactly the case where no overcharge may be claimed.
+  expectedValue String?
   difference    Float?
+
+  /// Charge type this concerns, as the merchant named it in their own file.
+  chargeType String?
+  /// The rate-card version that supplied expectedValue, copied at run time so
+  /// the evidence survives a later rate-card update.
+  rateCardVersion Int?
 
   /// Money, ONLY where a defensible input existed. NULL means not quantified,
   /// which is displayed as "impact not quantified" rather than as zero.
@@ -697,4 +755,127 @@ model ReconciliationDiscrepancy {
   @@index([storeId, runId])
   @@index([runId, kind])
   @@index([storeId, subjectKey])
+}
+
+/// One line of a Shopify order.
+///
+/// WHY THIS EXISTS. Without line items, a 3PL invoice claiming "4 items picked"
+/// could only be compared against an order total — which says nothing about how
+/// many things were in it. Per-item reconciliation was impossible.
+///
+/// DELIBERATELY NARROW. Identifiers, quantities and amounts. There is no
+/// customer name, email, address or phone here, and none is requested from
+/// Shopify: reconciliation compares what was shipped and billed, not who
+/// bought it.
+model OrderLineItem {
+  id      String @id @default(cuid())
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  /// Denormalized so every read filters on the store directly.
+  storeId String
+
+  shopifyLineItemId String
+  /// Variant and product references, when Shopify supplies them. A line for a
+  /// deleted product legitimately has neither.
+  shopifyVariantId  String?
+  shopifyProductId  String?
+  sku               String?
+  title             String?
+
+  /// Quantity ORIGINALLY ordered.
+  quantity          Int
+  /// Quantity still on the order after refunds/removals. Shopify's
+  /// currentQuantity. NULL when the API did not report one.
+  currentQuantity   Int?
+  /// Quantity Shopify considers still fulfillable.
+  fulfillableQuantity Int?
+  /// Quantity actually refunded. Distinct from the order-level `refunded` flag,
+  /// which cannot express a partial refund of one line.
+  refundedQuantity  Int?
+  /// Quantity Shopify reports as fulfilled.
+  fulfilledQuantity Int?
+
+  price    Float?
+  currency String?
+
+  syncedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Repeat syncs UPDATE rather than duplicate.
+  @@unique([storeId, shopifyLineItemId])
+  @@index([storeId, sku])
+  @@index([orderId])
+}
+
+/// A merchant's agreed 3PL pricing, as a VERSIONED snapshot.
+///
+/// Never edited in place. Uploading new pricing creates a new version and the
+/// previous one is retained, because runs point at the version they used.
+model RateCard {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// Merchant-facing label, e.g. "ShipBob 2026". Versions share a name.
+  name    String
+  /// Monotonic per (store, name). Version 1 is the first upload.
+  version Int
+
+  /// "active" | "superseded". Exactly one active version per name; superseding
+  /// marks the old one rather than deleting it, so old runs stay explainable.
+  status String @default("active")
+
+  /// The upload this version came from, for traceability back to the file.
+  sourceFileName String?
+  currency       String?
+
+  /// Free-text note the merchant can attach, e.g. "post-renegotiation".
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries RateCardEntry[]
+  runs    ReconciliationRun[]
+
+  @@unique([storeId, name, version])
+  @@index([storeId, status])
+}
+
+/// One agreed charge within a rate card version.
+///
+/// GENERIC BY DESIGN. `chargeType` is whatever the merchant called it — pick
+/// fee, additional item, storage, receiving, return handling, or something this
+/// codebase has never heard of. Nothing here enumerates a fixed set of fees,
+/// because a 3PL contract can contain any charge the two parties agreed on.
+model RateCardEntry {
+  id         String   @id @default(cuid())
+  rateCard   RateCard @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+  rateCardId String
+  storeId    String
+
+  /// Canonical key used for matching, lowercased and whitespace-normalized.
+  chargeKey String
+  /// Exactly as the merchant wrote it, for display.
+  chargeType String
+  /// Extra spellings the merchant declared for this charge, JSON array of
+  /// canonical keys. Merchant-defined; VedaSuite never invents one.
+  aliasesJson String?
+
+  /// What the rate is charged per: "order" | "item" | "shipment" | "month" |
+  /// "kg" | anything the merchant wrote. Free text on purpose.
+  unit String?
+
+  rate     Float
+  currency String?
+
+  /// Optional band, when a contract prices differently above a threshold.
+  minQuantity Float?
+  maxQuantity Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, rateCardId])
+  @@index([rateCardId, chargeKey])
 }

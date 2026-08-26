@@ -1,0 +1,5 @@
+Order Number,Service,Quantity,Amount,Currency,Invoice Date
+1001,Pick Fee,4,10.00,USD,2026-08-25
+1002,Pack Fee,1,1.25,USD,2026-08-25
+1003,Special Handling,1,18.00,USD,2026-08-25
+9999,Pick Fee,2,4.00,USD,2026-08-25

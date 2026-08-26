@@ -1,0 +1,5 @@
+Charge Type,Agreed Rate,Charged Per,Currency,Also Known As
+Pick Fee,2.00,item,USD,picking;pick
+Pack Fee,1.25,order,USD,packing
+Storage,0.35,month,USD,
+Return Handling,3.00,order,USD,returns

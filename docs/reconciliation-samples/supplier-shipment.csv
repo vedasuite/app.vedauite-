@@ -1,0 +1,4 @@
+SKU,Ordered Qty,Received Qty,Tracking Number,Unit Cost,Currency
+SKU-A,100,92,TRK-0001,4.50,USD
+SKU-B,50,50,TRK-0002,2.00,USD
+SKU-ZZ,20,20,TRK-0003,1.00,USD

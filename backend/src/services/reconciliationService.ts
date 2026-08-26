@@ -45,8 +45,10 @@ import {
   runCheck,
   type ExternalRow,
   type ShopifyInventoryRecord,
+  type ShopifyLineRecord,
   type ShopifyOrderRecord,
 } from "./reconciliationChecks";
+import { getActiveRateCard, loadRateCardEntries } from "./rateCardService";
 import {
   buildReconciliationFindings,
   RECONCILIATION_MODULE,
@@ -90,6 +92,9 @@ export interface UploadResult {
   needsConfirmation: boolean;
   totalRows: number;
   truncated: boolean;
+  /** Every worksheet in the workbook, so none is silently ignored. */
+  availableSheets: string[];
+  sheetName: string | null;
 }
 
 /**
@@ -107,6 +112,8 @@ export async function uploadReconciliationFile(input: {
   fileName: string;
   /** Raw bytes. The caller decodes the transport encoding. */
   buffer: Buffer;
+  /** Which worksheet to read. Ignored for CSV. */
+  sheetName?: string | null;
 }): Promise<UploadResult> {
   const storeId = await resolveStoreId(input.shopDomain);
   const checkType = assertCheckType(input.checkType);
@@ -120,7 +127,11 @@ export async function uploadReconciliationFile(input: {
 
   let parsed;
   try {
-    parsed = parseSpreadsheet({ fileName: input.fileName, buffer: input.buffer });
+    parsed = parseSpreadsheet({
+      fileName: input.fileName,
+      buffer: input.buffer,
+      sheetName: input.sheetName,
+    });
   } catch (error) {
     if (error instanceof SpreadsheetParseError) {
       // The parser's messages are written for merchants and name the fix.
@@ -148,6 +159,8 @@ export async function uploadReconciliationFile(input: {
         ? "VedaSuite is not certain which columns to use. Confirm the mapping to continue."
         : null,
       headersJson: JSON.stringify(parsed.headers),
+      availableSheetsJson: JSON.stringify(parsed.availableSheets),
+      sheetName: parsed.sheetName,
       totalRows: parsed.rows.length,
     },
     select: { id: true },
@@ -179,6 +192,8 @@ export async function uploadReconciliationFile(input: {
     needsConfirmation: proposal.needsConfirmation,
     totalRows: parsed.rows.length,
     truncated: parsed.truncated,
+    availableSheets: parsed.availableSheets,
+    sheetName: parsed.sheetName,
   };
 }
 
@@ -213,6 +228,7 @@ export async function confirmMapping(input: {
   /** Re-supplied because the raw file is not retained between calls. */
   fileName: string;
   buffer: Buffer;
+  sheetName?: string | null;
 }): Promise<ConfirmMappingResult> {
   const storeId = await resolveStoreId(input.shopDomain);
 
@@ -227,7 +243,11 @@ export async function confirmMapping(input: {
 
   let parsed;
   try {
-    parsed = parseSpreadsheet({ fileName: input.fileName, buffer: input.buffer });
+    parsed = parseSpreadsheet({
+      fileName: input.fileName,
+      buffer: input.buffer,
+      sheetName: input.sheetName,
+    });
   } catch (error) {
     if (error instanceof SpreadsheetParseError) throw new HttpError(400, error.message);
     throw error;
@@ -291,6 +311,23 @@ export async function confirmMapping(input: {
         currency: row.currency,
         observedAt: row.observedAtIso ? new Date(row.observedAtIso) : null,
         invalidReason: row.invalidReason,
+        // THE MERCHANT'S REFERENCE VALUES, PERSISTED.
+        //
+        // These four used to live only in a process-lifetime Map. A Render
+        // restart or redeploy emptied it, and re-running an old upload then
+        // silently skipped every check that needed them while still reporting
+        // the run as complete. A run is now reproducible from the database
+        // alone, on any process, at any later date.
+        expectedAmount: row.expectedAmount,
+        expectedQuantity: row.expectedQuantity,
+        receivedQuantity: row.receivedQuantity,
+        unitCost: row.unitCost,
+        chargeType: row.chargeType ?? null,
+        // Every one of these came from a column the MERCHANT mapped. Nothing
+        // VedaSuite computed is written here, so an assumed value cannot
+        // become authoritative by sitting in an authoritative column.
+        valueSource: "merchant_file",
+        duplicateOfRow: row.duplicateOf,
       })),
     }),
     prisma.reconciliationSource.updateMany({
@@ -300,6 +337,8 @@ export async function confirmMapping(input: {
         statusReason: null,
         mappingJson: JSON.stringify(input.mapping),
         headersJson: JSON.stringify(parsed.headers),
+        availableSheetsJson: JSON.stringify(parsed.availableSheets),
+        sheetName: parsed.sheetName,
         totalRows: preview.totalRows,
         validRows: preview.validRows,
         invalidRows: preview.invalidRows,
@@ -307,11 +346,6 @@ export async function confirmMapping(input: {
       },
     }),
   ]);
-
-  // Rows that only exist in the wider ImportedRow shape (expected/received
-  // quantities, unit cost) are recomputed at run time from the same mapping, so
-  // nothing is lost by the narrower persisted schema.
-  cacheDerivedRows(source.id, preview.rows);
 
   logEvent("info", "reconciliation.mapping_confirmed", {
     storeId,
@@ -347,24 +381,17 @@ export async function confirmMapping(input: {
   };
 }
 
-/**
- * Holds the fields the narrow persisted schema does not carry, for the life of
- * the process.
- *
- * Deliberately in-memory and deliberately small. A cache miss simply means the
- * run reads what IS persisted and reports which checks could not run — it never
- * substitutes a default, and it never fails.
- */
-const derivedRowCache = new Map<string, ImportedRow[]>();
-const DERIVED_CACHE_LIMIT = 20;
-
-function cacheDerivedRows(sourceId: string, rows: ImportedRow[]) {
-  if (derivedRowCache.size >= DERIVED_CACHE_LIMIT) {
-    const oldest = derivedRowCache.keys().next().value;
-    if (oldest) derivedRowCache.delete(oldest);
-  }
-  derivedRowCache.set(sourceId, rows.slice(0, MAX_PERSISTED_ROWS));
-}
+// THERE IS NO CACHE HERE ANY MORE.
+//
+// A process-lifetime Map used to hold expectedAmount, expectedQuantity,
+// receivedQuantity and unitCost, because the persisted schema did not carry
+// them. That made reconciliation quietly restart-dependent: after a Render
+// deploy the Map was empty, re-running an old upload skipped every check those
+// values fed, and the run still finished as "completed". A merchant revisiting
+// their own reconciliation would have seen fewer findings than the first time,
+// with nothing to tell them why.
+//
+// Those are columns now. Every read below comes from the database.
 
 // ---------------------------------------------------------------------------
 // Running a reconciliation
@@ -394,7 +421,7 @@ export interface RunResult {
  * reaches a discrepancy when the merchant supplied it in their own file.
  */
 async function loadShopifySide(storeId: string) {
-  const [variants, orders] = await Promise.all([
+  const [variants, orders, lines] = await Promise.all([
     prisma.variantSnapshot.findMany({
       where: { product: { storeId } },
       select: {
@@ -418,6 +445,21 @@ async function loadShopifySide(storeId: string) {
       },
       orderBy: { createdAt: "desc" },
       take: 5_000,
+    }),
+    // ORDER LINES. The third leg of a three-way 3PL comparison: what the
+    // orders actually contained. Without these, a billed quantity can only be
+    // compared against an order total, which says nothing about item counts.
+    prisma.orderLineItem.findMany({
+      where: { storeId },
+      select: {
+        sku: true,
+        quantity: true,
+        currentQuantity: true,
+        refundedQuantity: true,
+        fulfilledQuantity: true,
+        order: { select: { orderName: true, shopifyLegacyOrderId: true } },
+      },
+      take: 20_000,
     }),
   ]);
 
@@ -447,33 +489,35 @@ async function loadShopifySide(storeId: string) {
     }
   }
 
-  return { inventory, orders: orderRecords };
-}
-
-/** Rebuilds the wide row shape from what is persisted, plus the cache. */
-async function loadExternalRows(storeId: string, sourceId: string): Promise<ExternalRow[]> {
-  const cached = derivedRowCache.get(sourceId);
-  if (cached) {
-    return cached
-      .filter((row) => !row.invalidReason)
-      .map((row) => ({
-        rowNumber: row.rowNumber,
-        sku: row.sku,
-        orderRef: row.orderRef,
-        tracking: row.tracking,
-        location: row.location,
-        quantity: row.quantity,
-        amount: row.amount,
-        expectedAmount: row.expectedAmount,
-        expectedQuantity: row.expectedQuantity,
-        receivedQuantity: row.receivedQuantity,
-        unitCost: row.unitCost,
-        currency: row.currency,
-        observedAtIso: row.observedAtIso,
-        duplicateOf: row.duplicateOf,
-      }));
+  // A line is offered under BOTH order references, matching how orderRecords
+  // is built - a 3PL export may cite either the display name or the legacy id.
+  const lineRecords: ShopifyLineRecord[] = [];
+  for (const line of lines) {
+    const base = {
+      sku: line.sku,
+      quantity: line.quantity,
+      currentQuantity: line.currentQuantity,
+      refundedQuantity: line.refundedQuantity,
+      fulfilledQuantity: line.fulfilledQuantity,
+    };
+    if (line.order.orderName) {
+      lineRecords.push({ ...base, orderRef: line.order.orderName });
+    }
+    if (line.order.shopifyLegacyOrderId) {
+      lineRecords.push({ ...base, orderRef: line.order.shopifyLegacyOrderId });
+    }
   }
 
+  return { inventory, orders: orderRecords, lines: lineRecords };
+}
+
+/**
+ * Reads the uploaded rows back, ENTIRELY from the database.
+ *
+ * There is no cache branch. Whatever the merchant mapped is what a run sees,
+ * on the first run and on every run after any number of restarts.
+ */
+async function loadExternalRows(storeId: string, sourceId: string): Promise<ExternalRow[]> {
   const rows = await prisma.reconciliationRecord.findMany({
     where: { sourceId, storeId, invalidReason: null },
     orderBy: { rowNumber: "asc" },
@@ -488,15 +532,14 @@ async function loadExternalRows(storeId: string, sourceId: string): Promise<Exte
     location: row.location,
     quantity: row.quantity,
     amount: row.amount,
-    // Not persisted; a run from a restarted process simply cannot make the
-    // checks that need them, and says so rather than assuming values.
-    expectedAmount: null,
-    expectedQuantity: null,
-    receivedQuantity: null,
-    unitCost: null,
+    expectedAmount: row.expectedAmount,
+    expectedQuantity: row.expectedQuantity,
+    receivedQuantity: row.receivedQuantity,
+    unitCost: row.unitCost,
+    chargeType: row.chargeType,
     currency: row.currency,
     observedAtIso: row.observedAt ? row.observedAt.toISOString() : null,
-    duplicateOf: null,
+    duplicateOf: row.duplicateOfRow,
   }));
 }
 
@@ -511,6 +554,8 @@ async function loadExternalRows(storeId: string, sourceId: string): Promise<Exte
 export async function runReconciliation(input: {
   shopDomain: string;
   sourceId: string;
+  /** Explicit rate-card version; falls back to the active one. */
+  rateCardId?: string | null;
   nowIso?: string;
 }): Promise<RunResult> {
   const storeId = await resolveStoreId(input.shopDomain);
@@ -529,8 +574,38 @@ export async function runReconciliation(input: {
   }
   const checkType = assertCheckType(source.checkType);
 
+  // PIN THE RATE CARD AT RUN TIME.
+  //
+  // Resolved once, here, and stored on the run. A later upload creates a new
+  // VERSION and does not touch this one, so re-reading this run months from now
+  // shows the rates that were agreed when it ran — not today's.
+  const pinnedRateCard =
+    checkType === "3pl_invoice"
+      ? input.rateCardId
+        ? await loadRateCardEntries({ storeId, rateCardId: input.rateCardId })
+        : await (async () => {
+            const active = await getActiveRateCard(storeId);
+            return active
+              ? loadRateCardEntries({ storeId, rateCardId: active.id })
+              : null;
+          })()
+      : null;
+  const pinnedRateCardId =
+    checkType === "3pl_invoice"
+      ? input.rateCardId ?? (await getActiveRateCard(storeId))?.id ?? null
+      : null;
+
   const run = await prisma.reconciliationRun.create({
-    data: { storeId, sourceId: source.id, checkType, status: "running" },
+    data: {
+      storeId,
+      sourceId: source.id,
+      checkType,
+      status: "running",
+      rateCardId: pinnedRateCardId,
+      // Denormalized so the evidence survives the card being deleted.
+      rateCardVersion: pinnedRateCard?.version ?? null,
+      rateCardName: pinnedRateCard?.name ?? null,
+    },
     select: { id: true },
   });
 
@@ -544,6 +619,8 @@ export async function runReconciliation(input: {
       checkType,
       shopifyInventory: shopify.inventory,
       shopifyOrders: shopify.orders,
+      shopifyLines: shopify.lines,
+      rateCard: pinnedRateCard,
       external,
       nowIso,
     });
@@ -589,6 +666,9 @@ export async function runReconciliation(input: {
           subjectKey: discrepancy.subjectKey,
           shopifyValue: discrepancy.shopifyValue,
           externalValue: discrepancy.externalValue,
+          expectedValue: discrepancy.expectedValue ?? null,
+          chargeType: discrepancy.chargeType ?? null,
+          rateCardVersion: discrepancy.rateCardVersion ?? null,
           difference: discrepancy.difference,
           impactAmount:
             discrepancy.impact.status === "quantified" ? discrepancy.impact.amount : null,
@@ -740,7 +820,8 @@ type Discrepancyish = { kind: string; subjectKey: string };
 export async function getReconciliationWorkspace(shopDomain: string) {
   const storeId = await resolveStoreId(shopDomain);
 
-  const [sources, runs, openFindings, variantCoverage] = await Promise.all([
+  const [sources, runs, openFindings, variantCoverage, rateCards, inventoryProbe, lineItemCount] =
+    await Promise.all([
     prisma.reconciliationSource.findMany({
       where: { storeId },
       orderBy: { uploadedAt: "desc" },
@@ -757,6 +838,8 @@ export async function getReconciliationWorkspace(shopDomain: string) {
         invalidRows: true,
         duplicateRows: true,
         uploadedAt: true,
+        sheetName: true,
+        availableSheetsJson: true,
       },
     }),
     prisma.reconciliationRun.findMany({
@@ -775,6 +858,10 @@ export async function getReconciliationWorkspace(shopDomain: string) {
         quantifiedCount: true,
         startedAt: true,
         finishedAt: true,
+        // Which rate-card VERSION this run used. A later upload creates a new
+        // version and leaves this one alone, so history stays truthful.
+        rateCardName: true,
+        rateCardVersion: true,
       },
     }),
     prisma.intelligenceFinding.count({
@@ -787,6 +874,26 @@ export async function getReconciliationWorkspace(shopDomain: string) {
     prisma.variantSnapshot.count({
       where: { product: { storeId }, NOT: { sku: null } },
     }),
+    prisma.rateCard.findMany({
+      where: { storeId },
+      orderBy: [{ name: "asc" }, { version: "desc" }],
+      take: 20,
+      select: {
+        id: true,
+        name: true,
+        version: true,
+        status: true,
+        currency: true,
+        createdAt: true,
+        _count: { select: { entries: true } },
+      },
+    }),
+    prisma.variantSnapshot.findFirst({
+      where: { product: { storeId } },
+      select: { inventorySource: true },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.orderLineItem.count({ where: { storeId } }),
   ]);
 
   const latestRun = runs[0] ?? null;
@@ -834,7 +941,35 @@ export async function getReconciliationWorkspace(shopDomain: string) {
         variantCoverage > 0
           ? null
           : "None of your Shopify variants have a SKU set, so VedaSuite has nothing to match an inventory or shipment file against. Add SKUs in Shopify and run a sync.",
+      // WHY SHOPIFY INVENTORY IS ABSENT, stated rather than left as a blank.
+      //
+      // Reading it needs the read_inventory scope, which this app does not
+      // request. That is a permission fact about VedaSuite, not a fact about
+      // the merchant's store, and the difference matters: without it a merchant
+      // would reasonably conclude their own inventory tracking was broken.
+      inventoryAvailable: inventoryProbe?.inventorySource === "ok",
+      inventoryReason:
+        inventoryProbe?.inventorySource === "scope_missing"
+          ? "VedaSuite does not have permission to read Shopify inventory levels, so an inventory file is compared on SKUs and quantities you supply rather than against Shopify stock. Enabling this needs an additional Shopify permission and a new app review."
+          : inventoryProbe?.inventorySource === "ok"
+          ? null
+          : "VedaSuite has no Shopify inventory figures for this store yet.",
+      // Line items unlock the three-way 3PL check.
+      orderLinesSynced: lineItemCount,
+      orderLinesReason:
+        lineItemCount > 0
+          ? null
+          : "No Shopify order lines are synced yet, so billed quantities cannot be checked against what your orders contained. Run a Shopify sync first.",
     },
+    rateCards: rateCards.map((card) => ({
+      id: card.id,
+      name: card.name,
+      version: card.version,
+      status: card.status,
+      currency: card.currency,
+      entryCount: card._count.entries,
+      createdAt: card.createdAt,
+    })),
   };
 }
 
@@ -858,7 +993,6 @@ export async function deleteReconciliationSource(input: {
     where: { id: input.sourceId, storeId },
   });
   if (deleted.count === 0) throw new HttpError(404, "That upload was not found.");
-  derivedRowCache.delete(input.sourceId);
   logEvent("info", "reconciliation.source_deleted", { storeId, sourceId: input.sourceId });
   return { deleted: deleted.count };
 }

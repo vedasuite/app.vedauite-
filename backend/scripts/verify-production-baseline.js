@@ -209,6 +209,9 @@ const NON_HISTORICAL_MIGRATIONS = [
   // VariantSnapshot and four new tables. Applied by migrate deploy like the
   // rest of this list — never resolved.
   "20260826_reconciliation_engine",
+  // Reconciliation V1 completion. Additive: persisted reference evidence,
+  // order line items, versioned rate cards, XLSX sheet selection.
+  "20260826_reconciliation_v1_completion",
 ];
 /** Kept for the post-deploy checks that name the original one. */
 const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];

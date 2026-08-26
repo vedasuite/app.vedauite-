@@ -9,7 +9,16 @@ import {
   runReconciliation,
   uploadReconciliationFile,
 } from "../services/reconciliationService";
-import { MAX_UPLOAD_BYTES } from "../services/spreadsheetParsing";
+import {
+  MAX_UPLOAD_BYTES,
+  parseSpreadsheet,
+  SpreadsheetParseError,
+} from "../services/spreadsheetParsing";
+import {
+  listRateCards,
+  saveRateCard,
+  suggestRateCardMapping,
+} from "../services/rateCardService";
 
 export const reconciliationRouter = Router();
 
@@ -99,7 +108,7 @@ reconciliationRouter.get("/workspace", async (req, res) => {
  */
 reconciliationRouter.post("/upload", async (req, res) => {
   const shop = sessionShop(req) as string;
-  const { checkType, fileName, contentBase64 } = req.body ?? {};
+  const { checkType, fileName, contentBase64, sheetName } = req.body ?? {};
 
   if (typeof contentBase64 !== "string" || contentBase64.length === 0) {
     return res.status(400).json({ error: { message: "No file content was received." } });
@@ -125,6 +134,7 @@ reconciliationRouter.post("/upload", async (req, res) => {
       checkType,
       fileName,
       buffer,
+      sheetName: typeof sheetName === "string" ? sheetName : null,
     });
     return res.json({ result });
   } catch (error) {
@@ -134,7 +144,7 @@ reconciliationRouter.post("/upload", async (req, res) => {
 
 reconciliationRouter.post("/mapping", async (req, res) => {
   const shop = sessionShop(req) as string;
-  const { sourceId, mapping, fileName, contentBase64 } = req.body ?? {};
+  const { sourceId, mapping, fileName, contentBase64, sheetName } = req.body ?? {};
 
   if (typeof sourceId !== "string" || !sourceId) {
     return res.status(400).json({ error: { message: "No upload was identified." } });
@@ -161,6 +171,7 @@ reconciliationRouter.post("/mapping", async (req, res) => {
       ) as Record<string, string>,
       fileName,
       buffer: Buffer.from(contentBase64, "base64"),
+      sheetName: typeof sheetName === "string" ? sheetName : null,
     });
     return res.json({ result });
   } catch (error) {
@@ -170,12 +181,16 @@ reconciliationRouter.post("/mapping", async (req, res) => {
 
 reconciliationRouter.post("/run", async (req, res) => {
   const shop = sessionShop(req) as string;
-  const { sourceId } = req.body ?? {};
+  const { sourceId, rateCardId } = req.body ?? {};
   if (typeof sourceId !== "string" || !sourceId) {
     return res.status(400).json({ error: { message: "No upload was identified." } });
   }
   try {
-    const result = await runReconciliation({ shopDomain: shop, sourceId });
+    const result = await runReconciliation({
+      shopDomain: shop,
+      sourceId,
+      rateCardId: typeof rateCardId === "string" ? rateCardId : null,
+    });
     return res.json({ result });
   } catch (error) {
     return fail(res, error, "reconciliation.run_failed", { shop, sourceId });
@@ -195,5 +210,97 @@ reconciliationRouter.delete("/source/:sourceId", async (req, res) => {
       shop,
       sourceId: req.params.sourceId,
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Rate cards
+//
+// Same session-only shop resolution and same capability gate as everything
+// above — a rate card is a merchant's commercial contract terms, which is at
+// least as sensitive as an operational export.
+// ---------------------------------------------------------------------------
+
+reconciliationRouter.get("/rate-cards", async (req, res) => {
+  const shop = sessionShop(req) as string;
+  try {
+    return res.json({ rateCards: await listRateCards(shop) });
+  } catch (error) {
+    return fail(res, error, "reconciliation.rate_cards_failed", { shop });
+  }
+});
+
+/** Inspects a rate-card file and proposes a mapping. Saves nothing. */
+reconciliationRouter.post("/rate-card/inspect", async (req, res) => {
+  const shop = sessionShop(req) as string;
+  const { fileName, contentBase64, sheetName } = req.body ?? {};
+  if (typeof contentBase64 !== "string" || typeof fileName !== "string") {
+    return res.status(400).json({ error: { message: "No file was received." } });
+  }
+  if (contentBase64.length > Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 1024) {
+    return res.status(413).json({ error: { message: "That file is too large." } });
+  }
+  try {
+    const parsed = parseSpreadsheet({
+      fileName,
+      buffer: Buffer.from(contentBase64, "base64"),
+      sheetName: typeof sheetName === "string" ? sheetName : null,
+    });
+    return res.json({
+      result: {
+        fileName: parsed.fileName,
+        headers: parsed.headers,
+        sampleRows: parsed.rows.slice(0, 5),
+        availableSheets: parsed.availableSheets,
+        sheetName: parsed.sheetName,
+        totalRows: parsed.rows.length,
+        ...suggestRateCardMapping({
+          headers: parsed.headers,
+          sampleRows: parsed.rows.slice(0, 25),
+        }),
+      },
+    });
+  } catch (error) {
+    if (error instanceof SpreadsheetParseError) {
+      return res.status(400).json({ error: { message: error.message } });
+    }
+    return fail(res, error, "reconciliation.rate_card_inspect_failed", { shop });
+  }
+});
+
+/** Saves a rate card as a NEW VERSION. Never edits an existing one. */
+reconciliationRouter.post("/rate-card", async (req, res) => {
+  const shop = sessionShop(req) as string;
+  const { name, fileName, contentBase64, mapping, sheetName, note } = req.body ?? {};
+
+  if (typeof contentBase64 !== "string" || typeof fileName !== "string") {
+    return res.status(400).json({ error: { message: "No file was received." } });
+  }
+  if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
+    return res.status(400).json({ error: { message: "No column mapping was received." } });
+  }
+  if (contentBase64.length > Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 1024) {
+    return res.status(413).json({ error: { message: "That file is too large." } });
+  }
+
+  try {
+    const result = await saveRateCard({
+      shopDomain: shop,
+      name: typeof name === "string" ? name : "Rate card",
+      fileName,
+      buffer: Buffer.from(contentBase64, "base64"),
+      // Only string values survive; validateMapping-equivalent checks happen
+      // inside saveRateCard against the file's real headers.
+      mapping: Object.fromEntries(
+        Object.entries(mapping).filter(
+          ([, value]) => typeof value === "string" && value.length > 0
+        )
+      ) as Record<string, string>,
+      sheetName: typeof sheetName === "string" ? sheetName : null,
+      note: typeof note === "string" ? note : null,
+    });
+    return res.json({ result });
+  } catch (error) {
+    return fail(res, error, "reconciliation.rate_card_save_failed", { shop });
   }
 });
