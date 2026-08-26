@@ -246,12 +246,19 @@ export function deriveModuleStates(input: {
     // The check could run. Whether the SYNC was complete still matters: a
     // module analysing a partial dataset produced a partial answer.
     if (evidence.syncPartial) {
+      const partialCount = findings(module);
       return {
         module,
         state: "PARTIAL_DATA",
-        reason: `${MODULE_LABEL[module]} ran, but the last sync did not deliver all of your Shopify data, so this result may be incomplete.`,
+        // The count leads. A module that found something must say so even when
+        // the data behind it was incomplete — the incompleteness qualifies the
+        // finding, it does not erase it.
+        reason:
+          partialCount > 0
+            ? `${MODULE_LABEL[module]} found ${partialCount} ${partialCount === 1 ? "item" : "items"} to review, but the last sync did not deliver all of your Shopify data, so there may be more.`
+            : `${MODULE_LABEL[module]} ran, but the last sync did not deliver all of your Shopify data, so this result may be incomplete.`,
         missing: [],
-        findingCount: findings(module),
+        findingCount: partialCount,
       };
     }
 
@@ -400,8 +407,22 @@ export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthRes
     (s) => !didRun(s.state) && !isAwaitingMerchant(s.state)
   );
   const failed = expected.filter((s) => isFailure(s.state));
-  const withFindings = expected.filter((s) => s.state === "READY_WITH_FINDINGS");
+  // HOW COMPLETE THE DATA WAS, AND WHETHER ANYTHING WAS FOUND, ARE TWO
+  // DIFFERENT QUESTIONS.
+  //
+  // This used to read `s.state === "READY_WITH_FINDINGS"`. A module running on
+  // a partial sync is PARTIAL_DATA no matter what it found, so a module holding
+  // one open finding was excluded from `withFindings`, fell through to the
+  // PARTIAL branch below, and was named in "… ran and found nothing" — while
+  // Reconciliation and Action Center both showed that finding.
+  //
+  // The finding count is the authority on whether something was found. The
+  // state describes the data it was found in.
+  const withFindings = expected.filter((s) => didRun(s.state) && s.findingCount > 0);
   const partial = expected.filter((s) => s.state === "PARTIAL_DATA");
+  // Only modules that ran AND found nothing may be described as having found
+  // nothing. Anything else is a claim about a store VedaSuite has not earned.
+  const ranClean = ran.filter((s) => s.findingCount === 0);
 
   const names = (list: ModuleStateResult[]) => list.map((s) => MODULE_LABEL[s.module]);
   const base = {
@@ -465,10 +486,21 @@ export function deriveGlobalHealth(states: ModuleStateResult[]): GlobalHealthRes
     if (awaiting.length > 0) {
       clauses.push(`${names(awaiting).join(", ")} ${awaiting.length === 1 ? "is" : "are"} waiting for you`);
     }
+    // Incomplete data is its own clause. A module that ran on a partial sync was
+    // previously folded into "ran and found nothing", which stated more
+    // confidence than the data supported.
+    if (partial.length > 0) {
+      clauses.push(
+        `${names(partial).join(", ")} ran on incomplete Shopify data`
+      );
+    }
     return {
       health: "PARTIAL",
-      headline: `${names(ran).join(", ")} ran and found nothing. ${clauses.join("; ")}.`,
-      detail: [...couldNotRun, ...awaiting].map((s) => s.reason),
+      headline:
+        ranClean.length > 0
+          ? `${names(ranClean).join(", ")} ran and found nothing. ${clauses.join("; ")}.`
+          : `${clauses.join("; ")}.`,
+      detail: [...partial, ...couldNotRun, ...awaiting].map((s) => s.reason),
       ...base,
     };
   }

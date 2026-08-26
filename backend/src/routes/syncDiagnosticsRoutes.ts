@@ -153,8 +153,32 @@ syncDiagnosticsRouter.get("/sync", async (req, res) => {
     const counts = readCounts(latestJob?.summaryJson ?? null);
     const capability = inventoryCapability(store.grantedScopes);
 
-    const productStatus =
-      (resourceStatus?.products as { status?: string } | undefined)?.status ?? null;
+    const productResource =
+      (resourceStatus?.products as
+        | {
+            status?: string;
+            count?: number;
+            fetched?: number;
+            skipped?: number;
+            skippedReasons?: Record<string, number>;
+            safeMessage?: string | null;
+            errorClass?: string | null;
+          }
+        | undefined) ?? undefined;
+    const productStatus = productResource?.status ?? null;
+
+    const fetchedCounts = (counts as { fetched?: Record<string, unknown> } | null)?.fetched;
+    const savedCounts = (counts as { saved?: Record<string, unknown> } | null)?.saved;
+    const skippedCounts = (counts as { skipped?: Record<string, unknown> } | null)?.skipped;
+    const skippedReasons = (counts as { skippedReasons?: Record<string, number> } | null)
+      ?.skippedReasons;
+
+    const productsFetched =
+      productResource?.fetched ??
+      (typeof fetchedCounts?.products === "number" ? fetchedCounts.products : null);
+    const productsSkipped =
+      productResource?.skipped ??
+      (typeof skippedCounts?.products === "number" ? skippedCounts.products : null);
 
     /**
      * The verdict, spelled out. This is the field a tester reads.
@@ -178,13 +202,36 @@ syncDiagnosticsRouter.get("/sync", async (req, res) => {
           code: "PRODUCTS_PRESENT",
           meaning: `${productsPersisted} products are stored and available to every module.`,
         }
+      : // FETCHED BUT NOT STORED IS NOT AN EMPTY CATALOGUE.
+      //
+      // This branch must come BEFORE the empty-catalogue ones. Without it, a
+      // sync that pulled products from Shopify and discarded every one of them
+      // fell through to "your catalogue is empty" — telling the tester a fact
+      // about their Shopify store that VedaSuite had just disproved.
+      productsFetched !== null && productsFetched > 0
+      ? {
+          code: "PRODUCTS_FETCHED_BUT_NOT_STORED",
+          meaning:
+            `Shopify returned ${productsFetched} products and VedaSuite stored none of them. ` +
+            "This is a VedaSuite problem, NOT an empty catalogue. " +
+            (productsSkipped
+              ? `${productsSkipped} were discarded during persistence — see latestSync.resourceStatus.products.skippedReasons.`
+              : "Check latestSync.resourceStatus.products for why."),
+        }
+      : productStatus === "FETCHED_NONE_PERSISTED"
+      ? {
+          code: "PRODUCTS_FETCHED_BUT_NOT_STORED",
+          meaning:
+            productResource?.safeMessage ??
+            "Shopify returned products and VedaSuite stored none of them. This is a VedaSuite problem, not an empty catalogue.",
+        }
       : productStatus === "SUCCESS" || productStatus === "SUCCESS_EMPTY"
       ? {
           code: "NO_PRODUCTS_IN_SHOPIFY",
           meaning:
             "The product sync completed successfully and Shopify returned no products. This store's catalogue is empty.",
         }
-      : counts && (counts as { fetched?: { products?: number } }).fetched?.products === 0
+      : productsFetched === 0
       ? {
           code: "NO_PRODUCTS_IN_SHOPIFY",
           meaning:
@@ -253,6 +300,55 @@ syncDiagnosticsRouter.get("/sync", async (req, res) => {
           inventoryLevelRows,
           priceRows,
           findingsOpen,
+        },
+        // ---- THE PRODUCT PIPELINE, STAGE BY STAGE ---------------------------
+        //
+        // One block that follows a product from Shopify to the database, so a
+        // zero can be located at the stage it actually occurred rather than
+        // inferred from a single count at the end.
+        productPipeline: {
+          syncAttempted: store.lastSyncAt != null,
+          resourceStatus: productStatus,
+          // 1. What Shopify returned.
+          shopifyProductsFetched: productsFetched,
+          productPagesFetched:
+            typeof fetchedCounts?.productPages === "number" ? fetchedCounts.productPages : null,
+          productsTruncated:
+            typeof fetchedCounts?.productsTruncated === "boolean"
+              ? fetchedCounts.productsTruncated
+              : null,
+          variantsFetched:
+            typeof fetchedCounts?.variants === "number" ? fetchedCounts.variants : null,
+          // 2. What survived persistence, and what did not.
+          productsCreated:
+            typeof savedCounts?.productsCreated === "number" ? savedCounts.productsCreated : null,
+          productsUpdated:
+            typeof savedCounts?.productsUpdated === "number" ? savedCounts.productsUpdated : null,
+          variantsCreated:
+            typeof savedCounts?.variantsCreated === "number" ? savedCounts.variantsCreated : null,
+          variantsUpdated:
+            typeof savedCounts?.variantsUpdated === "number" ? savedCounts.variantsUpdated : null,
+          productsSkipped: productsSkipped,
+          skippedReasons: productResource?.skippedReasons ?? skippedReasons ?? null,
+          priceBaselinesSkipped:
+            typeof skippedCounts?.priceBaselines === "number"
+              ? skippedCounts.priceBaselines
+              : null,
+          // 3. What is in the database now, and usable.
+          productsPersisted,
+          variantsPersisted,
+          variantsWithSku,
+          variantsWithInventoryQuantity,
+          // 4. Whether the token could have read any of it.
+          canReadProducts: capability.storeWide,
+          productReadScopesGranted: parseScopes(store.grantedScopes).filter((s) =>
+            ["read_products", "read_inventory", "read_locations"].includes(s)
+          ),
+          // 5. The failure, if there was one. Class and safe text only — never
+          //    a raw Shopify payload, which can carry catalogue contents.
+          errorClass: productResource?.errorClass ?? null,
+          safeMessage: productResource?.safeMessage ?? null,
+          syncErrorMessage: latestJob?.errorMessage ?? null,
         },
         // ---- the answer -----------------------------------------------------
         productDiagnosis,

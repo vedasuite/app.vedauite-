@@ -1184,7 +1184,16 @@ export async function syncShopifyStoreData(shopDomain: string) {
   // stand for success in another.
   const resourceStatus: Record<
     string,
-    { status: string; count: number; errorClass?: string | null; safeMessage?: string | null }
+    {
+      status: string;
+      count: number;
+      errorClass?: string | null;
+      safeMessage?: string | null;
+      /** How many Shopify returned, so fetched-vs-stored is always comparable. */
+      fetched?: number;
+      skipped?: number;
+      skippedReasons?: Record<string, number>;
+    }
   > = {
     products: { status: "NOT_ATTEMPTED", count: 0 },
     orders: { status: "NOT_ATTEMPTED", count: 0 },
@@ -1223,6 +1232,15 @@ export async function syncShopifyStoreData(shopDomain: string) {
     skipped: {
       products: 0,
       variants: 0,
+      /** Products stored, but with no pricing baseline because price is 0. */
+      priceBaselines: 0,
+    },
+    // WHY something was skipped, not just how many. A single `skipped` count
+    // that no surface read is how three fetched products became "your
+    // catalogue is empty".
+    skippedReasons: {
+      noHandle: 0,
+      noVariants: 0,
     },
   };
 
@@ -1455,8 +1473,32 @@ export async function syncShopifyStoreData(shopDomain: string) {
     const variants = product.variants.edges.map((edge) => edge.node);
     const firstVariant = variants[0];
     const currentPrice = shopifyFloat(firstVariant?.price ?? 0);
-    if (!product.handle || variants.length === 0 || !currentPrice) {
+
+    // A PRODUCT IS NOT DISCARDED FOR HAVING NO PRICE.
+    //
+    // This guard used to include `!currentPrice`, so any product priced 0.00 —
+    // a free item, a sample, a gift, or a hand-made test product whose price
+    // field was simply left alone — was dropped before it was ever stored. It
+    // was counted only in an internal `skipped` tally that no surface read, so
+    // Shopify returned products, VedaSuite persisted none, and Pricing said
+    // "No products synced yet" while Reconciliation had no Shopify side to
+    // compare a warehouse file against.
+    //
+    // Price is a fact ABOUT a product, not what makes it a product. Identity is
+    // the handle and its variants; SKU and inventory live on the variants and
+    // have nothing to do with price. The pricing baseline further down is the
+    // only thing that genuinely needs a non-zero price — it divides by it — so
+    // that is where the price condition now lives.
+    if (!product.handle) {
       syncCounts.skipped.products += 1;
+      syncCounts.skippedReasons.noHandle += 1;
+      continue;
+    }
+    if (variants.length === 0) {
+      // No variant means no SKU and no inventory, so there is nothing any
+      // module could match on. Recorded distinctly rather than as one number.
+      syncCounts.skipped.products += 1;
+      syncCounts.skippedReasons.noVariants += 1;
       continue;
     }
 
@@ -1572,6 +1614,18 @@ export async function syncShopifyStoreData(shopDomain: string) {
       }
     }
 
+    // THE PRICING BASELINE IS THE ONLY PART THAT NEEDS A PRICE.
+    //
+    // `expectedMarginDelta` divides by `currentPrice`, so a zero price yields
+    // NaN and Prisma rejects it — which is why the old guard sat at the top of
+    // the loop and threw the whole product away. Skipping only the baseline
+    // keeps the product, its variants, its SKU and its inventory, and simply
+    // declines to state a pricing recommendation it cannot compute.
+    if (currentPrice <= 0) {
+      syncCounts.skipped.priceBaselines += 1;
+      continue;
+    }
+
     const recommendedPrice = computeRecommendedPrice(currentPrice, store.pricingBias);
     const existingPriceRows = await prisma.priceHistory.count({
       where: {
@@ -1626,9 +1680,36 @@ export async function syncShopifyStoreData(shopDomain: string) {
       syncCounts.saved.priceRowsCreated += 1;
     }
   }
-    resourceStatus.products.status = "SUCCESS";
-    resourceStatus.products.count =
+    const productsSaved =
       syncCounts.saved.productsCreated + syncCounts.saved.productsUpdated;
+
+    // FETCHING IS NOT SAVING.
+    //
+    // "SUCCESS" here used to mean only "the loop did not throw". A sync that
+    // pulled three products from Shopify and stored none of them reported
+    // SUCCESS with count 0, and the diagnostics endpoint read that as proof the
+    // merchant's catalogue was empty. It was not empty — every product had been
+    // discarded — and the tester was told the opposite of what happened.
+    //
+    // These are now three different outcomes, and none of them can stand in for
+    // another.
+    if (products.length === 0) {
+      resourceStatus.products.status = "SUCCESS_EMPTY";
+    } else if (productsSaved === 0) {
+      resourceStatus.products.status = "FETCHED_NONE_PERSISTED";
+      resourceStatus.products.safeMessage =
+        `Shopify returned ${products.length} products and VedaSuite stored none of them.`;
+    } else if (productsSaved < products.length) {
+      resourceStatus.products.status = "SUCCESS_PARTIAL";
+      resourceStatus.products.safeMessage =
+        `Shopify returned ${products.length} products and VedaSuite stored ${productsSaved}.`;
+    } else {
+      resourceStatus.products.status = "SUCCESS";
+    }
+    resourceStatus.products.count = productsSaved;
+    resourceStatus.products.fetched = products.length;
+    resourceStatus.products.skipped = syncCounts.skipped.products;
+    resourceStatus.products.skippedReasons = { ...syncCounts.skippedReasons };
   } catch (error) {
     // PRODUCTS FAILED, ORDERS DID NOT.
     //

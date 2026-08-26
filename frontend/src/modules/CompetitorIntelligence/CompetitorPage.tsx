@@ -1173,7 +1173,7 @@ export function CompetitorPage() {
         <Modal
           open={modalOpen}
           onClose={() => setModalOpen(false)}
-          title="Competitor tracking domains"
+          title="Market Signals domains"
           primaryAction={{ content: "Save domains", onAction: saveDomains }}
         >
           <Modal.Section>
