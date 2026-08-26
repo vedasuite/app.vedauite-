@@ -601,15 +601,39 @@ function deriveRefreshResult(args: {
     !freshnessChanged ? "Last refreshed" : null,
   ].filter((value): value is string => !!value);
 
+  /**
+   * Describes one KPI movement.
+   *
+   * WHY THIS IS NOT `previous ?? 0`. With no earlier reading to compare
+   * against, the old code still printed "changed from 0 to 6" — a transition
+   * that was never observed. Zero was a placeholder for "unknown", and the
+   * sentence presented it as a measurement. When the accompanying activity
+   * list also read "0 orders processed", the merchant was being told six
+   * opportunities had appeared out of nothing.
+   *
+   * A first reading is stated as a reading. Only a genuine before-and-after is
+   * described as a change.
+   */
+  const describeMetric = (
+    label: string,
+    previous: number | undefined,
+    next: number
+  ) =>
+    previous === undefined
+      ? `${label}: ${next}`
+      : `${label} changed from ${previous} to ${next}`;
+
   const metricDiffs: string[] = [];
   if (
     !previousSnapshot ||
     previousSnapshot.kpis.fraudAlerts !== nextSnapshot.kpis.fraudAlerts
   ) {
     metricDiffs.push(
-      `Fraud alerts changed from ${
-        previousSnapshot?.kpis.fraudAlerts ?? 0
-      } to ${nextSnapshot.kpis.fraudAlerts}`
+      describeMetric(
+        "Fraud alerts",
+        previousSnapshot?.kpis.fraudAlerts,
+        nextSnapshot.kpis.fraudAlerts
+      )
     );
   }
   if (
@@ -618,9 +642,11 @@ function deriveRefreshResult(args: {
       nextSnapshot.kpis.competitorChanges
   ) {
     metricDiffs.push(
-      `Competitor changes changed from ${
-        previousSnapshot?.kpis.competitorChanges ?? 0
-      } to ${nextSnapshot.kpis.competitorChanges}`
+      describeMetric(
+        "Competitor changes",
+        previousSnapshot?.kpis.competitorChanges,
+        nextSnapshot.kpis.competitorChanges
+      )
     );
   }
   if (
@@ -629,9 +655,11 @@ function deriveRefreshResult(args: {
       nextSnapshot.kpis.pricingOpportunities
   ) {
     metricDiffs.push(
-      `Pricing opportunities changed from ${
-        previousSnapshot?.kpis.pricingOpportunities ?? 0
-      } to ${nextSnapshot.kpis.pricingOpportunities}`
+      describeMetric(
+        "Pricing opportunities",
+        previousSnapshot?.kpis.pricingOpportunities,
+        nextSnapshot.kpis.pricingOpportunities
+      )
     );
   }
   if (
@@ -640,9 +668,11 @@ function deriveRefreshResult(args: {
       nextSnapshot.kpis.profitOpportunities
   ) {
     metricDiffs.push(
-      `Profit opportunities changed from ${
-        previousSnapshot?.kpis.profitOpportunities ?? 0
-      } to ${nextSnapshot.kpis.profitOpportunities}`
+      describeMetric(
+        "Profit opportunities",
+        previousSnapshot?.kpis.profitOpportunities,
+        nextSnapshot.kpis.profitOpportunities
+      )
     );
   }
 
@@ -672,9 +702,10 @@ function deriveRefreshResult(args: {
   const visibleDataChanged =
     kpiChanged || recentInsightsChanged || quickAccessChanged || syncHealthChanged;
   const unchangedModuleNames = [
-    !fraudChanged ? "Fraud" : null,
-    !competitorChanged ? "Competitor" : null,
-    !pricingChanged ? "Pricing" : null,
+    // Module names as the merchant sees them everywhere else.
+    !fraudChanged ? "Customer Loss" : null,
+    !competitorChanged ? "Market Signals" : null,
+    !pricingChanged ? "Pricing & Product Profit" : null,
   ].filter((value): value is string => !!value);
   const summary =
     refreshStatus === "failure"
@@ -1421,16 +1452,31 @@ export function DashboardPage() {
                       <List.Item>
                         {refreshResult.activitySummary.customersEvaluated} customers evaluated
                       </List.Item>
+                      {/*
+                        Competitor analysis does not run inside this sync — it
+                        is driven from Market Signals. Printing "0 competitor
+                        pages reviewed" reported a measurement of zero for work
+                        that was never attempted, which reads as "we looked and
+                        found nothing".
+                      */}
                       <List.Item>
-                        {refreshResult.activitySummary.competitorPagesChecked} competitor pages reviewed
+                        {refreshResult.activitySummary.moduleProcessing?.competitor
+                          ?.processed
+                          ? `${refreshResult.activitySummary.competitorPagesChecked} competitor pages reviewed`
+                          : "Competitor pages: not part of this update"}
                       </List.Item>
                       <List.Item>
                         {refreshResult.activitySummary.pricingRecordsAnalyzed} pricing records analyzed
                       </List.Item>
+                      {/*
+                        Only newly created timeline events are counted; there is
+                        no "updated" count behind updatedInsightsCount, so the
+                        label says added rather than implying both.
+                      */}
                       <List.Item>
                         {refreshResult.activitySummary.newInsightsCount +
                           refreshResult.activitySummary.updatedInsightsCount}{" "}
-                        insights updated
+                        insights added
                       </List.Item>
                       <List.Item>
                         {refreshResult.visibleDataChanged

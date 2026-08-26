@@ -109,7 +109,7 @@ function planSummary(planName: BillingPlanName) {
     case "GROWTH":
       return "Market signals and pricing, with deeper customer loss analysis.";
     case "PRO":
-      return "The complete VedaSuite engine set with profit optimization and priority processing.";
+      return "Everything in Growth, plus Product Profit intelligence.";
     case "TRIAL":
       return "Trial provides temporary evaluation access before a paid plan is selected.";
     default:

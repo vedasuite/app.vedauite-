@@ -7,6 +7,7 @@ import { getPricingRecommendations, simulatePricingChange } from "./pricingServi
 import { getProfitOpportunities } from "./profitService";
 import { getCurrentSubscription } from "./subscriptionService";
 import { classifyPricingEvidence, directionalHint } from "./pricingEvidenceCalc";
+import { profitRowProvenance, NOT_ENOUGH_DATA } from "./evidenceEligibility";
 import {
   deriveModuleReadiness,
   deriveSyncStatus,
@@ -232,6 +233,42 @@ export async function getPricingProfitOverview(shopDomain: string) {
     ? await safelyResolveWithTimeout(getProfitOpportunities(shopDomain), [], 7000)
     : [];
 
+  // Per-product velocity PROVENANCE, read once for the whole page.
+  //
+  // The single source of truth for "was this observed or assumed", shared with
+  // every other surface via profitRowProvenance(). Loaded regardless of plan,
+  // because the question "may this number be shown" must not depend on which
+  // plan happens to load profit opportunities.
+  //
+  // Never throws: if provenance cannot be read, the map stays empty and every
+  // lookup falls back to NOT observed. That is the safe direction — a missing
+  // fact must never be read as a favourable one.
+  const velocityObservedByHandle = new Map<string, boolean>();
+  try {
+    const provenanceRows = await prisma.profitOptimizationData.findMany({
+      where: { storeId: store.id },
+      select: {
+        productHandle: true,
+        salesVelocity: true,
+        velocitySource: true,
+        productCost: true,
+        costSource: true,
+      },
+    });
+    for (const row of provenanceRows) {
+      velocityObservedByHandle.set(
+        row.productHandle,
+        profitRowProvenance(row).velocityObserved
+      );
+    }
+  } catch (error) {
+    logEvent("warn", "pricing.velocity_provenance_unavailable", {
+      shop: shopDomain,
+      error: error instanceof Error ? error.message : String(error),
+      effect: "no monetary projection will be shown, which is the safe default",
+    });
+  }
+
   const recommendationCount = pricingRecommendations.length;
   const profitOpportunityCount = profitOpportunities.length;
   const topRecommendation = pricingRecommendations[0] ?? null;
@@ -263,9 +300,15 @@ export async function getPricingProfitOverview(shopDomain: string) {
         : "VedaSuite needs synced order, catalog, and pricing records before it can publish data-backed pricing actions.",
       actionType: topRecommendation ? "review" : "setup",
       priority: topRecommendation ? "High" : "Medium",
-      expectedImpact: topRecommendation?.expectedProfitGain
-        ? `Potential monthly gain of $${Math.round(topRecommendation.expectedProfitGain)}`
-        : "Generate the first baseline pricing set",
+      // Same gate as the cards. This used to test only whether a stored number
+      // was truthy, so a stale row's fabricated gain was quoted here as fact.
+      expectedImpact:
+        topRecommendation?.expectedProfitGain &&
+        (velocityObservedByHandle.get(topRecommendation.productHandle) ?? false)
+          ? `Potential monthly gain of $${Math.round(topRecommendation.expectedProfitGain)}`
+          : topRecommendation
+          ? `Projected gain: ${NOT_ENOUGH_DATA}`
+          : "Generate the first baseline pricing set",
     },
     {
       id: "respond-to-market-pressure",
@@ -296,13 +339,17 @@ export async function getPricingProfitOverview(shopDomain: string) {
         : "Growth includes pricing intelligence, while Pro unlocks the full profit engine.",
       actionType: canUseFullProfitEngine ? "profit" : "upgrade",
       priority: canUseFullProfitEngine ? "High" : "Low",
-      expectedImpact: canUseFullProfitEngine
-        ? `Projected gain $${Math.round(
-            topProfitOpportunity?.projectedMonthlyProfitGain ??
-              topRecommendation?.expectedProfitGain ??
-              0
-          )}`
-        : "Unlock advanced margin analysis",
+      // `?? 0` rendered "Projected gain $0" whenever nothing was known, which
+      // reads as a measured result of zero rather than an absence of evidence.
+      // Unknown is now stated as unknown, and a figure appears only when the
+      // product behind it has OBSERVED velocity — the same gate as everywhere
+      // else on this page.
+      expectedImpact: !canUseFullProfitEngine
+        ? "Unlock advanced margin analysis"
+        : topProfitOpportunity?.projectedMonthlyProfitGain &&
+          (velocityObservedByHandle.get(topProfitOpportunity.productHandle) ?? false)
+        ? `Projected gain $${Math.round(topProfitOpportunity.projectedMonthlyProfitGain)}`
+        : `Projected gain: ${NOT_ENOUGH_DATA}`,
     },
   ];
 
@@ -753,8 +800,22 @@ export async function getPricingProfitOverview(shopDomain: string) {
       // demandScore is the stored, observed demand signal for this product and
       // is null when nothing was measured. It is the only real velocity
       // evidence available here; the engine's `?? 8` fallback is not consulted.
+      // PROVENANCE, NOT INFERENCE.
+      //
+      // This read `typeof item.demandScore === "number"` and treated a non-null
+      // demandScore as proof that velocity had been observed. It is not proof,
+      // it is a guess about where a number came from — and production proved it
+      // wrong: price-history rows written before the engine was fixed still
+      // carry a demandScore derived from an ASSUMED velocity, so competitor-
+      // informed cards showed "Projected monthly gain of $100" while the page
+      // header correctly said "Projected gain — Not enough data yet".
+      //
+      // velocitySource is the fact. It is written by the engine alongside the
+      // value, read here through the same profitRowProvenance() every other
+      // surface uses, and defaults to "assumed" — so a row with no provenance
+      // recorded can never license a monetary claim.
       const salesVelocityObserved =
-        typeof item.demandScore === "number" && Number.isFinite(item.demandScore);
+        velocityObservedByHandle.get(item.productHandle) ?? false;
       const evidence = classifyPricingEvidence({
         competitorReady,
         competitorAveragePrice: null,
@@ -1005,10 +1066,12 @@ export async function getPricingProfitOverview(shopDomain: string) {
       pressureProducts: competitorResponse.responsePlans
         .filter((plan) => plan.pressureScore >= 30)
         .slice(0, 5),
+      // Nothing renders this today, and it is gated anyway. An un-evidenced
+      // money figure sitting in the payload is a trap for whoever wires this
+      // block up later: `0` would read as a measured result of zero rather
+      // than as an absence of evidence. `null` cannot be misread.
       projectedMonthlyGain:
-        topProfitOpportunity?.projectedMonthlyProfitGain ??
-        topRecommendation?.expectedProfitGain ??
-        0,
+        projectedGainStatus === "not_available" ? null : projectedGainValue,
       summary:
         competitorResponse.summary.topPressureCount > 0
           ? "Margin pressure is being inferred from live competitor movement and current pricing baselines."

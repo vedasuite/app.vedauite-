@@ -135,32 +135,34 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
     priceLabel: "$19/month",
     summary: "One focused workspace for small stores.",
     featureBullets: [
-      "Refund abuse detection",
-      "Customer risk scoring",
+      "One workspace: Customer Loss or Market Signals",
+      "Refund and return abuse detection",
       "Order-level risk evidence",
-      "Manual competitor tracking",
+      "Competitor domains you add and refresh yourself",
     ],
     includedFeatureBullets: [
-      "Choose Customer Loss",
-      "Or choose Market Signals",
+      "Customer Loss — or — Market Signals (choose one)",
+      "Pricing recommendations — Growth",
+      "Product Profit intelligence — Pro",
     ],
     idealFor: "Small stores that want one focused workflow first.",
   },
   GROWTH: {
     planName: "GROWTH",
     priceLabel: "$49/month",
-    summary: "Market signals and pricing, with deeper customer loss analysis.",
+    summary: "Customer Loss, Market Signals and pricing recommendations. Product Profit intelligence requires Pro.",
     featureBullets: [
-      "Pricing recommendations (limited — full Product Profit is Pro-only)",
-      "Automated competitor monitoring",
-      "Product match detection",
-      "Pricing change alerts",
-      "Deeper customer loss analysis",
+      "Pricing recommendations — included",
+      "Product Profit intelligence — requires Pro",
+      "Automated competitor monitoring and product matching",
+      "Shopper trust scoring and return-abuse evidence",
+      "Reports and exports",
     ],
     includedFeatureBullets: [
-      "Customer Loss",
-      "Market Signals",
-      "Pricing & Product Profit (limited)",
+      "Customer Loss — included",
+      "Market Signals — included",
+      "Pricing recommendations — included",
+      "Product Profit intelligence — requires Pro",
     ],
     idealFor: "Stores that want market, pricing and customer loss findings together.",
     recommended: true,
@@ -168,29 +170,41 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   PRO: {
     planName: "PRO",
     priceLabel: "$99/month",
-    summary: "The complete VedaSuite engine set.",
+    summary: "Everything in Growth, plus Product Profit intelligence.",
     featureBullets: [
-      "Product profit optimization",
-      "Advanced shopper scoring",
-      "Competitor trend analytics",
-      "Multi-store insights",
-      "Priority processing",
+      "Product Profit intelligence — included",
+      "Margin-at-risk and profit-leak detection",
+      "Pricing scenario simulator and daily action board",
+      "Refund outcome simulator and trust recovery",
+      "Advanced competitor reports",
     ],
     includedFeatureBullets: [
-      "Customer Loss",
-      "Market Signals",
-      "Pricing & Product Profit (complete)",
-      "Advanced Pro features",
+      "Customer Loss — included",
+      "Market Signals — included",
+      "Pricing recommendations — included",
+      "Product Profit intelligence — included",
     ],
     idealFor: "Stores that need pricing, risk, competitor, and profit insights in one app.",
   },
 };
 
+/**
+ * Names the merchant's selected Starter module.
+ *
+ * "pricing" is a valid stored value — capabilities.ts grants pricingModule for
+ * it — but the selector below deliberately offers only the two modules Starter
+ * is sold with. Falling through to "Not selected" told any merchant carrying
+ * that value that they had chosen nothing while the backend was granting them
+ * a module. Whatever is stored is named accurately; which modules can be
+ * PURCHASED is a separate question and is unchanged here.
+ */
 function starterLabel(moduleKey: StarterModule | null) {
   return moduleKey === "fraud"
     ? "Customer Loss"
     : moduleKey === "competitor"
     ? "Market Signals"
+    : moduleKey === "pricing"
+    ? "Pricing recommendations"
     : "Not selected";
 }
 
@@ -928,18 +942,18 @@ export function PricingPage() {
               <InlineGrid columns={{ xs: 1, md: 4 }} gap="200">
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Capability</Text>
-                  <Text as="p">Trust & Abuse</Text>
-                  <Text as="p">Competitor intelligence</Text>
+                  <Text as="p">Customer Loss</Text>
+                  <Text as="p">Market Signals</Text>
                   <Text as="p">Pricing recommendations</Text>
-                  <Text as="p">Profit optimization</Text>
-                  <Text as="p">Advanced automation</Text>
+                  <Text as="p">Product Profit intelligence</Text>
+                  <Text as="p">Shopper trust scoring</Text>
                   <Text as="p">Starter feature choice</Text>
                   <Text as="p">Ideal merchant type</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Starter</Text>
-                  <Text as="p">One selected feature</Text>
-                  <Text as="p">One selected feature</Text>
+                  <Text as="p">If selected</Text>
+                  <Text as="p">If selected</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
@@ -951,8 +965,8 @@ export function PricingPage() {
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
-                  <Text as="p">Baseline guidance</Text>
-                  <Text as="p">Limited</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Included</Text>
                   <Text as="p">Not needed</Text>
                   <Text as="p">Balanced coverage</Text>
                 </div>
@@ -961,7 +975,7 @@ export function PricingPage() {
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
-                  <Text as="p">Full depth</Text>
+                  <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Not needed</Text>
                   <Text as="p">Full operating layer</Text>
