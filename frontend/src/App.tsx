@@ -132,8 +132,10 @@ export default function App() {
         {/*
           Not wrapped in InsightRoute: that gate is keyed to the fraud /
           competitor / pricing module entitlements, and reconciliation has none
-          of those. Access is enforced by the reconciliation.run capability on
-          the API routes, which is where the decision belongs.
+          of those. Access is enforced PER CHECK on the API routes -
+          reconciliation.inventory / .supplier / .invoice / .rateCard - which is
+          where the decision belongs. The page itself is reachable on every
+          plan and renders an upgrade state for whatever the merchant lacks.
         */}
         <Route
           path="/app/reconciliation"

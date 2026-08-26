@@ -116,10 +116,12 @@ export function buildNavigationModel(moduleStatus) {
       // one engine; listing them separately would present one capability as
       // three products.
       //
-      // Ungated for this staging release: the capability exists
-      // (reconciliation.run) but its plan assignment is not yet decided, and a
-      // badge claiming an upgrade requirement would be a commercial statement
-      // nobody has made.
+      // Deliberately UNGATED, even though the checks inside it are not.
+      //
+      // Starter has none of the three checks, but a badge here would say
+      // "Upgrade" for a destination that also explains what each check does
+      // and what it would cost. Hiding it would be worse still. The gate lives
+      // per check, on the API and on the tiles inside the page.
       path: "/app/reconciliation",
       label: "Reconciliation",
     },
