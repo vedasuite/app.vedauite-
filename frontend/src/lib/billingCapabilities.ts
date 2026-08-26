@@ -48,6 +48,13 @@ export const CAPABILITIES = [
   "billing.upgrade",
   "billing.downgrade",
   "billing.trialActive",
+  // RECONCILIATION. Comparing Shopify against merchant-uploaded warehouse,
+  // 3PL and supplier files.
+  //
+  // The capability EXISTS so the gate is real and assignable. Its plan
+  // assignment below is a staging placeholder, not a commercial decision:
+  // changing which plans get it is one line, and nothing else needs to move.
+  "reconciliation.run",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -341,6 +348,14 @@ export function buildCapabilities(
   capabilities["pricing.advancedAutomation"] = profitModule;
 
   capabilities["reports.export"] = reportsModule;
+
+  // STAGING PLACEHOLDER - THE ONE LINE TO CHANGE WHEN PACKAGING IS DECIDED.
+  //
+  // Granted to every paid plan for now so the feature can be validated with
+  // real merchants before it is priced. It removes nothing: no existing
+  // capability, plan promise or price is affected by this line.
+  capabilities["reconciliation.run"] =
+    isStarterTrust || isStarterCompetitor || isStarterPricing || isGrowth || isPro;
 
   return capabilities;
 }

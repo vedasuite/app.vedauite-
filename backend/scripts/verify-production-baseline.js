@@ -205,6 +205,10 @@ const NON_HISTORICAL_MIGRATIONS = [
   "20260804_intelligence_finding_foundation",
   "20260825_profit_input_provenance",
   "20260825_competitor_attempt_status",
+  // Reconciliation Engine V1. Additive: two nullable columns on
+  // VariantSnapshot and four new tables. Applied by migrate deploy like the
+  // rest of this list — never resolved.
+  "20260826_reconciliation_engine",
 ];
 /** Kept for the post-deploy checks that name the original one. */
 const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];

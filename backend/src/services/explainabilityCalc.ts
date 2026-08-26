@@ -17,7 +17,12 @@ export type InsightModule =
   // "your Shopify connection is broken" or "no successful sync for 20 days"
   // affects every merchant regardless of plan, so it is never entitlement-gated.
   // See MODULE_CAPABILITY below.
-  | "operational";
+  | "operational"
+  // Reconciliation of Shopify data against merchant-uploaded operational
+  // files. A real analysis module, added here so its findings travel through
+  // the SAME Action Center lifecycle as every other detector rather than
+  // becoming a separate dashboard.
+  | "reconciliation";
 
 export type ImpactPeriod =
   | "per_order"
@@ -196,6 +201,13 @@ export const MODULE_CAPABILITY: Record<
   pricing: "pricing",
   profit: "profit",
   operational: null,
+  // STAGING PLACEHOLDER, and the ONE line to change once packaging is
+  // decided. `null` means reconciliation findings are visible to any merchant
+  // who can reach the workspace, exactly as operational findings are. The
+  // route-level capability (billing/capabilities.ts) is what actually controls
+  // who may RUN a reconciliation; this controls who may SEE the resulting
+  // finding, and the two should be set together.
+  reconciliation: null,
 };
 
 // ---------- Small helpers ----------

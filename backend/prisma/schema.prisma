@@ -59,6 +59,8 @@ model Store {
   syncJobs             SyncJob[]
   supportTickets       SupportTicket[]
   intelligenceFindings IntelligenceFinding[]
+  reconciliationRuns   ReconciliationRun[]
+  reconciliationSources ReconciliationSource[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -120,6 +122,14 @@ model VariantSnapshot {
   title             String
   price             Float
   currency          String?
+  /// Merchant-assigned stock keeping unit. NULL when the merchant has not set
+  /// one in Shopify - which is common, and is why reconciliation treats a
+  /// missing SKU as unmatchable rather than guessing at a title match.
+  sku               String?
+  /// Shopify inventory on hand at sync time. NULL means Shopify did not report
+  /// a tracked quantity, NOT zero. The distinction matters: a null must never
+  /// be reconciled against a warehouse count as though Shopify had said 0.
+  inventoryQuantity Int?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
@@ -499,4 +509,192 @@ model IntelligenceFinding {
   @@unique([storeId, fingerprint])
   @@index([storeId, status, lastSeenAt])
   @@index([storeId, module, status])
+}
+
+// ============================================================================
+// RECONCILIATION
+//
+// ONE engine, three check types. The tables below are deliberately generic:
+// nothing here names inventory, 3PL or suppliers, because a fourth check type
+// must not need a fifth table.
+//
+// Everything is store-scoped and cascades from Store, matching the isolation
+// and deletion behaviour every other model in this schema already has.
+// ============================================================================
+
+/// One uploaded operational file, plus the mapping the merchant confirmed for
+/// it. Rows are held on the source rather than the run so the same upload can
+/// be reconciled again without re-uploading.
+model ReconciliationSource {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// "inventory" | "3pl_invoice" | "supplier_shipment". A plain string with an
+  /// application-level whitelist, matching the SyncJob.status convention.
+  checkType String
+
+  /// Sanitized display name. Path separators and control characters are
+  /// stripped before this is written; the original is never stored, and no
+  /// filesystem path is recorded anywhere because the file itself is not kept.
+  fileName String
+  /// "csv" | "xlsx".
+  fileFormat String
+  fileSizeBytes Int
+
+  /// Lifecycle: uploaded | validating | needs_mapping | ready | reconciling |
+  /// completed | failed. A partially processed upload is never "completed".
+  status String @default("uploaded")
+  /// Merchant-facing explanation when status is failed or needs_mapping.
+  statusReason String?
+
+  /// Headers exactly as they appeared in the file.
+  headersJson String?
+  /// Confirmed column mapping: { sku: "Item SKU", quantity: "Available" }.
+  /// Written only after the merchant confirms; a low-confidence guess is
+  /// offered as a suggestion and never persisted as a decision.
+  mappingJson String?
+
+  /// Counts from validation. Reported before a run may be committed.
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+
+  uploadedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  records ReconciliationRecord[]
+  runs    ReconciliationRun[]
+
+  @@index([storeId, checkType, uploadedAt])
+  @@index([storeId, status])
+}
+
+/// One normalized row from an uploaded file.
+///
+/// Deliberately narrow. Reconciliation works on identifiers, quantities and
+/// amounts; it does not need customer identity, so no name, email, address or
+/// phone column exists here to put one in.
+model ReconciliationRecord {
+  id       String               @id @default(cuid())
+  source   ReconciliationSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId String
+  /// Denormalized for query isolation: every read filters on storeId directly
+  /// rather than trusting a join to enforce ownership.
+  storeId  String
+
+  /// 1-based line number in the merchant's own file, so evidence can point at
+  /// the row they can actually go and look at.
+  rowNumber Int
+
+  sku        String?
+  orderRef   String?
+  tracking   String?
+  location   String?
+  quantity   Float?
+  amount     Float?
+  currency   String?
+  /// Timestamp carried by the file itself, when it has one. NULL means the
+  /// file did not say, which is why staleness is only ever reported for files
+  /// that actually carry a date.
+  observedAt DateTime?
+
+  /// Why a row was rejected during validation. NULL for accepted rows.
+  invalidReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, sourceId])
+  @@index([sourceId, sku])
+  @@index([sourceId, orderRef])
+}
+
+/// One execution of one check type against one source.
+model ReconciliationRun {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  source   ReconciliationSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceId String?
+
+  checkType String
+
+  /// queued | running | completed | completed_with_warnings | failed.
+  /// completed_with_warnings exists so a run that could only partially match is
+  /// never displayed as a clean success.
+  status String @default("queued")
+  /// Merchant-facing reason for a failure or a partial result.
+  statusReason String?
+
+  matchedCount      Int @default(0)
+  probableCount     Int @default(0)
+  unmatchedCount    Int @default(0)
+  discrepancyCount  Int @default(0)
+  /// Discrepancies VedaSuite could size in money. Never inferred from the
+  /// total: a run can find 12 discrepancies and quantify none of them.
+  quantifiedCount   Int @default(0)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  discrepancies ReconciliationDiscrepancy[]
+
+  @@index([storeId, checkType, startedAt])
+  @@index([storeId, status])
+}
+
+/// One detected difference, with the evidence that supports it.
+model ReconciliationDiscrepancy {
+  id      String            @id @default(cuid())
+  run     ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId   String
+  storeId String
+
+  /// Detector key within the check type, e.g. "quantity_mismatch".
+  kind String
+
+  /// confirmed | possible | insufficient_data.
+  ///
+  /// SEPARATE from matchConfidence on purpose. A real quantity difference found
+  /// across a merely PROBABLE match is a possible discrepancy, not a confirmed
+  /// one, and the two must never be collapsed into a single number.
+  certainty String
+
+  /// exact | probable | unmatched.
+  matchConfidence String
+
+  /// SKU, order reference or shipment line this concerns. Used in the finding
+  /// fingerprint, so it must be stable across runs.
+  subjectKey String
+
+  shopifyValue  String?
+  externalValue String?
+  difference    Float?
+
+  /// Money, ONLY where a defensible input existed. NULL means not quantified,
+  /// which is displayed as "impact not quantified" rather than as zero.
+  impactAmount   Float?
+  impactCurrency String?
+  /// How impactAmount was derived. Required whenever impactAmount is set.
+  impactBasis    String?
+
+  /// [{label, value}] pairs, including the merchant's own file row number.
+  evidenceJson String?
+
+  /// The IntelligenceFinding this contributed to, for traceability from a
+  /// finding back to the exact source row. Pointer only, not a foreign key,
+  /// matching IntelligenceFinding.sourceInsightId's convention.
+  findingFingerprint String?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, runId])
+  @@index([runId, kind])
+  @@index([storeId, subjectKey])
 }

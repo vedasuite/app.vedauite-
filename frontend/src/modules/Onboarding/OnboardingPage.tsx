@@ -505,6 +505,35 @@ export function OnboardingPage() {
           </Card>
         </Layout.Section>
 
+        {/*
+          Minimal, and deliberately in plain language. No merchant has asked
+          for a reconciliation pipeline; they have a spreadsheet from their
+          warehouse and a suspicion that it does not agree with Shopify.
+        */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h2" variant="headingMd">
+                Check your warehouse and supplier files against Shopify
+              </Text>
+              <Text as="p" tone="subdued">
+                Compare Shopify with the files you receive from warehouses, 3PLs or
+                suppliers and let VedaSuite flag what does not match. Upload a stock
+                list, a 3PL invoice or a supplier shipment note, and anything that
+                disagrees is added to your Action Center with the rows it came from.
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Nothing in Shopify is changed. VedaSuite only reads and compares.
+              </Text>
+              <InlineStack>
+                <Button onClick={() => navigateEmbedded("/app/reconciliation")}>
+                  Open Reconciliation
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
         <Layout.Section>
           <Banner title={onboarding.stateSummary.title} tone={onboarding.stateSummary.tone}>
             <p>{onboarding.stateSummary.description}</p>

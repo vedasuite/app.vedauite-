@@ -7,6 +7,7 @@ import { AppFrame } from "./layout/AppFrame";
 import { DashboardPage } from "./modules/Dashboard/DashboardPage";
 import { ActionCenterPage } from "./modules/ActionCenter/ActionCenterPage";
 import { CompetitorPage } from "./modules/CompetitorIntelligence/CompetitorPage";
+import { ReconciliationPage } from "./modules/Reconciliation/ReconciliationPage";
 import { SettingsPage } from "./modules/Settings/SettingsPage";
 import { SupportPage } from "./modules/Support/SupportPage";
 import { PricingPage } from "./modules/SubscriptionPlans/PricingPage";
@@ -127,6 +128,16 @@ export default function App() {
               </InsightRoute>
             )
           }
+        />
+        {/*
+          Not wrapped in InsightRoute: that gate is keyed to the fraud /
+          competitor / pricing module entitlements, and reconciliation has none
+          of those. Access is enforced by the reconciliation.run capability on
+          the API routes, which is where the decision belongs.
+        */}
+        <Route
+          path="/app/reconciliation"
+          element={withRouteBoundary("Reconciliation", <ReconciliationPage />)}
         />
         <Route path="/app/billing" element={withRouteBoundary("Billing", <PricingPage />)} />
         <Route path="/app/settings" element={withRouteBoundary("Settings", <SettingsPage />)} />

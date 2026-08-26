@@ -662,6 +662,18 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
  * counts. A store that exceeds it has more history than VedaSuite analysed, and
  * saying so is the difference between a bound and a lie.
  */
+/**
+ * Keeps an unset SKU as NULL.
+ *
+ * Shopify returns "" for a variant with no SKU. Storing that empty string
+ * would make every SKU-less variant share one key, and reconciliation would
+ * then happily "match" them all to each other.
+ */
+function normalizeSku(value: string | null | undefined): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export const SYNC_PAGE_SIZE = 250;
 export const MAX_ORDER_PAGES = 20;
 export const MAX_PRODUCT_PAGES = 8;
@@ -679,6 +691,10 @@ type ProductNode = {
         id: string;
         title: string;
         price: string;
+        // Product data, NOT protected customer data - no field-level approval
+        // is involved, unlike the `email` field this sync had to drop.
+        sku?: string | null;
+        inventoryQuantity?: number | null;
       };
     }>;
   };
@@ -945,6 +961,8 @@ export async function syncShopifyStoreData(shopDomain: string) {
                       id
                       title
                       price
+                      sku
+                      inventoryQuantity
                     }
                   }
                 }
@@ -1324,11 +1342,21 @@ export async function syncShopifyStoreData(shopDomain: string) {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+          // Reconciliation needs both. An empty SKU stays NULL rather than
+          // becoming "", so an unset SKU is unmatchable instead of matching
+          // every other unset SKU. A null inventoryQuantity means Shopify does
+          // not track stock for this variant - it never means zero.
+          sku: normalizeSku(variant.sku),
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number" ? variant.inventoryQuantity : null,
         },
         update: {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+          sku: normalizeSku(variant.sku),
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number" ? variant.inventoryQuantity : null,
         },
       });
 
