@@ -680,8 +680,12 @@ export function runSupplierCheck(input: {
   const discrepancies: Discrepancy[] = [];
   const warnings = snapshotWarnings(input.external, input.nowIso);
 
+  // BOTH figures, not either. A file carrying only "received" cannot support a
+  // shortfall claim, and reporting nothing while staying silent about why would
+  // read as "we checked and everything is fine".
   const comparableRows = input.external.filter(
-    (row) => row.expectedQuantity != null || row.receivedQuantity != null
+    (row) =>
+      row.expectedQuantity != null && (row.receivedQuantity ?? row.quantity) != null
   );
   if (comparableRows.length === 0) {
     warnings.push(
