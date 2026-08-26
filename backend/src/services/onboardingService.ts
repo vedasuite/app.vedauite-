@@ -538,13 +538,13 @@ export async function getOnboardingState(shopDomain: string) {
         normalizeStarterModuleLabel(subscription.starterModule as StarterModule | null) ??
         null,
       unlockedFeatures: [
-        subscription.enabledModules.fraud ? "Fraud detection" : null,
-        subscription.enabledModules.competitor ? "Competitor analysis" : null,
+        subscription.enabledModules.fraud ? "Customer Loss" : null,
+        subscription.enabledModules.competitor ? "Market Signals" : null,
         subscription.enabledModules.pricing ? "Pricing optimization" : null,
       ].filter((value): value is string => !!value),
       lockedFeatures: [
-        subscription.enabledModules.fraud ? null : "Fraud detection",
-        subscription.enabledModules.competitor ? null : "Competitor analysis",
+        subscription.enabledModules.fraud ? null : "Customer Loss",
+        subscription.enabledModules.competitor ? null : "Market Signals",
         subscription.enabledModules.pricing ? null : "Pricing optimization",
       ].filter((value): value is string => !!value),
       manageRoute: "/app/billing",
