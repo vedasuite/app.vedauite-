@@ -863,21 +863,24 @@ test("AUDIT: an unreadable external quantity is not printed as 0", () => {
   assert.equal(labels["In uploaded file"], "Quantity not readable");
 });
 
-test("AUDIT: inventoryQuantity is NOT requested without the scope", () => {
+test("AUDIT: inventoryQuantity IS requested — read_products covers it", () => {
+  // CORRECTED. An earlier pass removed this field believing it needed
+  // read_inventory. Verified against the 2026-01 ProductVariant reference:
+  // the object requires read_products and no field requires anything more.
+  // Removing it left inventory reconciliation with no Shopify side at all.
   const src = read(path.join(SRC, "services/shopifyAdminService.ts"));
   const start = src.indexOf("products(first: $first");
   assert.ok(start > 0, "the product query must be findable");
-  const productQuery = [
-    src.slice(start, src.indexOf("`", start)).replace(/^\s*#.*$/gm, ""),
-  ];
-  assert.doesNotMatch(
-    productQuery[0],
-    /inventoryQuantity/,
-    "requesting a field the app has no scope for fails the WHOLE query"
-  );
-  // And the reason is recorded, not just the omission.
-  assert.match(src, /export function hasInventoryScope/);
-  assert.match(src, /inventorySource: inventoryAvailability/);
+  const productQuery = src
+    .slice(start, src.indexOf("`", start))
+    .replace(/^\s*#.*$/gm, "");
+  assert.match(productQuery, /inventoryQuantity/);
+  assert.match(productQuery, /sku/);
+  // Per-location InventoryLevel is the part that needs read_inventory, and
+  // it is NOT in this query — it is fetched separately and optionally.
+  assert.doesNotMatch(productQuery, /inventoryLevels/);
+  // Provenance is recorded beside the figure.
+  assert.match(src, /inventorySourceFor\(\{/);
 });
 
 test("AUDIT: the missing inventory scope is explained, not left blank", () => {
@@ -892,12 +895,28 @@ test("AUDIT: the missing inventory scope is explained, not left blank", () => {
   );
 });
 
-test("AUDIT: no new Shopify scope was requested", () => {
+test("AUDIT: requested scopes match the verified requirements", () => {
   const toml = read(path.resolve(__dirname, "../../shopify.app.toml"));
-  const scopes = /scopes = "([^"]*)"/.exec(toml)[1];
-  assert.equal(scopes, "read_products,read_orders,write_orders,read_customers");
-  assert.ok(!scopes.includes("read_inventory"), "no scope may be added this cycle");
-  assert.ok(!scopes.includes("read_locations"));
+  const scopes = /scopes = "([^"]*)"/.exec(toml)[1].split(",");
+  // The four that have always been required.
+  for (const scope of ["read_products", "read_orders", "write_orders", "read_customers"]) {
+    assert.ok(scopes.includes(scope), `${scope} must remain requested`);
+  }
+  // The two OPTIONAL additions that unlock per-location reconciliation.
+  assert.ok(scopes.includes("read_inventory"));
+  assert.ok(scopes.includes("read_locations"));
+  // Nothing unrelated crept in.
+  assert.deepEqual(scopes.slice().sort(), [
+    "read_customers",
+    "read_inventory",
+    "read_locations",
+    "read_orders",
+    "read_products",
+    "write_orders",
+  ]);
+  // env must agree, or an install would request a different set.
+  const envSrc = read(path.join(SRC, "config/env.ts"));
+  assert.match(envSrc, /read_inventory,read_locations/);
 });
 
 test("AUDIT: location reconciliation stays explicitly unsupported", () => {

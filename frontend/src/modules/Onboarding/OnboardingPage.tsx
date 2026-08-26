@@ -483,8 +483,21 @@ export function OnboardingPage() {
           <Card>
             <BlockStack gap="400">
               <BlockStack gap="200">
+                {/*
+                  The current product narrative, in the merchant's words:
+                  find what does not add up, prove it, size it where that is
+                  defensible, and put it in one prioritised place.
+                */}
                 <Text as="p" tone="subdued" variant="bodyLg">
-                  Follow the setup steps below to confirm store connection, sync Shopify data, choose the first workflow, and unlock the right features.
+                  VedaSuite finds the differences that cost you money — between
+                  your own records, and between Shopify and the files you get
+                  from warehouses, suppliers and 3PLs. Everything it finds comes
+                  with the evidence behind it, a value where that can be proved,
+                  and a place in your Action Center.
+                </Text>
+                <Text as="p" tone="subdued">
+                  Follow the setup steps below to confirm your store connection,
+                  sync your Shopify data and choose your first workspace.
                 </Text>
               </BlockStack>
               <InlineStack gap="300">
@@ -517,11 +530,22 @@ export function OnboardingPage() {
                 Check your warehouse and supplier files against Shopify
               </Text>
               <Text as="p" tone="subdued">
-                Compare Shopify with the files you receive from warehouses, 3PLs or
-                suppliers and let VedaSuite flag what does not match. Upload a stock
-                list, a 3PL invoice or a supplier shipment note, and anything that
-                disagrees is added to your Action Center with the rows it came from.
+                Compare Shopify with warehouse, supplier and 3PL records and let
+                VedaSuite show you what doesn’t match. Upload a stock list, a
+                supplier shipment note or a 3PL invoice, and anything that
+                disagrees is added to your Action Center with the rows it came
+                from.
               </Text>
+              <List type="bullet">
+                <List.Item>
+                  Inventory and supplier shipment checks are included on Growth
+                  and Pro.
+                </List.Item>
+                <List.Item>
+                  3PL invoice auditing against your saved rate card is included
+                  on Pro.
+                </List.Item>
+              </List>
               <Text as="p" variant="bodySm" tone="subdued">
                 Nothing in Shopify is changed. VedaSuite only reads and compares.
               </Text>

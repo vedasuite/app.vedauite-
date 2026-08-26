@@ -49,6 +49,8 @@ import {
   type ShopifyOrderRecord,
 } from "./reconciliationChecks";
 import { getActiveRateCard, loadRateCardEntries } from "./rateCardService";
+import { getCurrentSubscription } from "./subscriptionService";
+import type { Capability } from "../billing/capabilities";
 import {
   buildReconciliationFindings,
   RECONCILIATION_MODULE,
@@ -816,9 +818,35 @@ type Discrepancyish = { kind: string; subjectKey: string };
 // Reading
 // ---------------------------------------------------------------------------
 
+/** Which capability each check needs. Mirrors the route middleware exactly. */
+const CHECK_CAPABILITY = {
+  inventory: "reconciliation.inventory",
+  supplier_shipment: "reconciliation.supplier",
+  "3pl_invoice": "reconciliation.invoice",
+} as const satisfies Record<CheckType, Capability>;
+
+const CHECK_REQUIRED_PLAN: Record<CheckType, string> = {
+  inventory: "GROWTH",
+  supplier_shipment: "GROWTH",
+  "3pl_invoice": "PRO",
+};
+
+const CHECK_UPGRADE_REASON: Record<CheckType, string> = {
+  inventory:
+    "Comparing Shopify stock against a warehouse file is included on Growth and Pro.",
+  supplier_shipment:
+    "Checking supplier shipments against what arrived is included on Growth and Pro.",
+  "3pl_invoice":
+    "Auditing a 3PL invoice against your agreed rates and your real order activity is included on Pro.",
+};
+
 /** The workspace payload: what exists, what ran, and what it found. */
 export async function getReconciliationWorkspace(shopDomain: string) {
   const storeId = await resolveStoreId(shopDomain);
+  // ONE ENTITLEMENT SOURCE. The page is drawn from exactly the capabilities
+  // the API enforces on, so the UI cannot show a tile the endpoint would
+  // refuse, and cannot hide one the endpoint would allow.
+  const subscription = await getCurrentSubscription(shopDomain);
 
   const [sources, runs, openFindings, variantCoverage, rateCards, inventoryProbe, lineItemCount] =
     await Promise.all([
@@ -906,13 +934,29 @@ export async function getReconciliationWorkspace(shopDomain: string) {
     : [];
 
   return {
-    checkTypes: (Object.keys(CHECK_TYPE_FIELDS) as CheckType[]).map((checkType) => ({
-      checkType,
-      label: CHECK_TYPE_LABEL[checkType],
-      requiredFields: CHECK_TYPE_FIELDS[checkType].required,
-      optionalFields: CHECK_TYPE_FIELDS[checkType].optional,
-      latestRun: runs.find((entry) => entry.checkType === checkType) ?? null,
-    })),
+    checkTypes: (Object.keys(CHECK_TYPE_FIELDS) as CheckType[]).map((checkType) => {
+      const capability = CHECK_CAPABILITY[checkType];
+      const entitled = subscription.capabilities[capability] === true;
+      return {
+        checkType,
+        label: CHECK_TYPE_LABEL[checkType],
+        requiredFields: CHECK_TYPE_FIELDS[checkType].required,
+        optionalFields: CHECK_TYPE_FIELDS[checkType].optional,
+        latestRun: runs.find((entry) => entry.checkType === checkType) ?? null,
+        entitled,
+        // Named so the UI renders an upgrade state rather than an empty
+        // workspace, and so it says which plan actually includes it.
+        requiredPlan: entitled ? null : CHECK_REQUIRED_PLAN[checkType],
+        upgradeReason: entitled ? null : CHECK_UPGRADE_REASON[checkType],
+      };
+    }),
+    capabilities: {
+      inventory: subscription.capabilities["reconciliation.inventory"] === true,
+      supplier: subscription.capabilities["reconciliation.supplier"] === true,
+      invoice: subscription.capabilities["reconciliation.invoice"] === true,
+      rateCard: subscription.capabilities["reconciliation.rateCard"] === true,
+    },
+    plan: subscription.planName,
     sources,
     runs,
     openFindings,
@@ -961,7 +1005,12 @@ export async function getReconciliationWorkspace(shopDomain: string) {
           ? null
           : "No Shopify order lines are synced yet, so billed quantities cannot be checked against what your orders contained. Run a Shopify sync first.",
     },
-    rateCards: rateCards.map((card) => ({
+    // Withheld entirely without the capability. A Growth merchant should not
+    // even see the names of contract documents they cannot use.
+    rateCards: (subscription.capabilities["reconciliation.rateCard"] === true
+      ? rateCards
+      : []
+    ).map((card) => ({
       id: card.id,
       name: card.name,
       version: card.version,
@@ -981,6 +1030,25 @@ function safeParseEvidence(value: string | null): Array<{ label: string; value: 
   } catch {
     return [];
   }
+}
+
+/**
+ * The check type a stored source belongs to.
+ *
+ * Read from the DATABASE, never from the request. A caller could otherwise
+ * post a cheap checkType alongside a 3PL sourceId and have the gate approve
+ * the wrong thing.
+ */
+export async function getSourceCheckType(
+  shopDomain: string,
+  sourceId: string
+): Promise<string | null> {
+  const storeId = await resolveStoreId(shopDomain);
+  const source = await prisma.reconciliationSource.findFirst({
+    where: { id: sourceId, storeId },
+    select: { checkType: true },
+  });
+  return source?.checkType ?? null;
 }
 
 /** Deletes an upload and everything derived from it, scoped to the store. */

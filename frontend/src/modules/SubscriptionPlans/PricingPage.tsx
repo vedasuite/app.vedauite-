@@ -133,16 +133,19 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   STARTER: {
     planName: "STARTER",
     priceLabel: "$19/month",
-    summary: "One focused workspace for small stores.",
+    summary: "One focused workspace, plus your Action Center.",
     featureBullets: [
-      "One workspace: Customer Loss or Market Signals",
-      "Refund and return abuse detection",
-      "Order-level risk evidence",
-      "Competitor domains you add and refresh yourself",
+      "Action Center — every finding, prioritised, with its evidence",
+      "Store Overview and store health checks",
+      "One workspace you choose: Customer Loss or Market Signals",
+      "Findings appear only for the workspace you selected",
     ],
     includedFeatureBullets: [
+      "Action Center — included on every plan",
       "Customer Loss — or — Market Signals (choose one)",
       "Pricing recommendations — Growth",
+      "Reconciliation — Growth",
+      "3PL invoice auditing — Pro",
       "Product Profit intelligence — Pro",
     ],
     idealFor: "Small stores that want one focused workflow first.",
@@ -150,41 +153,52 @@ const PLAN_CATALOG: Record<"STARTER" | "GROWTH" | "PRO", PlanCatalogEntry> = {
   GROWTH: {
     planName: "GROWTH",
     priceLabel: "$49/month",
-    summary: "Customer Loss, Market Signals and pricing recommendations. Product Profit intelligence requires Pro.",
+    summary:
+      "All three intelligence workspaces, plus reconciliation against your warehouse and supplier files.",
     featureBullets: [
-      "Pricing recommendations — included",
-      "Product Profit intelligence — requires Pro",
-      "Automated competitor monitoring and product matching",
-      "Shopper trust scoring and return-abuse evidence",
+      "Customer Loss, Market Signals and Pricing recommendations — all three",
+      "Inventory reconciliation against a warehouse or 3PL stock file",
+      "Supplier shipment reconciliation — expected against received",
+      "Reconciliation history and evidence you can revisit",
       "Reports and exports",
     ],
     includedFeatureBullets: [
+      "Action Center — included",
       "Customer Loss — included",
       "Market Signals — included",
       "Pricing recommendations — included",
-      "Product Profit intelligence — requires Pro",
+      "Inventory reconciliation — included",
+      "Supplier shipment reconciliation — included",
+      "3PL invoice auditing — Pro",
+      "Product Profit intelligence — Pro",
     ],
-    idealFor: "Stores that want market, pricing and customer loss findings together.",
+    idealFor: "Stores holding stock with a warehouse or supplier to check against.",
     recommended: true,
   },
   PRO: {
     planName: "PRO",
     priceLabel: "$99/month",
-    summary: "Everything in Growth, plus Product Profit intelligence.",
+    summary:
+      "Everything in Growth, plus 3PL invoice auditing against your agreed rates and Product Profit intelligence.",
     featureBullets: [
-      "Product Profit intelligence — included",
-      "Margin-at-risk and profit-leak detection",
-      "Pricing scenario simulator and daily action board",
-      "Refund outcome simulator and trust recovery",
-      "Advanced competitor reports",
+      "3PL invoice reconciliation — every charge checked",
+      "Saved 3PL rate cards, versioned so old checks stay accurate",
+      "Three-way check: agreed rate, real order activity, invoice",
+      "Evidence-backed billing differences, quantified where provable",
+      "Product Profit intelligence, margin-at-risk and profit-leak detection",
     ],
     includedFeatureBullets: [
+      "Action Center — included",
       "Customer Loss — included",
       "Market Signals — included",
       "Pricing recommendations — included",
+      "Inventory reconciliation — included",
+      "Supplier shipment reconciliation — included",
+      "3PL invoice auditing and rate cards — included",
       "Product Profit intelligence — included",
     ],
-    idealFor: "Stores that need pricing, risk, competitor, and profit insights in one app.",
+    idealFor:
+      "Stores using a 3PL, who want their invoices checked against what they agreed.",
   },
 };
 
@@ -942,18 +956,24 @@ export function PricingPage() {
               <InlineGrid columns={{ xs: 1, md: 4 }} gap="200">
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Capability</Text>
+                  <Text as="p">Action Center</Text>
                   <Text as="p">Customer Loss</Text>
                   <Text as="p">Market Signals</Text>
                   <Text as="p">Pricing recommendations</Text>
+                  <Text as="p">Inventory reconciliation</Text>
+                  <Text as="p">Supplier shipment reconciliation</Text>
+                  <Text as="p">3PL invoice auditing and rate cards</Text>
                   <Text as="p">Product Profit intelligence</Text>
-                  <Text as="p">Shopper trust scoring</Text>
                   <Text as="p">Starter feature choice</Text>
                   <Text as="p">Ideal merchant type</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Starter</Text>
+                  <Text as="p">Included</Text>
                   <Text as="p">If selected</Text>
                   <Text as="p">If selected</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
                   <Text as="p">Not included</Text>
@@ -965,13 +985,19 @@ export function PricingPage() {
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
-                  <Text as="p">Not included</Text>
                   <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Not included</Text>
+                  <Text as="p">Not included</Text>
                   <Text as="p">Not needed</Text>
                   <Text as="p">Balanced coverage</Text>
                 </div>
                 <div className="vs-signal-stat">
                   <Text as="p" variant="bodySm" tone="subdued">Pro</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
+                  <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>
                   <Text as="p">Included</Text>

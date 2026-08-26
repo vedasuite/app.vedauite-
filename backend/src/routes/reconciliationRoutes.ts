@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { HttpError } from "../lib/httpError";
 import { logEvent } from "../services/observabilityService";
 import { getCurrentSubscription } from "../services/subscriptionService";
@@ -6,6 +6,7 @@ import {
   confirmMapping,
   deleteReconciliationSource,
   getReconciliationWorkspace,
+  getSourceCheckType,
   runReconciliation,
   uploadReconciliationFile,
 } from "../services/reconciliationService";
@@ -55,21 +56,107 @@ reconciliationRouter.use(async (req, res, next) => {
       },
     });
   }
-  try {
-    const subscription = await getCurrentSubscription(shop);
-    if (!subscription.capabilities["reconciliation.run"]) {
-      return res.status(403).json({
+  return next();
+});
+
+/**
+ * Per-CHECK entitlement, re-derived from the subscription on EVERY request.
+ *
+ * FRONTEND HIDING IS NOT SECURITY. A Starter merchant who types the URL, or
+ * curls the endpoint with a valid session token, reaches this code — so this is
+ * where the decision is made, not in the React component that draws the tile.
+ *
+ * Re-derived rather than cached: a plan change must take effect on the next
+ * request, not on the next deploy.
+ */
+function requireReconciliationCapability(
+  capability:
+    | "reconciliation.inventory"
+    | "reconciliation.supplier"
+    | "reconciliation.invoice"
+    | "reconciliation.rateCard"
+) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const shop = sessionShop(req) as string;
+    try {
+      const subscription = await getCurrentSubscription(shop);
+      if (!subscription.capabilities[capability]) {
+        return res.status(403).json({
+          error: {
+            code: "FEATURE_NOT_INCLUDED",
+            message: UPGRADE_MESSAGE[capability],
+            requiredPlan: REQUIRED_PLAN[capability],
+            upgradePath: "/app/billing",
+          },
+        });
+      }
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+/** Which check a request is about, derived from what it names. */
+const CHECK_CAPABILITY = {
+  inventory: "reconciliation.inventory",
+  supplier_shipment: "reconciliation.supplier",
+  "3pl_invoice": "reconciliation.invoice",
+} as const;
+
+const UPGRADE_MESSAGE = {
+  "reconciliation.inventory":
+    "Inventory reconciliation is included on Growth and Pro.",
+  "reconciliation.supplier":
+    "Supplier shipment reconciliation is included on Growth and Pro.",
+  "reconciliation.invoice":
+    "3PL invoice reconciliation is included on Pro.",
+  "reconciliation.rateCard":
+    "3PL rate cards are included on Pro.",
+} as const;
+
+const REQUIRED_PLAN = {
+  "reconciliation.inventory": "GROWTH",
+  "reconciliation.supplier": "GROWTH",
+  "reconciliation.invoice": "PRO",
+  "reconciliation.rateCard": "PRO",
+} as const;
+
+/**
+ * Enforces the capability for whichever check the request names.
+ *
+ * Used where the check type arrives in the body or is derived from a stored
+ * source, so one middleware cannot know it in advance.
+ */
+async function assertCheckAllowed(
+  shop: string,
+  checkType: string
+): Promise<{ ok: true } | { ok: false; status: number; body: unknown }> {
+  const capability = CHECK_CAPABILITY[checkType as keyof typeof CHECK_CAPABILITY];
+  if (!capability) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: { message: "That reconciliation type is not recognised." } },
+    };
+  }
+  const subscription = await getCurrentSubscription(shop);
+  if (!subscription.capabilities[capability]) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
         error: {
           code: "FEATURE_NOT_INCLUDED",
-          message: "Reconciliation is not included in your current plan.",
+          message: UPGRADE_MESSAGE[capability],
+          requiredPlan: REQUIRED_PLAN[capability],
+          upgradePath: "/app/billing",
         },
-      });
-    }
-    return next();
-  } catch (error) {
-    return next(error);
+      },
+    };
   }
-});
+  return { ok: true };
+}
 
 /** Translates a thrown error into a response without leaking internals. */
 function fail(res: Parameters<typeof reconciliationRouter.get>[1] extends never ? never : any, error: unknown, event: string, context: Record<string, unknown>) {
@@ -128,6 +215,12 @@ reconciliationRouter.post("/upload", async (req, res) => {
   }
 
   try {
+    // The check type arrives in the BODY, so the gate is here rather than in
+    // middleware. A Starter merchant posting checkType: "inventory" is
+    // refused at exactly this point, before any file is parsed.
+    const allowed = await assertCheckAllowed(shop, String(checkType));
+    if (!allowed.ok) return res.status(allowed.status).json(allowed.body);
+
     const buffer = Buffer.from(contentBase64, "base64");
     const result = await uploadReconciliationFile({
       shopDomain: shop,
@@ -159,6 +252,14 @@ reconciliationRouter.post("/mapping", async (req, res) => {
   }
 
   try {
+    // Derived from the stored source rather than trusted from the client, so
+    // a caller cannot claim a cheaper check type to slip past the gate.
+    const sourceCheckType = await getSourceCheckType(shop, sourceId);
+    if (sourceCheckType) {
+      const allowed = await assertCheckAllowed(shop, sourceCheckType);
+      if (!allowed.ok) return res.status(allowed.status).json(allowed.body);
+    }
+
     const result = await confirmMapping({
       shopDomain: shop,
       sourceId,
@@ -186,6 +287,12 @@ reconciliationRouter.post("/run", async (req, res) => {
     return res.status(400).json({ error: { message: "No upload was identified." } });
   }
   try {
+    const sourceCheckType = await getSourceCheckType(shop, sourceId);
+    if (sourceCheckType) {
+      const allowed = await assertCheckAllowed(shop, sourceCheckType);
+      if (!allowed.ok) return res.status(allowed.status).json(allowed.body);
+    }
+
     const result = await runReconciliation({
       shopDomain: shop,
       sourceId,
@@ -221,7 +328,10 @@ reconciliationRouter.delete("/source/:sourceId", async (req, res) => {
 // least as sensitive as an operational export.
 // ---------------------------------------------------------------------------
 
-reconciliationRouter.get("/rate-cards", async (req, res) => {
+reconciliationRouter.get(
+  "/rate-cards",
+  requireReconciliationCapability("reconciliation.rateCard"),
+  async (req, res) => {
   const shop = sessionShop(req) as string;
   try {
     return res.json({ rateCards: await listRateCards(shop) });
@@ -231,7 +341,10 @@ reconciliationRouter.get("/rate-cards", async (req, res) => {
 });
 
 /** Inspects a rate-card file and proposes a mapping. Saves nothing. */
-reconciliationRouter.post("/rate-card/inspect", async (req, res) => {
+reconciliationRouter.post(
+  "/rate-card/inspect",
+  requireReconciliationCapability("reconciliation.rateCard"),
+  async (req, res) => {
   const shop = sessionShop(req) as string;
   const { fileName, contentBase64, sheetName } = req.body ?? {};
   if (typeof contentBase64 !== "string" || typeof fileName !== "string") {
@@ -269,7 +382,10 @@ reconciliationRouter.post("/rate-card/inspect", async (req, res) => {
 });
 
 /** Saves a rate card as a NEW VERSION. Never edits an existing one. */
-reconciliationRouter.post("/rate-card", async (req, res) => {
+reconciliationRouter.post(
+  "/rate-card",
+  requireReconciliationCapability("reconciliation.rateCard"),
+  async (req, res) => {
   const shop = sessionShop(req) as string;
   const { name, fileName, contentBase64, mapping, sheetName, note } = req.body ?? {};
 

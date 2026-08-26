@@ -46,13 +46,17 @@ export const CAPABILITIES = [
   "billing.upgrade",
   "billing.downgrade",
   "billing.trialActive",
-  // RECONCILIATION. Comparing Shopify against merchant-uploaded warehouse,
-  // 3PL and supplier files.
+  // RECONCILIATION. One capability per CHECK, not one for the feature.
   //
-  // The capability EXISTS so the gate is real and assignable. Its plan
-  // assignment below is a staging placeholder, not a commercial decision:
-  // changing which plans get it is one line, and nothing else needs to move.
-  "reconciliation.run",
+  // A single reconciliation.run key could not express the packaging: Growth
+  // gets inventory and supplier, Pro additionally gets the 3PL invoice check
+  // and rate cards. Gating four different checks on one boolean would have
+  // meant either giving Growth the 3PL audit or withholding inventory from
+  // it, and the API could not have enforced the difference at all.
+  "reconciliation.inventory",
+  "reconciliation.supplier",
+  "reconciliation.invoice",
+  "reconciliation.rateCard",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -227,6 +231,10 @@ export function buildCapabilities(
   const reportsModule = isGrowth || isPro;
   // Full Profit Optimization stays Pro-only, trial or not.
   const profitModule = isPro;
+  // Reconciliation. Derived here beside every other module boolean, so there
+  // is exactly one place in the codebase where a plan becomes a capability.
+  const reconciliationStandard = isGrowth || isPro;
+  const reconciliationAdvanced = isPro;
 
   capabilities["reports.view"] = reportsModule;
   capabilities["settings.view"] = true;
@@ -273,13 +281,21 @@ export function buildCapabilities(
 
   capabilities["reports.export"] = reportsModule;
 
-  // STAGING PLACEHOLDER - THE ONE LINE TO CHANGE WHEN PACKAGING IS DECIDED.
+  // RECONCILIATION PACKAGING.
   //
-  // Granted to every paid plan for now so the feature can be validated with
-  // real merchants before it is priced. It removes nothing: no existing
-  // capability, plan promise or price is affected by this line.
-  capabilities["reconciliation.run"] =
-    isStarterTrust || isStarterCompetitor || isStarterPricing || isGrowth || isPro;
+  // Growth: inventory and supplier shipment. Both compare a merchant's own
+  // file against Shopify and need no contract data.
+  //
+  // Pro: additionally the 3PL invoice check and the rate cards it depends
+  // on. Those two are one capability in practice - a 3PL audit without a
+  // rate card can only ever say "unverified" - so they move together, and
+  // separating them would sell Growth a check that cannot conclude anything.
+  //
+  // Starter gets none of them. Its promise is one focused workspace.
+  capabilities["reconciliation.inventory"] = reconciliationStandard;
+  capabilities["reconciliation.supplier"] = reconciliationStandard;
+  capabilities["reconciliation.invoice"] = reconciliationAdvanced;
+  capabilities["reconciliation.rateCard"] = reconciliationAdvanced;
 
   return capabilities;
 }

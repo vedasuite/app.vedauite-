@@ -16,6 +16,11 @@ import {
   resolveOfflineInstallation,
   updateConnectionDiagnostics,
 } from "./shopifyConnectionService";
+import {
+  inventoryCapability,
+  inventorySourceFor,
+} from "./shopifyScopeState";
+import { syncInventoryLevels } from "./shopifyInventoryLevels";
 
 const SHOPIFY_API_VERSION = env.shopifyAdminApiVersion;
 
@@ -149,6 +154,10 @@ async function getStoreAccess(shopDomain: string) {
     accessToken: access.accessToken,
     pricingBias: access.pricingBias,
     profitGuardrail: access.profitGuardrail,
+    // What THIS merchant granted at their last authorization. Distinct from
+    // env.shopifyScopes, which is what the app requests today — the two diverge
+    // for every existing install the moment a scope is added.
+    grantedScopes: access.grantedScopes ?? null,
   };
 }
 
@@ -757,33 +766,14 @@ type OrderNode = {
 export const LINE_ITEM_PAGE_SIZE = 50;
 
 /**
- * INVENTORY SCOPE.
+ * INVENTORY SCOPE — see shopifyScopeState.ts for the verified requirements.
  *
- * Why Shopify inventory is absent, in a form the UI can explain.
- *
- * `ProductVariant.inventoryQuantity` requires the `read_inventory` access
- * scope. VedaSuite requests read_products, read_orders, write_orders and
- * read_customers, so it cannot read inventory at all — and per-location
- * inventory would additionally need `read_locations`.
- *
- * This is recorded rather than worked around. A NULL inventory column would
- * otherwise be indistinguishable from "the merchant does not track stock for
- * this variant", and reconciliation would report a store with no permission
- * exactly as it reports a store with no tracking.
+ * Store-wide inventoryQuantity needs read_products only. Per-location
+ * InventoryLevel needs read_inventory, and Location identity needs
+ * read_locations or read_inventory. Both of the latter are OPTIONAL: a
+ * merchant who has not granted them keeps a fully working sync.
  */
-export type InventorySource =
-  | "ok"
-  | "scope_missing"
-  | "not_tracked"
-  | "unavailable";
-
-/** True when the configured scopes permit reading inventory at all. */
-export function hasInventoryScope(scopes: string): boolean {
-  return scopes
-    .split(",")
-    .map((scope) => scope.trim().toLowerCase())
-    .includes("read_inventory");
-}
+export { type InventorySource } from "./shopifyScopeState";
 
 type ProductPageResponse = {
   shop: { name: string };
@@ -1014,12 +1004,18 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 handle
                 title
                 status
-                # NO inventoryQuantity HERE — see INVENTORY SCOPE above this
-                # file's sync function. Reading it requires read_inventory,
-                # which this app does not hold, and a denied field fails the
-                # WHOLE query rather than degrading. Requesting it here would
-                # break the entire product sync, exactly as the email field
-                # broke order sync in production.
+                # inventoryQuantity needs only read_products. VERIFIED against
+                # the 2026-01 ProductVariant reference, which states exactly one
+                # object-level requirement — read_products — and no per-field
+                # requirements at all.
+                #
+                # An earlier pass removed this field believing it needed
+                # read_inventory. It does not, and removing it left inventory
+                # reconciliation with no Shopify side to compare against, which
+                # is the entire point of the feature.
+                #
+                # read_inventory is required for InventoryLevel — PER-LOCATION
+                # quantities — which is fetched separately and is optional.
                 variants(first: 25) {
                   edges {
                     node {
@@ -1027,6 +1023,7 @@ export async function syncShopifyStoreData(shopDomain: string) {
                       title
                       price
                       sku
+                      inventoryQuantity
                     }
                   }
                 }
@@ -1424,11 +1421,9 @@ export async function syncShopifyStoreData(shopDomain: string) {
     });
   }
 
-  // Why every variant's inventory figure will be NULL, recorded once rather
-  // than inferred later. See INVENTORY SCOPE.
-  const inventoryAvailability: InventorySource = hasInventoryScope(env.shopifyScopes)
-    ? "unavailable"
-    : "scope_missing";
+  // What THIS merchant granted, not what the app requests. The two diverge for
+  // every existing install the moment a scope is added.
+  const inventoryAccess = inventoryCapability(store.grantedScopes);
 
   for (const product of products) {
     const variants = product.variants.edges.map((edge) => edge.node);
@@ -1516,18 +1511,31 @@ export async function syncShopifyStoreData(shopDomain: string) {
           // An empty SKU stays NULL rather than becoming "", so an unset SKU
           // is unmatchable instead of matching every other unset SKU.
           sku: normalizeSku(variant.sku),
-          // NULL, with the REASON recorded beside it. inventoryQuantity is not
-          // requested at all (read_inventory is not held), so this is not a
-          // store that fails to track stock - it is VedaSuite that may not look.
-          inventoryQuantity: null,
-          inventorySource: inventoryAvailability,
+          // The real figure, with WHY beside it. A null here means Shopify did
+          // not report a tracked quantity for this variant - never zero, and
+          // never a permissions problem, which inventorySource distinguishes.
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number"
+              ? variant.inventoryQuantity
+              : null,
+          inventorySource: inventorySourceFor({
+            capability: inventoryAccess,
+            reported: variant.inventoryQuantity,
+          }),
         },
         update: {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
           sku: normalizeSku(variant.sku),
-          inventorySource: inventoryAvailability,
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number"
+              ? variant.inventoryQuantity
+              : null,
+          inventorySource: inventorySourceFor({
+            capability: inventoryAccess,
+            reported: variant.inventoryQuantity,
+          }),
         },
       });
 
@@ -1624,12 +1632,32 @@ export async function syncShopifyStoreData(shopDomain: string) {
       ? "SUCCEEDED_NO_DATA"
       : "SUCCEEDED";
 
+  // PER-LOCATION STOCK, LAST AND OPTIONAL.
+  //
+  // Deliberately after everything above has committed, and deliberately unable
+  // to throw: it needs a scope this app only recently began requesting, and no
+  // existing merchant has granted it. A permission failure here must leave the
+  // sync exactly as successful as it already was.
+  const inventoryLevels = await syncInventoryLevels({
+    shopDomain: normalizedShop,
+    storeId: store.id,
+    grantedScopes: store.grantedScopes,
+  });
+
   logEvent("info", "shopify.sync.completed", {
     shop: normalizedShop,
     startedAt: syncStartedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     status,
     counts: syncCounts,
+    lineItemsSaved,
+    lineItemsTruncated,
+    inventoryLevels: {
+      attempted: inventoryLevels.attempted,
+      succeeded: inventoryLevels.succeeded,
+      locations: inventoryLevels.locations,
+      levels: inventoryLevels.levels,
+    },
   });
 
   return {
@@ -1640,6 +1668,9 @@ export async function syncShopifyStoreData(shopDomain: string) {
     ordersSynced: orders.length,
     customersSynced: orders.filter((order) => order.customer?.legacyResourceId).length,
     counts: syncCounts,
+    lineItemsSaved,
+    lineItemsTruncated,
+    inventoryLevels,
   };
 }
 

@@ -17,10 +17,15 @@ import {
   TextField,
   Toast,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "../../hooks/useAppState";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
 import { useSubscriptionPlan } from "../../hooks/useSubscriptionPlan";
+import {
+  buildCapabilities,
+  type BillingPlanName,
+  type StarterModule,
+} from "../../lib/billingCapabilities";
 import { resolveBackendEnabledModules, resolveBackendPlan } from "../../lib/backendModuleAccess";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
@@ -70,6 +75,23 @@ export function SettingsPage() {
   const pricingProfitEnabled = backendModules.pricing;
   const fullProfitEngineEnabled = backendModules.profit;
   const competitorEnabled = backendModules.competitor;
+  // ONE ENTITLEMENT SOURCE. Derived from the same plan + starter module the
+  // backend derives from, so Settings cannot claim access the API refuses.
+  // There is deliberately no second plan matrix in this file.
+  const capabilities = useMemo(
+    () =>
+      buildCapabilities(
+        (subscription?.planName ?? "NONE") as BillingPlanName,
+        (subscription?.starterModule ?? null) as StarterModule
+      ),
+    [subscription?.planName, subscription?.starterModule]
+  );
+  const reconciliation = {
+    inventory: capabilities["reconciliation.inventory"],
+    supplier: capabilities["reconciliation.supplier"],
+    invoice: capabilities["reconciliation.invoice"],
+    rateCard: capabilities["reconciliation.rateCard"],
+  };
   const connectedDomains = domainsInput
     .split(",")
     .map((domain) => domain.trim())
@@ -295,6 +317,38 @@ export function SettingsPage() {
                 </Badge>
                 <Text as="p" variant="bodySm" tone="subdued">
                   Bias: {pricingBias}/100
+                </Text>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">Reconciliation</Text>
+                <InlineStack gap="200" wrap>
+                  <Badge tone={reconciliation.inventory ? "success" : "info"}>
+                    {reconciliation.inventory
+                      ? "Inventory — included"
+                      : "Inventory — Growth"}
+                  </Badge>
+                  <Badge tone={reconciliation.supplier ? "success" : "info"}>
+                    {reconciliation.supplier
+                      ? "Supplier shipment — included"
+                      : "Supplier shipment — Growth"}
+                  </Badge>
+                  <Badge tone={reconciliation.invoice ? "success" : "info"}>
+                    {reconciliation.invoice
+                      ? "3PL invoice — included"
+                      : "3PL invoice — Pro"}
+                  </Badge>
+                  <Badge tone={reconciliation.rateCard ? "success" : "info"}>
+                    {reconciliation.rateCard
+                      ? "Rate cards — included"
+                      : "Rate cards — Pro"}
+                  </Badge>
+                </InlineStack>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Compare Shopify with the files you receive from warehouses,
+                  suppliers and 3PLs. Uploads and mappings are managed in the
+                  Reconciliation workspace.
                 </Text>
               </BlockStack>
             </Card>

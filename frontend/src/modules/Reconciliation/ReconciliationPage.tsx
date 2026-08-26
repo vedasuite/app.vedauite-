@@ -120,7 +120,18 @@ type Workspace = {
     requiredFields: string[];
     optionalFields: string[];
     latestRun: RunSummary | null;
+    /** Authoritative, from the same source the API enforces on. */
+    entitled: boolean;
+    requiredPlan: string | null;
+    upgradeReason: string | null;
   }>;
+  capabilities?: {
+    inventory: boolean;
+    supplier: boolean;
+    invoice: boolean;
+    rateCard: boolean;
+  };
+  plan?: string;
   sources: Array<{
     id: string;
     checkType: CheckType;
@@ -469,6 +480,22 @@ export function ReconciliationPage() {
     }
   }, [loadWorkspace, rateCardId, upload]);
 
+  /** The authoritative entry for a check, straight from the backend. */
+  const checkEntry = useCallback(
+    (key: CheckType) => workspace?.checkTypes.find((entry) => entry.checkType === key) ?? null,
+    [workspace]
+  );
+
+  // Land on a check the merchant actually has. Defaulting to inventory would
+  // show a Starter merchant an upgrade wall as their first impression.
+  useEffect(() => {
+    if (!workspace) return;
+    const current = workspace.checkTypes.find((entry) => entry.checkType === checkType);
+    if (current && current.entitled) return;
+    const firstEntitled = workspace.checkTypes.find((entry) => entry.entitled);
+    if (firstEntitled) setCheckType(firstEntitled.checkType);
+  }, [checkType, workspace]);
+
   const requiredUnmapped = useMemo(
     () =>
       (upload?.suggestions ?? []).filter(
@@ -542,51 +569,81 @@ export function ReconciliationPage() {
               <Text as="h2" variant="headingMd">
                 Run a reconciliation
               </Text>
+              {/*
+                ONE destination, three checks, each drawn from the
+                authoritative entitlement the API enforces on. A check the
+                merchant does not have shows an UPGRADE state - not a hidden
+                tile and not an empty workspace, either of which would leave
+                them wondering whether the feature was broken.
+              */}
               <InlineStack gap="300" wrap>
-                {(Object.keys(CHECK_LABEL) as CheckType[]).map((key) => (
-                  <Box
-                    key={key}
-                    padding="300"
-                    borderWidth="025"
-                    borderRadius="200"
-                    borderColor={key === checkType ? "border-emphasis" : "border"}
-                    minWidth="220px"
-                  >
-                    <BlockStack gap="200">
-                      <Text as="h3" variant="headingSm">
-                        {CHECK_LABEL[key]}
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {CHECK_BLURB[key]}
-                      </Text>
-                      <Button
-                        variant={key === checkType ? "primary" : "secondary"}
-                        onClick={() => {
-                          setCheckType(key);
-                          setUpload(null);
-                          setPreview(null);
-                          setActionError(null);
-                          fileRef.current = null;
-                        }}
-                      >
-                        {key === checkType ? "Selected" : "Choose"}
-                      </Button>
-                    </BlockStack>
-                  </Box>
-                ))}
+                {(Object.keys(CHECK_LABEL) as CheckType[]).map((key) => {
+                  const entry = checkEntry(key);
+                  const entitled = entry?.entitled !== false;
+                  return (
+                    <Box
+                      key={key}
+                      padding="300"
+                      borderWidth="025"
+                      borderRadius="200"
+                      borderColor={
+                        key === checkType && entitled ? "border-emphasis" : "border"
+                      }
+                      minWidth="220px"
+                    >
+                      <BlockStack gap="200">
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="h3" variant="headingSm">
+                            {CHECK_LABEL[key]}
+                          </Text>
+                          {!entitled ? (
+                            <Badge tone="info">{`${entry?.requiredPlan ?? "Upgrade"}`}</Badge>
+                          ) : null}
+                        </InlineStack>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {entitled ? CHECK_BLURB[key] : entry?.upgradeReason ?? CHECK_BLURB[key]}
+                        </Text>
+                        {entitled ? (
+                          <Button
+                            variant={key === checkType ? "primary" : "secondary"}
+                            onClick={() => {
+                              setCheckType(key);
+                              setUpload(null);
+                              setPreview(null);
+                              setActionError(null);
+                              fileRef.current = null;
+                            }}
+                          >
+                            {key === checkType ? "Selected" : "Choose"}
+                          </Button>
+                        ) : (
+                          <Button url="/app/billing">
+                            {`Upgrade to ${entry?.requiredPlan === "PRO" ? "Pro" : "Growth"}`}
+                          </Button>
+                        )}
+                      </BlockStack>
+                    </Box>
+                  );
+                })}
               </InlineStack>
 
               <Text as="p" variant="bodySm" tone="subdued">
                 VedaSuite reads .csv and .xlsx files. It never changes anything in
                 Shopify — every reconciliation is read-only.
               </Text>
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".csv,.xlsx"
-                onChange={(event) => void onFileSelected(event.target.files?.[0] ?? null)}
-                style={{ display: "block" }}
-              />
+              {checkEntry(checkType)?.entitled === false ? (
+                <Banner tone="info" title="Not included on your plan">
+                  <p>{checkEntry(checkType)?.upgradeReason}</p>
+                </Banner>
+              ) : (
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept=".csv,.xlsx"
+                  onChange={(event) => void onFileSelected(event.target.files?.[0] ?? null)}
+                  style={{ display: "block" }}
+                />
+              )}
               {busy === "uploading" ? (
                 <InlineStack gap="200" blockAlign="center">
                   <Spinner size="small" />
@@ -603,7 +660,7 @@ export function ReconciliationPage() {
         </Layout.Section>
 
         {/* ---------------- rate card (3PL only) ---------------- */}
-        {checkType === "3pl_invoice" ? (
+        {checkType === "3pl_invoice" && workspace?.capabilities?.rateCard !== false ? (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">

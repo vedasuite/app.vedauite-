@@ -1187,15 +1187,24 @@ test("WIRING: the routes trust the SESSION, never a body-supplied shop", () => {
   );
 });
 
-test("WIRING: the capability gate exists and is one line to reassign", () => {
-  assert.match(routeSrc, /capabilities\["reconciliation\.run"\]/);
+test("WIRING: there is a capability PER CHECK, not one generic gate", () => {
+  // reconciliation.run could not express the packaging: Growth gets
+  // inventory and supplier, Pro additionally gets the invoice check and
+  // rate cards. One boolean would have meant giving Growth the 3PL audit
+  // or withholding inventory from it.
   const capabilities = read(path.join(SRC, "billing/capabilities.ts"));
-  assert.match(capabilities, /"reconciliation\.run"/, "the key must be declared");
-  assert.match(
-    capabilities,
-    /STAGING PLACEHOLDER - THE ONE LINE TO CHANGE WHEN PACKAGING IS DECIDED/,
-    "and marked as a placeholder rather than a decision"
-  );
+  for (const key of [
+    "reconciliation.inventory",
+    "reconciliation.supplier",
+    "reconciliation.invoice",
+    "reconciliation.rateCard",
+  ]) {
+    assert.match(capabilities, new RegExp(`"${key.replace(".", "\\.")}"`), key);
+  }
+  assert.doesNotMatch(capabilities, /"reconciliation\.run"/, "the generic key is gone");
+  // And every one of them is enforced on the API, not merely declared.
+  assert.match(routeSrc, /requireReconciliationCapability\(/);
+  assert.match(routeSrc, /assertCheckAllowed\(/);
 });
 
 test("WIRING: existing entitlements are untouched by the new capability", () => {
@@ -1293,7 +1302,7 @@ test("WIRING: ONE navigation destination, not three", () => {
 
 test("WIRING: onboarding explains it without technical language", () => {
   const onboarding = read(path.join(FRONTEND, "modules/Onboarding/OnboardingPage.tsx"));
-  assert.match(onboarding, /Compare Shopify with the files you receive from warehouses/);
+  assert.match(onboarding, /Compare Shopify with warehouse, supplier and 3PL records/);
   const section = onboarding.match(/Check your warehouse and supplier files[\s\S]{0,1200}/);
   assert.ok(section);
   for (const jargon of ["ETL", "pipeline", "normalization", "fingerprint", "reconciliation engine"]) {
