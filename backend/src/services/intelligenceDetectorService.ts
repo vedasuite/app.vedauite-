@@ -38,6 +38,12 @@ import {
 } from "./explainabilityCalc";
 import { computeCustomerLoss, CUSTOMER_LOSS } from "./customerLossCalc";
 import {
+  classifyPricingEvidence,
+  explainWithheldTarget,
+  isExactTargetAllowed,
+  readTargetProvenance,
+} from "./pricingEvidenceCalc";
+import {
   INDIVIDUAL_FINDING_LIMIT,
   qualifiesAsCustomerLossAction,
   qualifiesAsPricingAction,
@@ -45,7 +51,6 @@ import {
   splitForActionCenter,
 } from "./actionQualification";
 import { profitRowProvenance } from "./evidenceEligibility";
-import { classifyPricingEvidence } from "./pricingEvidenceCalc";
 import { isCurrentEvidence } from "./competitorFetchStatus";
 import { computeProductProfit, PRODUCT_PROFIT } from "./productProfitCalc";
 import {
@@ -875,6 +880,10 @@ export async function detectPricingOpportunities(input: {
       productHandle: true,
       currentPrice: true,
       recommendedPrice: true,
+      // Carries targetProvenance. Needed so Action Center applies the SAME
+      // target-eligibility rule as the Pricing workspace instead of printing
+      // whatever number happens to be stored.
+      rationaleJson: true,
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
@@ -920,6 +929,18 @@ export async function detectPricingOpportunities(input: {
       salesVelocityObserved: provenance.velocityObserved,
     });
 
+    // THE SHARED RULE. Identical call to the one the Pricing workspace makes.
+    //
+    // Production handed Action Center exact figures - 51.35, 61.62, 69.84 -
+    // for the same rows whose Pricing cards said "evidence needed to say how
+    // much". The evidence bar below is deliberately UNCHANGED: a competitor-
+    // matched product is still worth raising. What changes is that the finding
+    // now states a DIRECTION when the number itself is not defensible.
+    const exactTargetAllowed = isExactTargetAllowed({
+      evidence,
+      targetProvenance: readTargetProvenance(row.rationaleJson),
+    });
+
     if (
       !qualifiesAsPricingAction({
         showExactTarget: evidence.showExactTarget,
@@ -938,11 +959,18 @@ export async function detectPricingOpportunities(input: {
       title: "Pricing opportunity on " + handle,
       reasons: [
         "A price " + direction + " is supported by " + evidence.label.toLowerCase() + " evidence.",
-        evidence.whatWouldHelp || "The recommended price is derived from observed inputs only.",
+        exactTargetAllowed
+          ? evidence.whatWouldHelp || "The recommended price is derived from observed inputs only."
+          : explainWithheldTarget(readTargetProvenance(row.rationaleJson)),
       ],
       evidence: [
         { label: "Current price", value: row.currentPrice.toFixed(2) },
-        { label: "Recommended price", value: row.recommendedPrice.toFixed(2) },
+        // The exact figure appears only when the rule allows it. Otherwise the
+        // row states the direction, which is what the evidence actually
+        // supports, rather than a two-decimal number that reads as measured.
+        exactTargetAllowed
+          ? { label: "Recommended price", value: row.recommendedPrice.toFixed(2) }
+          : { label: "Suggested direction", value: "Possible " + direction },
         { label: "Evidence basis", value: evidence.label },
       ],
       // A monetary projection needs OBSERVED velocity. Without it the gain
@@ -965,7 +993,9 @@ export async function detectPricingOpportunities(input: {
       confidence: evidence.basis === "profit_informed" ? "high" : "medium",
       urgency: "medium",
       recommendedAction:
-        "Review the recommended price in the Pricing Workspace before applying it in Shopify. No automatic action was taken.",
+        exactTargetAllowed
+          ? "Review the recommended price in the Pricing Workspace before applying it in Shopify. No automatic action was taken."
+          : "Review this product in the Pricing Workspace. VedaSuite can see the direction but not enough to name a price, so decide the figure yourself. No automatic action was taken.",
       route: "/app/ai-pricing-engine",
       methodology: {
         summary: "Evidence basis: " + evidence.basis + ". Only observed inputs contribute.",

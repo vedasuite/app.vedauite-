@@ -6,7 +6,12 @@ import { derivePricingEngineViewState } from "./pricingEngineStateService";
 import { getPricingRecommendations, simulatePricingChange } from "./pricingService";
 import { getProfitOpportunities } from "./profitService";
 import { getCurrentSubscription } from "./subscriptionService";
-import { classifyPricingEvidence, directionalHint } from "./pricingEvidenceCalc";
+import {
+  classifyPricingEvidence,
+  directionalHint,
+  explainWithheldTarget,
+  isExactTargetAllowed,
+} from "./pricingEvidenceCalc";
 import { profitRowProvenance, NOT_ENOUGH_DATA } from "./evidenceEligibility";
 import {
   deriveModuleReadiness,
@@ -858,6 +863,11 @@ export async function getPricingProfitOverview(shopDomain: string) {
       //
       // `showProjectedGain` is the gate and is unchanged: it is still the only
       // thing that decides whether a monetary figure may appear at all.
+      // The ONE shared rule. Action Center calls the same function.
+      const exactTargetAllowed = isExactTargetAllowed({
+        evidence,
+        targetProvenance: item.targetProvenance,
+      });
       const expectedImpact = !evidence.showProjectedGain
         ? directionalHint(item.currentPrice, item.recommendedPrice)
         : item.expectedProfitGain != null && item.expectedProfitGain > 0
@@ -872,8 +882,17 @@ export async function getPricingProfitOverview(shopDomain: string) {
         // NULL when nothing product-specific supports a figure. An exact target
         // to two decimal places reads as a finding; without evidence there is
         // no finding, only arithmetic on a store-wide slider.
-        recommendedPrice: evidence.showExactTarget ? item.recommendedPrice : null,
-        recommendationType: evidence.showExactTarget ? actionLabel : "Needs more data",
+        // TWO gates, not one. showExactTarget asks whether the EVIDENCE
+        // supports naming a price; exactTargetAllowed additionally asks
+        // whether THIS NUMBER was derived without assumption terms.
+        //
+        // Production showed "$32.00 -> $34.20" beside the sentence "May have
+        // room to increase - evidence needed to say how much" because only
+        // the first gate existed: competitor data made showExactTarget true,
+        // while the figure itself was moved by the merchant's pricing bias
+        // slider and an arbitrary 0.35 blend of the competitor gap.
+        recommendedPrice: exactTargetAllowed ? item.recommendedPrice : null,
+        recommendationType: exactTargetAllowed ? actionLabel : "Direction only",
         expectedImpact,
         confidence,
         confidenceScore: evidenceBacked ? item.approvalConfidence : 0,
@@ -881,7 +900,13 @@ export async function getPricingProfitOverview(shopDomain: string) {
         evidenceBasis: evidence.basis,
         dataBasis: evidence.label,
         missingInputs: evidence.missingInputs,
-        whatWouldHelp: evidence.whatWouldHelp,
+        // When the EVIDENCE was sufficient but the NUMBER was not, say which
+        // it was. "Not enough data about this product" would be misleading for
+        // a competitor-matched product whose target was simply bias-shaped.
+        whatWouldHelp:
+          evidence.showExactTarget && !exactTargetAllowed
+            ? explainWithheldTarget(item.targetProvenance)
+            : evidence.whatWouldHelp,
         why: evidenceBacked
           ? item.demandSignals[0] ??
             "Recommendation is based on synced pricing rows and current merchant pricing settings."

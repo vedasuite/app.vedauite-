@@ -470,9 +470,9 @@ export async function getOnboardingState(shopDomain: string) {
     dashboardEntryState: mapDashboardState(readiness.initialSync.syncStatus),
     isCompleted: !!store.onboardingCompletedAt && readiness.setup.minimumComplete,
     isDismissed: !!store.onboardingDismissedAt,
-    title: "Turn Your Store Data Into Fraud Detection & Profit Insights",
+    title: "Turn Your Store Data Into Customer Loss & Profit Insights",
     description:
-      "VedaSuite turns Shopify orders, customers, and products into fraud detection, competitor tracking, and pricing guidance for your store.",
+      "VedaSuite turns Shopify orders, customers, and products into Customer Loss, Market Signals, and pricing guidance for your store.",
     primaryAction,
     progress: {
       completedSteps: stepTemplates.filter((step) => step.complete).length,
@@ -483,9 +483,9 @@ export async function getOnboardingState(shopDomain: string) {
     },
     steps,
     hero: {
-      headline: "Turn Your Store Data Into Fraud Detection & Profit Insights",
+      headline: "Turn Your Store Data Into Customer Loss & Profit Insights",
       subtext:
-        "VedaSuite syncs Shopify data, detects refund and fraud abuse, tracks competitor pricing and ads, and surfaces pricing opportunities that protect profit.",
+        "VedaSuite syncs Shopify data, finds where money leaves through refunds and returns, tracks competitor pricing and ads, and surfaces pricing opportunities that protect profit.",
       benefits: [
         "Detect refund & fraud abuse",
         "Track competitor pricing & ads",
@@ -538,13 +538,13 @@ export async function getOnboardingState(shopDomain: string) {
         normalizeStarterModuleLabel(subscription.starterModule as StarterModule | null) ??
         null,
       unlockedFeatures: [
-        subscription.enabledModules.fraud ? "Fraud detection" : null,
-        subscription.enabledModules.competitor ? "Competitor analysis" : null,
+        subscription.enabledModules.fraud ? "Customer Loss" : null,
+        subscription.enabledModules.competitor ? "Market Signals" : null,
         subscription.enabledModules.pricing ? "Pricing optimization" : null,
       ].filter((value): value is string => !!value),
       lockedFeatures: [
-        subscription.enabledModules.fraud ? null : "Fraud detection",
-        subscription.enabledModules.competitor ? null : "Competitor analysis",
+        subscription.enabledModules.fraud ? null : "Customer Loss",
+        subscription.enabledModules.competitor ? null : "Market Signals",
         subscription.enabledModules.pricing ? null : "Pricing optimization",
       ].filter((value): value is string => !!value),
       manageRoute: "/app/billing",

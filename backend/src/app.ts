@@ -118,6 +118,11 @@ export function createApp() {
   app.use(morgan(":method :url :status :response-time ms req_id=:request-id"));
   app.use("/webhooks/shopify", express.raw({ type: "application/json" }));
   app.use("/webhooks/shopify", shopifyWebhookRouter);
+  // Reconciliation uploads arrive as base64 on the normal JSON route, so this
+  // ONE path needs a larger body than the app-wide default. Scoped to the
+  // path rather than raised globally: every other endpoint keeps the small
+  // default, so a large body is only accepted where one is expected.
+  app.use("/api/reconciliation", express.json({ limit: "8mb" }));
   app.use(express.json());
   app.use(cookieParser());
 

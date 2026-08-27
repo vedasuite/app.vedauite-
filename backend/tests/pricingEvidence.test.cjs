@@ -200,10 +200,22 @@ const pageSrc = fs.readFileSync(PAGE, "utf8");
 
 test("WIRING: the service classifies every recommendation before shaping a card", () => {
   assert.match(serviceSrc, /classifyPricingEvidence\(\{/, "the classifier must be called");
+  // The gate is now STRONGER than it was. It used to be `evidence.showExactTarget`
+  // alone, which asked only whether the evidence supported naming a price —
+  // and competitor data alone satisfied that. Production then printed
+  // "$32.00 -> $34.20" beside "evidence needed to say how much", because the
+  // NUMBER was moved by the merchant's own bias slider and an arbitrary 0.35
+  // blend of the competitor gap. isExactTargetAllowed checks both the evidence
+  // AND the provenance of the figure itself.
   assert.match(
     serviceSrc,
-    /recommendedPrice: evidence\.showExactTarget \? item\.recommendedPrice : null/,
-    "an exact target must be gated on evidence"
+    /recommendedPrice: exactTargetAllowed \? item\.recommendedPrice : null/,
+    "an exact target must be gated on the shared rule"
+  );
+  assert.match(
+    serviceSrc,
+    /const exactTargetAllowed = isExactTargetAllowed\(\{/,
+    "and that rule must be the shared function, not a local re-derivation"
   );
 });
 

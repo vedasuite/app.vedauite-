@@ -79,6 +79,29 @@ export function verifyShopifySessionToken(
       audience: env.shopifyApiKey,
     }) as JwtPayload & { dest?: string; iss?: string };
 
+    // `dest` NAMES THE SHOP, SO IT IS MANDATORY.
+    //
+    // Everything below derives the session's shop from `dest`. Without it,
+    // `tokenShop` is undefined, the shop-mismatch check further down has
+    // nothing to compare, and the session falls back to the shop named in the
+    // query string or body — which is caller-controlled.
+    //
+    // No real Shopify session token omits `dest`, and minting one requires this
+    // app's signing secret, so this was not reachable. But that made tenant
+    // isolation rest on an external invariant rather than on a check of our
+    // own. A token that cannot name its shop is not a token this app can act
+    // on, so it is refused here instead.
+    if (typeof payload.dest !== "string" || payload.dest.length === 0) {
+      return sendAuthError(
+        req,
+        res,
+        401,
+        "INVALID_SHOPIFY_SESSION_TOKEN",
+        "Invalid Shopify session token. Refresh or reconnect the embedded app and retry.",
+        requestedShop
+      );
+    }
+
     // Docs require iss and dest top-level domains to match
     if (typeof payload.iss === "string" && typeof payload.dest === "string") {
       try {

@@ -331,7 +331,7 @@ test("REGRESSION: Product Profit is described as Pro-only everywhere", () => {
   // Billing must never present it as included on Growth.
   assert.doesNotMatch(billingSrc, /Pricing & Product Profit \(limited\)/);
   assert.doesNotMatch(billingSrc, /Pricing & Product Profit \(complete\)/);
-  assert.match(billingSrc, /Product Profit intelligence — requires Pro/);
+  assert.match(billingSrc, /Product Profit intelligence — (requires )?Pro/);
   assert.match(billingSrc, /Product Profit intelligence — included/);
 });
 

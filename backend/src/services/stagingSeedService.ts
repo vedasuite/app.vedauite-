@@ -135,7 +135,7 @@ type GraphQLBody = {
  * Distinguishes three outcomes the shared client collapses into one: success,
  * throttled (retryable, possibly with a Retry-After), and a hard error.
  */
-async function stagingGraphQL<T>(
+export async function stagingGraphQL<T>(
   shop: string,
   query: string,
   variables: Record<string, unknown>

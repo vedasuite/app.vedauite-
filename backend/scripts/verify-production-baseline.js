@@ -205,6 +205,15 @@ const NON_HISTORICAL_MIGRATIONS = [
   "20260804_intelligence_finding_foundation",
   "20260825_profit_input_provenance",
   "20260825_competitor_attempt_status",
+  // Reconciliation Engine V1. Additive: two nullable columns on
+  // VariantSnapshot and four new tables. Applied by migrate deploy like the
+  // rest of this list — never resolved.
+  "20260826_reconciliation_engine",
+  // Reconciliation V1 completion. Additive: persisted reference evidence,
+  // order line items, versioned rate cards, XLSX sheet selection.
+  "20260826_reconciliation_v1_completion",
+  // Per-location Shopify inventory. Additive: one new table.
+  "20260826_inventory_levels",
 ];
 /** Kept for the post-deploy checks that name the original one. */
 const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];

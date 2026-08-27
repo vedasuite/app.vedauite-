@@ -227,12 +227,24 @@ test("SAFETY: the console does not exist unless STAGING_SEED_TOKEN is set", () =
 test("SAFETY: creating data requires a typed confirmation, not just a page load", () => {
   // An accidental visit, a bookmark or a browser prefetch must not seed.
   assert.match(routerSrc, /CONFIRM_PHRASE/);
-  assert.match(routerSrc, /requireConfirm && req\.body\?\.confirm !== CONFIRM_PHRASE/);
-  // The data-creating endpoint demands it...
+  // The phrase is compared, whichever phrase the endpoint requires. Two
+  // consoles now share this guard with DIFFERENT phrases, so one cannot be
+  // triggered by the other's confirmation.
+  assert.match(routerSrc, /requireConfirm && req\.body\?\.confirm !== phrase/);
+  assert.match(routerSrc, /const CONFIRM_PHRASE = "SEED STAGING"/);
+  assert.match(routerSrc, /const PRODUCT_CONFIRM_PHRASE = "CREATE TEST PRODUCTS"/);
+
+  // Every data-creating endpoint demands a confirmation...
   assert.match(routerSrc, /"\/run"[\s\S]{0,400}?resolveAction\(req, res, true\)/);
-  // ...and the read-only one correctly does not, so an operator can always
+  assert.match(
+    routerSrc,
+    /"\/products\/run"[\s\S]{0,400}?resolveAction\(req, res, true, PRODUCT_CONFIRM_PHRASE\)/
+  );
+
+  // ...and the read-only ones correctly do not, so an operator can always
   // check what exists without being able to create anything by accident.
   assert.match(routerSrc, /"\/state"[\s\S]{0,400}?resolveAction\(req, res, false\)/);
+  assert.match(routerSrc, /"\/products\/state"[\s\S]{0,400}?resolveAction\(req, res, false\)/);
 });
 
 test("SAFETY: the seed writes no findings and no VedaSuite database rows", () => {

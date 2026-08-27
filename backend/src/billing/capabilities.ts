@@ -46,6 +46,17 @@ export const CAPABILITIES = [
   "billing.upgrade",
   "billing.downgrade",
   "billing.trialActive",
+  // RECONCILIATION. One capability per CHECK, not one for the feature.
+  //
+  // A single reconciliation.run key could not express the packaging: Growth
+  // gets inventory and supplier, Pro additionally gets the 3PL invoice check
+  // and rate cards. Gating four different checks on one boolean would have
+  // meant either giving Growth the 3PL audit or withholding inventory from
+  // it, and the API could not have enforced the difference at all.
+  "reconciliation.inventory",
+  "reconciliation.supplier",
+  "reconciliation.invoice",
+  "reconciliation.rateCard",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -220,6 +231,10 @@ export function buildCapabilities(
   const reportsModule = isGrowth || isPro;
   // Full Profit Optimization stays Pro-only, trial or not.
   const profitModule = isPro;
+  // Reconciliation. Derived here beside every other module boolean, so there
+  // is exactly one place in the codebase where a plan becomes a capability.
+  const reconciliationStandard = isGrowth || isPro;
+  const reconciliationAdvanced = isPro;
 
   capabilities["reports.view"] = reportsModule;
   capabilities["settings.view"] = true;
@@ -265,6 +280,22 @@ export function buildCapabilities(
   capabilities["pricing.advancedAutomation"] = profitModule;
 
   capabilities["reports.export"] = reportsModule;
+
+  // RECONCILIATION PACKAGING.
+  //
+  // Growth: inventory and supplier shipment. Both compare a merchant's own
+  // file against Shopify and need no contract data.
+  //
+  // Pro: additionally the 3PL invoice check and the rate cards it depends
+  // on. Those two are one capability in practice - a 3PL audit without a
+  // rate card can only ever say "unverified" - so they move together, and
+  // separating them would sell Growth a check that cannot conclude anything.
+  //
+  // Starter gets none of them. Its promise is one focused workspace.
+  capabilities["reconciliation.inventory"] = reconciliationStandard;
+  capabilities["reconciliation.supplier"] = reconciliationStandard;
+  capabilities["reconciliation.invoice"] = reconciliationAdvanced;
+  capabilities["reconciliation.rateCard"] = reconciliationAdvanced;
 
   return capabilities;
 }
@@ -315,6 +346,19 @@ export function resolveEntitlements(input: {
   const enabledModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
     (moduleKey) => moduleAccess[moduleKey]
   );
+  // THE PLAN DECIDES ACCESS, AND IT DECIDES IT ONCE.
+  //
+  // `NONE` unlocks nothing, so any caller that believes access is active while
+  // the plan is NONE holds a contradiction: one surface reads the access flag
+  // and says the merchant's features are active, another reads these
+  // capabilities and offers an Upgrade button. Stating it here means a future
+  // path cannot reintroduce it quietly — `entitlementsContradictAccess` is
+  // asserted by the billing tests and by resolveBillingState's caller.
+  if (input.plan === "NONE" && enabledModules.length > 0) {
+    throw new Error(
+      "Plan NONE unlocked modules: " + enabledModules.join(", ")
+    );
+  }
   const lockedModules = (["fraud", "competitor", "pricing", "profit"] as CanonicalModuleKey[]).filter(
     (moduleKey) => !moduleAccess[moduleKey]
   );

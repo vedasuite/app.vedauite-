@@ -21,9 +21,13 @@ export const env = {
   port: Number(process.env.PORT) || 4000,
   shopifyApiKey: process.env.SHOPIFY_API_KEY || "",
   shopifyApiSecret: process.env.SHOPIFY_API_SECRET || "",
+  // read_inventory and read_locations are OPTIONAL: they unlock per-location
+  // reconciliation. Everything else works without them, and an existing
+  // merchant who has not granted them keeps a fully working app until they
+  // choose to reconnect. See shopifyScopeState.ts.
   shopifyScopes:
     process.env.SHOPIFY_SCOPES ||
-    "read_products,read_orders,write_orders,read_customers",
+    "read_products,read_orders,write_orders,read_customers,read_inventory,read_locations",
   shopifyAppUrl: process.env.SHOPIFY_APP_URL || "",
   shopifyAdminApiVersion:
     process.env.SHOPIFY_ADMIN_API_VERSION || "2026-01",

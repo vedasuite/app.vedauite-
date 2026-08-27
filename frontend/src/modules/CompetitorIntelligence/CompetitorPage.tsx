@@ -9,6 +9,7 @@ import {
   InlineGrid,
   InlineStack,
   Layout,
+  List,
   Modal,
   Page,
   Tabs,
@@ -60,7 +61,18 @@ type CompetitorOverview = {
     freshnessLabel: string;
     lastSuccessfulRunAt?: string | null;
     lastAttemptAt?: string | null;
+    /** Domains that actually yielded evidence on the latest run. */
     checkedDomainsCount: number;
+    attemptedDomainsCount?: number;
+    refreshedDomainsCount?: number;
+    /** Merchant-safe explanations only. No Node error strings are sent. */
+    failedDomains?: Array<{
+      domain: string;
+      status: string | null;
+      message: string;
+      lastAttemptAt?: string | null;
+      lastSuccessAt?: string | null;
+    }>;
     monitoredProductsCount?: number;
     matchedProductsCount: number;
     validMatchedProductsCount?: number;
@@ -535,7 +547,7 @@ export function CompetitorPage() {
     }
     if (primaryState === "CHANGES_DETECTED") {
       setSelectedTab(1);
-      setToast("Competitor changes loaded — scroll down to 'Move feed & signals' tab.");
+      setToast("Market Signals loaded — scroll down to 'Move feed & signals' tab.");
       window.setTimeout(() => {
         tabsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 50);
@@ -557,7 +569,13 @@ export function CompetitorPage() {
     ["Low-confidence matches", overview.competitorState?.lowConfidenceMatchesCount ?? 0],
     ["Active promotions", overview.competitorState?.activePromotionsCount ?? 0],
     ["Stock alerts", overview.competitorState?.stockAlertsCount ?? 0],
-    ["Domains reviewed", overview.competitorState?.checkedDomainsCount ?? 0],
+    // "Domains reviewed: 3" counted domains that were ATTEMPTED, including one
+    // whose certificate had expired. Refreshed and attempted are now shown
+    // together so the number cannot imply evidence that was never collected.
+    [
+      "Domains refreshed",
+      `${overview.competitorState?.refreshedDomainsCount ?? overview.competitorState?.checkedDomainsCount ?? 0} of ${overview.competitorState?.attemptedDomainsCount ?? 0}`,
+    ],
     ["Analysis recency", overview.competitorState?.freshnessLabel ?? "Unknown"],
     ["Coverage status", overview.competitorState?.coverageStatus ?? "Unknown"],
   ];
@@ -569,7 +587,10 @@ export function CompetitorPage() {
       formatDateTime(overview.competitorState?.lastSuccessfulRunAt),
     ],
     ["Last analysis attempt", formatDateTime(overview.competitorState?.lastAttemptAt)],
-    ["Domains reviewed", String(overview.competitorState?.checkedDomainsCount ?? 0)],
+    [
+      "Domains refreshed",
+      `${overview.competitorState?.refreshedDomainsCount ?? overview.competitorState?.checkedDomainsCount ?? 0} of ${overview.competitorState?.attemptedDomainsCount ?? 0}`,
+    ],
     ["Eligible products reviewed", String(overview.competitorState?.monitoredProductsCount ?? overview.productCoverage?.eligibleProductsCount ?? 0)],
     ["Comparable matches", String(overview.competitorState?.validMatchedProductsCount ?? overview.competitorState?.matchedProductsCount ?? 0)],
     ["Low-confidence matches", String(overview.competitorState?.lowConfidenceMatchesCount ?? 0)],
@@ -615,6 +636,35 @@ export function CompetitorPage() {
         ]}
       >
         <Layout>
+          {/*
+            A domain that failed must be VISIBLE, not merely absent from a
+            count. The message comes from the backend, which rebuilds it from
+            the stored status — the raw technical detail ("CERT_HAS_EXPIRED:
+            fetch failed") lives on a column that is never serialised here.
+            The domain is shown exactly as the merchant typed it; VedaSuite
+            does not guess at a correction.
+          */}
+          {(overview.competitorState?.failedDomains ?? []).length > 0 ? (
+            <Layout.Section>
+              <Banner
+                tone="warning"
+                title={`${overview.competitorState?.refreshedDomainsCount ?? 0} of ${overview.competitorState?.attemptedDomainsCount ?? 0} domains refreshed`}
+              >
+                <BlockStack gap="200">
+                  <Text as="p">
+                    The figures on this page do not include fresh data from the
+                    domains below. Anything shown for them comes from earlier
+                    stored data, not from this run.
+                  </Text>
+                  <List type="bullet">
+                    {(overview.competitorState?.failedDomains ?? []).map((entry) => (
+                      <List.Item key={entry.domain}>{entry.message}</List.Item>
+                    ))}
+                  </List>
+                </BlockStack>
+              </Banner>
+            </Layout.Section>
+          ) : null}
           <Layout.Section>
             <ModuleInsights
               modules={["competitor"]}
@@ -842,7 +892,7 @@ export function CompetitorPage() {
                         selectable={false}
                         headings={[
                           { title: "Product" },
-                          { title: "Competitor" },
+                          { title: "Competitor site" },
                           { title: "Price" },
                           { title: "Confidence" },
                           { title: "Promotion" },
@@ -1123,7 +1173,7 @@ export function CompetitorPage() {
         <Modal
           open={modalOpen}
           onClose={() => setModalOpen(false)}
-          title="Competitor tracking domains"
+          title="Market Signals domains"
           primaryAction={{ content: "Save domains", onAction: saveDomains }}
         >
           <Modal.Section>

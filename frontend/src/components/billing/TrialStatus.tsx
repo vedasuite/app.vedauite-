@@ -77,19 +77,35 @@ export function selectedPaidPlan(planName: string | null): string | null {
  * Sentence describing what's unlocked right now, scoped to the selected
  * plan — plan-selected trial model, so only that plan's features are
  * active, not "every module".
+ *
+ * THE FALLBACK BRANCH USED TO LIE. `selectedPaidPlan` returns null exactly
+ * when there is NO real plan — "NONE", "TRIAL", or missing — and the old
+ * fallback answered that case with "Your selected features are active."
+ * There are no selected features in that state and nothing is active: the
+ * entitlements are empty and every module shows Upgrade. Reachable after an
+ * uninstall/reinstall, where the trial window is deliberately preserved while
+ * the Shopify subscription is cancelled.
  */
 export function trialPlanSentence(planName: string | null): string {
   const plan = selectedPaidPlan(planName);
   return plan
     ? `Your ${plan} features are active. You will not be charged until the trial ends.`
-    : `Your selected features are active. You will not be charged until the trial ends.`;
+    : `Choose a plan to activate your features. You will not be charged until the trial ends.`;
 }
 
 /**
  * Detailed card — Onboarding.
- * Renders nothing unless the canonical trial flag is set (i.e. a plan has
- * been approved in Shopify and its trial window is still open). Use
- * `ChoosePlanCard` for the "no plan approved yet" state instead.
+ *
+ * Renders nothing unless the trial window is open AND a real plan is attached.
+ *
+ * The `planName` half is not redundant. This comment used to read
+ * "(i.e. a plan has been approved in Shopify ...)" as though `trialActive`
+ * implied it — but `trialActive` is a DATE-ONLY fact by design, so a window
+ * can stay open after the plan it belonged to is gone. Uninstall does exactly
+ * that: it cancels the subscription and deliberately preserves the trial dates
+ * so a reinstall cannot mint a second trial. Gating on `trialActive` alone put
+ * this card, saying the trial was active, next to a sidebar offering Upgrade on
+ * every module. Use `ChoosePlanCard` for the "no plan approved yet" state.
  */
 export function TrialStatusCard({
   data,
@@ -99,6 +115,8 @@ export function TrialStatusCard({
   onViewBilling: () => void;
 }) {
   if (!data.trialActive) return null;
+  // A trial of nothing is not a trial the merchant can use.
+  if (!selectedPaidPlan(data.planName)) return null;
 
   const formattedDate = formatTrialDate(data.trialEndsAt);
   const remaining = trialRemainingLabel(data.trialEndsAt);
@@ -169,6 +187,10 @@ export function TrialStatusBanner({
   onViewBilling: () => void;
 }) {
   if (!data.trialActive) return null;
+  // Same reason as TrialStatusCard: an open window with no plan attached
+  // unlocks nothing, so announcing "Trial active" here contradicts the
+  // Upgrade buttons the merchant sees in the same viewport.
+  if (!selectedPaidPlan(data.planName)) return null;
 
   const formattedDate = formatTrialDate(data.trialEndsAt);
   const remaining = trialRemainingLabel(data.trialEndsAt);

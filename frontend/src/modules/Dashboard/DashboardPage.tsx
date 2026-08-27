@@ -14,9 +14,11 @@ import {
   Spinner,
   Text,
   Toast,
+  Tooltip,
 } from "@shopify/polaris";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmbeddedNavigation } from "../../hooks/useEmbeddedNavigation";
+import "./dashboard.css";
 import { embeddedShopRequest } from "../../lib/embeddedShopRequest";
 import { readModuleCache, writeModuleCache } from "../../lib/moduleCache";
 import { useAppBridge } from "../../shopifyAppBridge";
@@ -119,6 +121,7 @@ type DashboardState = {
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+    reconciliation: number;
   };
   /**
    * PHASE F. Every tile above is now a projection of the OPEN findings Action
@@ -150,6 +153,56 @@ type DashboardState = {
     unchangedSections: string[];
   };
 };
+
+/**
+ * Strips finding COUNTS from a cache-seeded payload.
+ *
+ * A cached number and a current number look identical on screen, and Store
+ * Overview is the one surface that can be opened minutes after a
+ * reconciliation run created findings on another page — no sync involved, so
+ * nothing invalidated the entry. That is how Store Overview showed one older
+ * finding as the current state while Action Center, which has no cache, showed
+ * the three the latest run produced.
+ *
+ * The cached payload still seeds the page shell so the layout does not flash.
+ * Only the numbers are withheld, and the existing `available: false` path
+ * renders them as "—" until the live fetch lands. Nothing here invents a value.
+ */
+function withheldFindings(payload: DashboardPayload | null): DashboardPayload | null {
+  if (!payload) return null;
+  const state = payload.metrics.dashboardState;
+  if (!state) return payload;
+
+  return {
+    ...payload,
+    metrics: {
+      ...payload.metrics,
+      recentInsights: [],
+      dashboardState: {
+        ...state,
+        kpis: {
+          storeHealth: 0,
+          fraudAlerts: 0,
+          competitorChanges: 0,
+          pricingOpportunities: 0,
+          profitOpportunities: 0,
+          reconciliation: 0,
+        },
+        findings: state.findings
+          ? {
+              ...state.findings,
+              available: false,
+              unavailableReason:
+                "Checking for the latest findings — these counts are not current yet.",
+              totalOpen: 0,
+              bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+            }
+          : state.findings,
+        recentInsights: [],
+      },
+    },
+  };
+}
 
 type Diagnostics = {
   connection: {
@@ -256,6 +309,28 @@ type DashboardRefreshResult = {
   summary: string;
 };
 
+/**
+ * The backend's canonical store verdict.
+ *
+ * Rendered, never re-derived: the moment a surface computes its own version
+ * of this it can contradict every other surface, which is exactly what
+ * happened.
+ */
+type CanonicalHealth = {
+  health:
+    | "HEALTHY"
+    | "ATTENTION_REQUIRED"
+    | "PARTIAL"
+    | "AWAITING_SETUP"
+    | "BLOCKED"
+    | "NOT_READY";
+  headline: string;
+  detail: string[];
+  ran: string[];
+  couldNotRun: string[];
+  awaitingMerchant: string[];
+};
+
 type DashboardVisibleSnapshot = {
   kpis: {
     storeHealth: number;
@@ -263,6 +338,7 @@ type DashboardVisibleSnapshot = {
     competitorChanges: number;
     pricingOpportunities: number;
     profitOpportunities: number;
+    reconciliation: number;
   };
   recentInsightKeys: string[];
   quickAccess: {
@@ -504,6 +580,9 @@ function buildDashboardSnapshot(
       profitOpportunities:
         dashboardState?.kpis.profitOpportunities ??
         payload.metrics.profitOptimizationOpportunities,
+      // No legacy `metrics` fallback: reconciliation postdates that shape, and
+      // inventing a zero here would be a claim rather than a reading.
+      reconciliation: dashboardState?.kpis.reconciliation ?? 0,
     },
     recentInsightKeys:
       (
@@ -573,6 +652,10 @@ function deriveRefreshResult(args: {
 }): DashboardRefreshResult {
   const previousSnapshot = buildDashboardSnapshot(args.previous);
   const nextSnapshot = buildDashboardSnapshot(args.next)!;
+  // The server's verdict, carried on the payload. Never recomputed here.
+  const canonicalHealth =
+    (args.next?.metrics?.dashboardState as { health?: CanonicalHealth } | undefined)
+      ?.health ?? null;
   const kpiChanged =
     !previousSnapshot || !equalJson(previousSnapshot.kpis, nextSnapshot.kpis);
   const recentInsightsChanged =
@@ -630,7 +713,7 @@ function deriveRefreshResult(args: {
   ) {
     metricDiffs.push(
       describeMetric(
-        "Fraud alerts",
+        "Customer Loss",
         previousSnapshot?.kpis.fraudAlerts,
         nextSnapshot.kpis.fraudAlerts
       )
@@ -643,7 +726,7 @@ function deriveRefreshResult(args: {
   ) {
     metricDiffs.push(
       describeMetric(
-        "Competitor changes",
+        "Market Signals",
         previousSnapshot?.kpis.competitorChanges,
         nextSnapshot.kpis.competitorChanges
       )
@@ -672,6 +755,18 @@ function deriveRefreshResult(args: {
         "Profit opportunities",
         previousSnapshot?.kpis.profitOpportunities,
         nextSnapshot.kpis.profitOpportunities
+      )
+    );
+  }
+  if (
+    !previousSnapshot ||
+    previousSnapshot.kpis.reconciliation !== nextSnapshot.kpis.reconciliation
+  ) {
+    metricDiffs.push(
+      describeMetric(
+        "Reconciliation",
+        previousSnapshot?.kpis.reconciliation,
+        nextSnapshot.kpis.reconciliation
       )
     );
   }
@@ -722,10 +817,29 @@ function deriveRefreshResult(args: {
       ? `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Updated ${changedSections
           .filter((section) => section !== "Last refreshed")
           .join(", ")}.${unchangedModuleNames.length > 0 ? ` ${unchangedModuleNames.join(" and ")} remained unchanged.` : ""}`
-      : `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. Everything looks healthy right now.`;
+      // THE CONTRADICTION THIS REMOVES.
+      //
+      // This said "Everything looks healthy right now" whenever no KPI number
+      // had changed since the last refresh — a question about DIFFS, not about
+      // whether the checks ran. A store whose product sync delivered nothing
+      // showed it while Pricing said it had no products and Action Center
+      // correctly reported that three checks could not be evaluated.
+      //
+      // The backend verdict is authoritative. The diff-based wording survives
+      // only for the case where something genuinely changed.
+      : canonicalHealth
+      ? `Analysis completed. ${canonicalHealth.headline}`
+      : `Analysis completed${refreshStatus === "partial" ? " with partial updates" : ""}. No changes were detected.`;
+  // Only offered when the canonical verdict actually IS healthy. Previously
+  // this asserted health from the sync's own no-change reasons, which know
+  // nothing about whether a module could run.
   const noChangeExplanation =
-    !kpiChanged && activitySummary?.noChangeReasons?.length
-      ? `Everything looks healthy because ${activitySummary.noChangeReasons.join(", ")}.`
+    canonicalHealth?.health === "HEALTHY" &&
+    !kpiChanged &&
+    activitySummary?.noChangeReasons?.length
+      ? `Nothing changed because ${activitySummary.noChangeReasons.join(", ")}.`
+      : canonicalHealth && canonicalHealth.detail.length > 0
+      ? canonicalHealth.detail[0]
       : null;
 
   return {
@@ -776,7 +890,7 @@ export function DashboardPage() {
   const { appState } = useAppState();
   const { host, shop } = useAppBridge();
   const cachedDashboard = useMemo(
-    () => readModuleCache<DashboardPayload>("dashboard-overview") ?? null,
+    () => withheldFindings(readModuleCache<DashboardPayload>("dashboard-overview") ?? null),
     []
   );
   const { subscription } = useSubscriptionPlan();
@@ -1089,6 +1203,7 @@ export function DashboardPage() {
               competitorChanges: 0,
               pricingOpportunities: 0,
               profitOpportunities: 0,
+              reconciliation: 0,
             },
             recentInsightKeys: [],
             quickAccess: {
@@ -1141,6 +1256,14 @@ export function DashboardPage() {
   // When findings are not being recorded, the counts are all zero but say
   // nothing about the store. A "0" would be read as "no problems found", which
   // is a claim VedaSuite has not earned, so the tiles show a dash instead.
+  //
+  // The same reasoning applies to a count restored from the session cache: on
+  // screen it is indistinguishable from a current one. A reconciliation run
+  // happens on another page and creates findings without a sync, so the cached
+  // payload could be minutes out of date while Action Center — which has no
+  // cache — showed the new findings. `withheldFindings` marks a cache-seeded
+  // payload unavailable, so the tiles read "—" until the live fetch lands
+  // rather than presenting a stale number as the state of the store.
   const findingsAvailable = dashboardFindings ? dashboardFindings.available : true;
   const kpiValue = (n: number) => (findingsAvailable ? n : "—");
 
@@ -1152,38 +1275,32 @@ export function DashboardPage() {
         note: "Connection and sync issues",
       },
       {
-        title: "Fraud alerts",
-        value: kpiValue(
-          dashboardState?.kpis.fraudAlerts ?? metrics?.fraudAlertsToday ?? 0
-        ),
+        title: "Customer Loss",
+        value: kpiValue(dashboardState?.kpis.fraudAlerts ?? 0),
         note: "Open refund-abuse and risky-order findings",
       },
       {
-        title: "Competitor changes",
-        value: kpiValue(
-          dashboardState?.kpis.competitorChanges ??
-            metrics?.competitorPriceChanges ??
-            0
-        ),
+        title: "Market Signals",
+        value: kpiValue(dashboardState?.kpis.competitorChanges ?? 0),
         note: "Open findings from monitored competitors",
       },
       {
         title: "Pricing opportunities",
-        value: kpiValue(
-          dashboardState?.kpis.pricingOpportunities ??
-            metrics?.aiPricingSuggestions ??
-            0
-        ),
+        value: kpiValue(dashboardState?.kpis.pricingOpportunities ?? 0),
         note: "Open pricing findings to review",
       },
       {
         title: "Profit opportunities",
-        value: kpiValue(
-          dashboardState?.kpis.profitOpportunities ??
-            metrics?.profitOptimizationOpportunities ??
-            0
-        ),
+        value: kpiValue(dashboardState?.kpis.profitOpportunities ?? 0),
         note: "Open product-profit findings",
+      },
+      {
+        // Without this tile a reconciliation finding was counted in the total
+        // but shown on no tile, so the Dashboard read as zero while the
+        // Reconciliation workspace read as one.
+        title: "Reconciliation",
+        value: kpiValue(dashboardState?.kpis.reconciliation ?? 0),
+        note: "Open inventory, invoice and shipment mismatches",
       },
     ],
     [dashboardState, metrics, findingsAvailable]
@@ -1481,7 +1598,7 @@ export function DashboardPage() {
                       <List.Item>
                         {refreshResult.visibleDataChanged
                           ? "New findings are ready."
-                          : "Everything looks healthy right now."}
+                          : refreshResult.summary}
                       </List.Item>
                     </List>
                   </BlockStack>
@@ -1543,7 +1660,15 @@ export function DashboardPage() {
         ) : null}
 
         <Layout.Section>
-          <InlineGrid columns={{ xs: 1, sm: 2, md: 5 }} gap="300">
+          {/*
+            Six tiles, each previously carrying an explanatory sentence: six
+            sentences of chrome above the findings the merchant came for. The
+            number is the fact; the sentence explains what it counts, which is
+            worth reading once, not on every visit. It moves into a tooltip on
+            the label, and a dot marks the tiles that are non-zero so the eye
+            lands on them without reading a digit.
+          */}
+          <InlineGrid columns={{ xs: 2, sm: 3, md: 6 }} gap="300">
             {syncing
               ? metricsCards.map((item) => (
                   <Card key={item.title}>
@@ -1552,23 +1677,30 @@ export function DashboardPage() {
                         {item.title}
                       </Text>
                       <SkeletonDisplayText size="medium" />
-                      <SkeletonBodyText lines={1} />
                     </BlockStack>
                   </Card>
                 ))
               : metricsCards.map((item) => (
                   <Card key={item.title}>
-                    <BlockStack gap="150">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {item.title}
-                      </Text>
-                      <Text as="p" variant="heading2xl">
-                        {item.value}
-                      </Text>
-                      <Text as="p" tone="subdued">
-                        {item.note}
-                      </Text>
-                    </BlockStack>
+                    <div className="vs-kpi">
+                      <BlockStack gap="100">
+                        <Tooltip content={item.note} dismissOnMouseOut>
+                          <span className="vs-kpi__label">{item.title}</span>
+                        </Tooltip>
+                        <InlineStack gap="150" blockAlign="center" wrap={false}>
+                          <Text as="p" variant="heading2xl">
+                            {item.value}
+                          </Text>
+                          {typeof item.value === "number" && item.value > 0 ? (
+                            <span
+                              className="vs-kpi__dot"
+                              aria-label="Needs attention"
+                              role="img"
+                            />
+                          ) : null}
+                        </InlineStack>
+                      </BlockStack>
+                    </div>
                   </Card>
                 ))}
           </InlineGrid>

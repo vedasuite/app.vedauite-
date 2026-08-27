@@ -16,6 +16,11 @@ import {
   resolveOfflineInstallation,
   updateConnectionDiagnostics,
 } from "./shopifyConnectionService";
+import {
+  inventoryCapability,
+  inventorySourceFor,
+} from "./shopifyScopeState";
+import { syncInventoryLevels } from "./shopifyInventoryLevels";
 
 const SHOPIFY_API_VERSION = env.shopifyAdminApiVersion;
 
@@ -149,6 +154,10 @@ async function getStoreAccess(shopDomain: string) {
     accessToken: access.accessToken,
     pricingBias: access.pricingBias,
     profitGuardrail: access.profitGuardrail,
+    // What THIS merchant granted at their last authorization. Distinct from
+    // env.shopifyScopes, which is what the app requests today — the two diverge
+    // for every existing install the moment a scope is added.
+    grantedScopes: access.grantedScopes ?? null,
   };
 }
 
@@ -662,6 +671,18 @@ export async function getSyncWebhookStatus(shopDomain: string, appUrl: string) {
  * counts. A store that exceeds it has more history than VedaSuite analysed, and
  * saying so is the difference between a bound and a lie.
  */
+/**
+ * Keeps an unset SKU as NULL.
+ *
+ * Shopify returns "" for a variant with no SKU. Storing that empty string
+ * would make every SKU-less variant share one key, and reconciliation would
+ * then happily "match" them all to each other.
+ */
+function normalizeSku(value: string | null | undefined): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export const SYNC_PAGE_SIZE = 250;
 export const MAX_ORDER_PAGES = 20;
 export const MAX_PRODUCT_PAGES = 8;
@@ -679,6 +700,10 @@ type ProductNode = {
         id: string;
         title: string;
         price: string;
+        // Product data, NOT protected customer data - no field-level approval
+        // is involved, unlike the `email` field this sync had to drop.
+        sku?: string | null;
+        inventoryQuantity?: number | null;
       };
     }>;
   };
@@ -708,7 +733,47 @@ type OrderNode = {
     // read again by a later change.
   } | null;
   tags: string[];
+  lineItems?: {
+    pageInfo: { hasNextPage: boolean };
+    edges: Array<{
+      node: {
+        id: string;
+        sku?: string | null;
+        title?: string | null;
+        quantity: number;
+        /** Quantity remaining after refunds/removals. */
+        currentQuantity?: number | null;
+        refundableQuantity?: number | null;
+        unfulfilledQuantity?: number | null;
+        variant?: { id: string } | null;
+        product?: { id: string } | null;
+        originalUnitPriceSet?: {
+          shopMoney: { amount: string; currencyCode: string };
+        } | null;
+      };
+    }>;
+  } | null;
 };
+
+/**
+ * Line items fetched per order, inside the order page.
+ *
+ * Nested rather than paged separately, so the order sync's existing pagination
+ * and page ceilings continue to bound the whole operation — there is no second
+ * cursor to get wrong and no extra round trip per order. An order with more
+ * lines than this is reported as truncated, never silently under-counted.
+ */
+export const LINE_ITEM_PAGE_SIZE = 50;
+
+/**
+ * INVENTORY SCOPE — see shopifyScopeState.ts for the verified requirements.
+ *
+ * Store-wide inventoryQuantity needs read_products only. Per-location
+ * InventoryLevel needs read_inventory, and Location identity needs
+ * read_locations or read_inventory. Both of the latter are OPTIONAL: a
+ * merchant who has not granted them keeps a fully working sync.
+ */
+export { type InventorySource } from "./shopifyScopeState";
 
 type ProductPageResponse = {
   shop: { name: string };
@@ -939,12 +1004,26 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 handle
                 title
                 status
+                # inventoryQuantity needs only read_products. VERIFIED against
+                # the 2026-01 ProductVariant reference, which states exactly one
+                # object-level requirement — read_products — and no per-field
+                # requirements at all.
+                #
+                # An earlier pass removed this field believing it needed
+                # read_inventory. It does not, and removing it left inventory
+                # reconciliation with no Shopify side to compare against, which
+                # is the entire point of the feature.
+                #
+                # read_inventory is required for InventoryLevel — PER-LOCATION
+                # quantities — which is fetched separately and is optional.
                 variants(first: 25) {
                   edges {
                     node {
                       id
                       title
                       price
+                      sku
+                      inventoryQuantity
                     }
                   }
                 }
@@ -997,6 +1076,9 @@ export async function syncShopifyStoreData(shopDomain: string) {
   let orderCursor: string | null = null;
   let orderPages = 0;
   let ordersTruncated = false;
+  let lineItemsSaved = 0;
+  /** Orders carrying more than LINE_ITEM_PAGE_SIZE lines. Reported, not hidden. */
+  let lineItemsTruncated = 0;
 
   for (;;) {
     const page: OrderPageResponse = await shopifyGraphQL<OrderPageResponse>(
@@ -1027,6 +1109,37 @@ export async function syncShopifyStoreData(shopDomain: string) {
                 }
                 tags
                 displayFulfillmentStatus
+                # LINE ITEMS. Needed so a 3PL invoice claiming "4 items picked"
+                # can be compared against what the order actually contained —
+                # an order total says nothing about how many things were in it.
+                #
+                # Nested inside the order page, so this adds NO extra round
+                # trips and no separate cursor. 50 covers essentially every
+                # real order; LINE_ITEM_PAGE_SIZE documents the bound, and a
+                # longer order is reported as truncated rather than silently
+                # under-counted.
+                #
+                # Every field here is order data. There is no customer field of
+                # any kind, protected or otherwise.
+                lineItems(first: 50) {
+                  pageInfo { hasNextPage }
+                  edges {
+                    node {
+                      id
+                      sku
+                      title
+                      quantity
+                      currentQuantity
+                      refundableQuantity
+                      unfulfilledQuantity
+                      variant { id }
+                      product { id }
+                      originalUnitPriceSet {
+                        shopMoney { amount currencyCode }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -1058,6 +1171,37 @@ export async function syncShopifyStoreData(shopDomain: string) {
   });
 
   const data = { shop: { name: shopName } };
+  // A SYNC IS NOT ONE BOOLEAN.
+  //
+  // Orders persist BEFORE products in this function. A throw inside the
+  // product loop therefore left 75 committed orders and zero products, and
+  // every downstream reader saw a store with data. Nothing recorded that one
+  // resource had failed while another succeeded, so Pricing could only report
+  // "no products synced" without knowing whether that meant an empty
+  // catalogue or a broken sync.
+  //
+  // Each resource now carries its own outcome, and success in one can never
+  // stand for success in another.
+  const resourceStatus: Record<
+    string,
+    {
+      status: string;
+      count: number;
+      errorClass?: string | null;
+      safeMessage?: string | null;
+      /** How many Shopify returned, so fetched-vs-stored is always comparable. */
+      fetched?: number;
+      skipped?: number;
+      skippedReasons?: Record<string, number>;
+    }
+  > = {
+    products: { status: "NOT_ATTEMPTED", count: 0 },
+    orders: { status: "NOT_ATTEMPTED", count: 0 },
+    customers: { status: "NOT_ATTEMPTED", count: 0 },
+    lineItems: { status: "NOT_ATTEMPTED", count: 0 },
+    inventoryLevels: { status: "NOT_ATTEMPTED", count: 0 },
+  };
+
   const syncCounts = {
     fetched: {
       products: products.length,
@@ -1088,6 +1232,15 @@ export async function syncShopifyStoreData(shopDomain: string) {
     skipped: {
       products: 0,
       variants: 0,
+      /** Products stored, but with no pricing baseline because price is 0. */
+      priceBaselines: 0,
+    },
+    // WHY something was skipped, not just how many. A single `skipped` count
+    // that no surface read is how three fetched products became "your
+    // catalogue is empty".
+    skippedReasons: {
+      noHandle: 0,
+      noVariants: 0,
     },
   };
 
@@ -1196,6 +1349,73 @@ export async function syncShopifyStoreData(shopDomain: string) {
     } else {
       syncCounts.saved.ordersCreated += 1;
     }
+
+    // --- LINE ITEMS ------------------------------------------------------
+    //
+    // UPSERT on [storeId, shopifyLineItemId], so a repeat sync updates the
+    // same rows rather than accumulating duplicates - the same discipline the
+    // order write above already follows.
+    //
+    // REFUND SEMANTICS ARE PRESERVED, NOT REINTERPRETED. Order.refunded stays
+    // exactly as it was; these columns add the per-line detail an order-level
+    // boolean cannot express, which is what makes a partial refund visible to
+    // reconciliation. Nothing here feeds Customer Loss.
+    const savedOrder =
+      existingOrder ??
+      (await prisma.order.findFirst({
+        where: { storeId: store.id, shopifyOrderGid: orderNode.id },
+        select: { id: true },
+      }));
+
+    if (savedOrder && orderNode.lineItems) {
+      if (orderNode.lineItems.pageInfo?.hasNextPage) {
+        lineItemsTruncated += 1;
+      }
+      for (const edge of orderNode.lineItems.edges) {
+        const line = edge.node;
+        const unitPrice = line.originalUnitPriceSet?.shopMoney;
+        const data = {
+          orderId: savedOrder.id,
+          storeId: store.id,
+          shopifyLineItemId: line.id,
+          shopifyVariantId: line.variant?.id ?? null,
+          shopifyProductId: line.product?.id ?? null,
+          sku: normalizeSku(line.sku),
+          title: line.title ?? null,
+          quantity: shopifyInt(line.quantity),
+          currentQuantity:
+            typeof line.currentQuantity === "number" ? line.currentQuantity : null,
+          // Shopify reports what remains refundable and what remains
+          // unfulfilled. The refunded and fulfilled counts are DERIVED from
+          // the original quantity, and only when the source figure exists -
+          // a missing figure stays NULL rather than becoming zero.
+          refundedQuantity:
+            typeof line.refundableQuantity === "number"
+              ? Math.max(0, shopifyInt(line.quantity) - line.refundableQuantity)
+              : null,
+          fulfilledQuantity:
+            typeof line.unfulfilledQuantity === "number"
+              ? Math.max(0, shopifyInt(line.quantity) - line.unfulfilledQuantity)
+              : null,
+          fulfillableQuantity:
+            typeof line.unfulfilledQuantity === "number" ? line.unfulfilledQuantity : null,
+          price: unitPrice ? shopifyFloat(unitPrice.amount) : null,
+          currency: unitPrice?.currencyCode ?? null,
+          syncedAt: new Date(),
+        };
+        await prisma.orderLineItem.upsert({
+          where: {
+            storeId_shopifyLineItemId: {
+              storeId: store.id,
+              shopifyLineItemId: line.id,
+            },
+          },
+          create: data,
+          update: data,
+        });
+        lineItemsSaved += 1;
+      }
+    }
   }
 
   const customers = await prisma.customer.findMany({
@@ -1241,12 +1461,44 @@ export async function syncShopifyStoreData(shopDomain: string) {
     });
   }
 
+  // What THIS merchant granted, not what the app requests. The two diverge for
+  // every existing install the moment a scope is added.
+  const inventoryAccess = inventoryCapability(store.grantedScopes);
+
+  // Products fetched successfully; persistence is what follows.
+  resourceStatus.products.status = "FETCHED";
+  resourceStatus.products.count = products.length;
+  try {
   for (const product of products) {
     const variants = product.variants.edges.map((edge) => edge.node);
     const firstVariant = variants[0];
     const currentPrice = shopifyFloat(firstVariant?.price ?? 0);
-    if (!product.handle || variants.length === 0 || !currentPrice) {
+
+    // A PRODUCT IS NOT DISCARDED FOR HAVING NO PRICE.
+    //
+    // This guard used to include `!currentPrice`, so any product priced 0.00 —
+    // a free item, a sample, a gift, or a hand-made test product whose price
+    // field was simply left alone — was dropped before it was ever stored. It
+    // was counted only in an internal `skipped` tally that no surface read, so
+    // Shopify returned products, VedaSuite persisted none, and Pricing said
+    // "No products synced yet" while Reconciliation had no Shopify side to
+    // compare a warehouse file against.
+    //
+    // Price is a fact ABOUT a product, not what makes it a product. Identity is
+    // the handle and its variants; SKU and inventory live on the variants and
+    // have nothing to do with price. The pricing baseline further down is the
+    // only thing that genuinely needs a non-zero price — it divides by it — so
+    // that is where the price condition now lives.
+    if (!product.handle) {
       syncCounts.skipped.products += 1;
+      syncCounts.skippedReasons.noHandle += 1;
+      continue;
+    }
+    if (variants.length === 0) {
+      // No variant means no SKU and no inventory, so there is nothing any
+      // module could match on. Recorded distinctly rather than as one number.
+      syncCounts.skipped.products += 1;
+      syncCounts.skippedReasons.noVariants += 1;
       continue;
     }
 
@@ -1324,11 +1576,34 @@ export async function syncShopifyStoreData(shopDomain: string) {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+          // An empty SKU stays NULL rather than becoming "", so an unset SKU
+          // is unmatchable instead of matching every other unset SKU.
+          sku: normalizeSku(variant.sku),
+          // The real figure, with WHY beside it. A null here means Shopify did
+          // not report a tracked quantity for this variant - never zero, and
+          // never a permissions problem, which inventorySource distinguishes.
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number"
+              ? variant.inventoryQuantity
+              : null,
+          inventorySource: inventorySourceFor({
+            capability: inventoryAccess,
+            reported: variant.inventoryQuantity,
+          }),
         },
         update: {
           title: variant.title,
           price: shopifyFloat(variant.price),
           currency: orders[0]?.currentTotalPriceSet.shopMoney.currencyCode ?? null,
+          sku: normalizeSku(variant.sku),
+          inventoryQuantity:
+            typeof variant.inventoryQuantity === "number"
+              ? variant.inventoryQuantity
+              : null,
+          inventorySource: inventorySourceFor({
+            capability: inventoryAccess,
+            reported: variant.inventoryQuantity,
+          }),
         },
       });
 
@@ -1337,6 +1612,18 @@ export async function syncShopifyStoreData(shopDomain: string) {
       } else {
         syncCounts.saved.variantsCreated += 1;
       }
+    }
+
+    // THE PRICING BASELINE IS THE ONLY PART THAT NEEDS A PRICE.
+    //
+    // `expectedMarginDelta` divides by `currentPrice`, so a zero price yields
+    // NaN and Prisma rejects it — which is why the old guard sat at the top of
+    // the loop and threw the whole product away. Skipping only the baseline
+    // keeps the product, its variants, its SKU and its inventory, and simply
+    // declines to state a pricing recommendation it cannot compute.
+    if (currentPrice <= 0) {
+      syncCounts.skipped.priceBaselines += 1;
+      continue;
     }
 
     const recommendedPrice = computeRecommendedPrice(currentPrice, store.pricingBias);
@@ -1393,6 +1680,72 @@ export async function syncShopifyStoreData(shopDomain: string) {
       syncCounts.saved.priceRowsCreated += 1;
     }
   }
+    const productsSaved =
+      syncCounts.saved.productsCreated + syncCounts.saved.productsUpdated;
+
+    // FETCHING IS NOT SAVING.
+    //
+    // "SUCCESS" here used to mean only "the loop did not throw". A sync that
+    // pulled three products from Shopify and stored none of them reported
+    // SUCCESS with count 0, and the diagnostics endpoint read that as proof the
+    // merchant's catalogue was empty. It was not empty — every product had been
+    // discarded — and the tester was told the opposite of what happened.
+    //
+    // These are now three different outcomes, and none of them can stand in for
+    // another.
+    if (products.length === 0) {
+      resourceStatus.products.status = "SUCCESS_EMPTY";
+    } else if (productsSaved === 0) {
+      resourceStatus.products.status = "FETCHED_NONE_PERSISTED";
+      resourceStatus.products.safeMessage =
+        `Shopify returned ${products.length} products and VedaSuite stored none of them.`;
+    } else if (productsSaved < products.length) {
+      resourceStatus.products.status = "SUCCESS_PARTIAL";
+      resourceStatus.products.safeMessage =
+        `Shopify returned ${products.length} products and VedaSuite stored ${productsSaved}.`;
+    } else {
+      resourceStatus.products.status = "SUCCESS";
+    }
+    resourceStatus.products.count = productsSaved;
+    resourceStatus.products.fetched = products.length;
+    resourceStatus.products.skipped = syncCounts.skipped.products;
+    resourceStatus.products.skippedReasons = { ...syncCounts.skippedReasons };
+  } catch (error) {
+    // PRODUCTS FAILED, ORDERS DID NOT.
+    //
+    // Orders are already committed at this point. Rethrowing would discard a
+    // successful order sync; swallowing silently would leave the store looking
+    // like it simply has no products. Neither is acceptable, so the failure is
+    // RECORDED against the product resource and the sync continues.
+    resourceStatus.products.status = "FAILED";
+    resourceStatus.products.errorClass =
+      error instanceof Error ? error.name : "UnknownError";
+    // Merchant-safe. The full error goes to the log, never to a client.
+    resourceStatus.products.safeMessage =
+      "Shopify product data could not be saved during the last sync.";
+    logEvent("error", "shopify.sync.products_failed", {
+      shop: normalizedShop,
+      productsFetched: products.length,
+      productsSavedBeforeFailure:
+        syncCounts.saved.productsCreated + syncCounts.saved.productsUpdated,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Orders and customers completed before the product loop began.
+  resourceStatus.orders.status = orders.length > 0 ? "SUCCESS" : "SUCCESS_EMPTY";
+  resourceStatus.orders.count =
+    syncCounts.saved.ordersCreated + syncCounts.saved.ordersUpdated;
+  resourceStatus.customers.status =
+    syncCounts.fetched.customers > 0 ? "SUCCESS" : "SUCCESS_EMPTY";
+  resourceStatus.customers.count =
+    syncCounts.saved.customersCreated + syncCounts.saved.customersUpdated;
+  resourceStatus.lineItems.status = lineItemsTruncated > 0
+    ? "PARTIAL"
+    : lineItemsSaved > 0
+    ? "SUCCESS"
+    : "SUCCESS_EMPTY";
+  resourceStatus.lineItems.count = lineItemsSaved;
 
   const savedTotal =
     syncCounts.saved.productsCreated +
@@ -1418,12 +1771,44 @@ export async function syncShopifyStoreData(shopDomain: string) {
     );
   }
 
-  const status =
-    syncCounts.fetched.products === 0 &&
-    syncCounts.fetched.orders === 0 &&
-    syncCounts.fetched.customers === 0
-      ? "SUCCEEDED_NO_DATA"
-      : "SUCCEEDED";
+  // A failed resource is never reported as an unqualified success. This is
+  // the line that stopped a broken product sync looking like a clean one.
+  const anyResourceFailed = Object.entries(resourceStatus).some(
+    ([key, value]) => value.status === "FAILED" && key !== "inventoryLevels"
+  );
+  const status = anyResourceFailed
+    ? "SUCCEEDED_PARTIAL"
+    : syncCounts.fetched.products === 0 &&
+      syncCounts.fetched.orders === 0 &&
+      syncCounts.fetched.customers === 0
+    ? "SUCCEEDED_NO_DATA"
+    : "SUCCEEDED";
+
+  // PER-LOCATION STOCK, LAST AND OPTIONAL.
+  //
+  // Deliberately after everything above has committed, and deliberately unable
+  // to throw: it needs a scope this app only recently began requesting, and no
+  // existing merchant has granted it. A permission failure here must leave the
+  // sync exactly as successful as it already was.
+  const inventoryLevels = await syncInventoryLevels({
+    shopDomain: normalizedShop,
+    storeId: store.id,
+    grantedScopes: store.grantedScopes,
+  });
+
+  resourceStatus.inventoryLevels.status = !inventoryLevels.attempted
+    ? "PERMISSION_LIMITED"
+    : inventoryLevels.succeeded
+    ? "SUCCESS"
+    : "FAILED";
+  resourceStatus.inventoryLevels.count = inventoryLevels.levels;
+  resourceStatus.inventoryLevels.safeMessage = inventoryLevels.reason;
+
+  // THE OVERALL VERDICT IS AN AGGREGATE, not a single boolean. A resource
+  // that failed makes the job PARTIAL even when every other one succeeded.
+  const resourceFailed = Object.entries(resourceStatus).filter(
+    ([key, value]) => value.status === "FAILED" && key !== "inventoryLevels"
+  );
 
   logEvent("info", "shopify.sync.completed", {
     shop: normalizedShop,
@@ -1431,6 +1816,15 @@ export async function syncShopifyStoreData(shopDomain: string) {
     finishedAt: new Date().toISOString(),
     status,
     counts: syncCounts,
+    resourceStatus,
+    lineItemsSaved,
+    lineItemsTruncated,
+    inventoryLevels: {
+      attempted: inventoryLevels.attempted,
+      succeeded: inventoryLevels.succeeded,
+      locations: inventoryLevels.locations,
+      levels: inventoryLevels.levels,
+    },
   });
 
   return {
@@ -1441,6 +1835,13 @@ export async function syncShopifyStoreData(shopDomain: string) {
     ordersSynced: orders.length,
     customersSynced: orders.filter((order) => order.customer?.legacyResourceId).length,
     counts: syncCounts,
+    // Per-resource outcomes, so a caller never has to infer which part of
+    // the sync worked from the presence or absence of rows.
+    resourceStatus,
+    resourcesFailed: resourceFailed.map(([key]) => key),
+    lineItemsSaved,
+    lineItemsTruncated,
+    inventoryLevels,
   };
 }
 

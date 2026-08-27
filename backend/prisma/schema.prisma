@@ -59,6 +59,10 @@ model Store {
   syncJobs             SyncJob[]
   supportTickets       SupportTicket[]
   intelligenceFindings IntelligenceFinding[]
+  reconciliationRuns   ReconciliationRun[]
+  reconciliationSources ReconciliationSource[]
+  inventoryLevels      InventoryLevelSnapshot[]
+  rateCards            RateCard[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -120,6 +124,23 @@ model VariantSnapshot {
   title             String
   price             Float
   currency          String?
+  /// Merchant-assigned stock keeping unit. NULL when the merchant has not set
+  /// one in Shopify - which is common, and is why reconciliation treats a
+  /// missing SKU as unmatchable rather than guessing at a title match.
+  sku               String?
+  /// Shopify inventory on hand at sync time. NULL means Shopify did not report
+  /// a tracked quantity, NOT zero. The distinction matters: a null must never
+  /// be reconciled against a warehouse count as though Shopify had said 0.
+  inventoryQuantity Int?
+  /// Why inventoryQuantity is what it is: "ok" | "scope_missing" |
+  /// "not_tracked" | "unavailable".
+  ///
+  /// inventoryQuantity itself needs only read_products (verified against the
+  /// 2026-01 ProductVariant reference). This column exists because a NULL
+  /// quantity is ambiguous on its own: "the merchant does not track this
+  /// variant" and "we were not permitted to look" are different facts, and
+  /// neither of them is zero.
+  inventorySource   String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
@@ -247,6 +268,7 @@ model Order {
 
   fraudSignals   FraudSignal[]
   timelineEvents TimelineEvent[]
+  lineItems      OrderLineItem[]
 
   @@index([shopifyOrderGid])
   @@index([storeId, shopifyLegacyOrderId])
@@ -499,4 +521,402 @@ model IntelligenceFinding {
   @@unique([storeId, fingerprint])
   @@index([storeId, status, lastSeenAt])
   @@index([storeId, module, status])
+}
+
+// ============================================================================
+// RECONCILIATION
+//
+// ONE engine, three check types. The tables below are deliberately generic:
+// nothing here names inventory, 3PL or suppliers, because a fourth check type
+// must not need a fifth table.
+//
+// Everything is store-scoped and cascades from Store, matching the isolation
+// and deletion behaviour every other model in this schema already has.
+// ============================================================================
+
+/// One uploaded operational file, plus the mapping the merchant confirmed for
+/// it. Rows are held on the source rather than the run so the same upload can
+/// be reconciled again without re-uploading.
+model ReconciliationSource {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// "inventory" | "3pl_invoice" | "supplier_shipment". A plain string with an
+  /// application-level whitelist, matching the SyncJob.status convention.
+  checkType String
+
+  /// Sanitized display name. Path separators and control characters are
+  /// stripped before this is written; the original is never stored, and no
+  /// filesystem path is recorded anywhere because the file itself is not kept.
+  fileName String
+  /// "csv" | "xlsx".
+  fileFormat String
+  fileSizeBytes Int
+
+  /// Lifecycle: uploaded | validating | needs_mapping | ready | reconciling |
+  /// completed | failed. A partially processed upload is never "completed".
+  status String @default("uploaded")
+  /// Merchant-facing explanation when status is failed or needs_mapping.
+  statusReason String?
+
+  /// For XLSX: every worksheet found, and which one was actually read.
+  /// A workbook with more than one sheet must never have the others silently
+  /// ignored — the merchant is shown the list and picks.
+  availableSheetsJson String?
+  sheetName           String?
+
+  /// Headers exactly as they appeared in the file.
+  headersJson String?
+  /// Confirmed column mapping: { sku: "Item SKU", quantity: "Available" }.
+  /// Written only after the merchant confirms; a low-confidence guess is
+  /// offered as a suggestion and never persisted as a decision.
+  mappingJson String?
+
+  /// Counts from validation. Reported before a run may be committed.
+  totalRows     Int @default(0)
+  validRows     Int @default(0)
+  invalidRows   Int @default(0)
+  duplicateRows Int @default(0)
+
+  uploadedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  records ReconciliationRecord[]
+  runs    ReconciliationRun[]
+
+  @@index([storeId, checkType, uploadedAt])
+  @@index([storeId, status])
+}
+
+/// One normalized row from an uploaded file.
+///
+/// Deliberately narrow. Reconciliation works on identifiers, quantities and
+/// amounts; it does not need customer identity, so no name, email, address or
+/// phone column exists here to put one in.
+model ReconciliationRecord {
+  id       String               @id @default(cuid())
+  source   ReconciliationSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId String
+  /// Denormalized for query isolation: every read filters on storeId directly
+  /// rather than trusting a join to enforce ownership.
+  storeId  String
+
+  /// 1-based line number in the merchant's own file, so evidence can point at
+  /// the row they can actually go and look at.
+  rowNumber Int
+
+  sku        String?
+  orderRef   String?
+  tracking   String?
+  location   String?
+  quantity   Float?
+  amount     Float?
+  currency   String?
+  /// Timestamp carried by the file itself, when it has one. NULL means the
+  /// file did not say, which is why staleness is only ever reported for files
+  /// that actually carry a date.
+  observedAt DateTime?
+
+  /// MERCHANT-SUPPLIED REFERENCE VALUES.
+  ///
+  /// These previously existed only in a process-lifetime cache, so a restart
+  /// silently downgraded every historical run: the checks that need them
+  /// stopped running while the run still displayed as complete. They are
+  /// columns now, and a run is reproducible from the database alone.
+  ///
+  /// Every one comes from a column the MERCHANT mapped. None is derived,
+  /// defaulted or inferred — see valueSource.
+  expectedAmount   Float?
+  expectedQuantity Float?
+  receivedQuantity Float?
+  unitCost         Float?
+  /// Charge type as the merchant wrote it, for rate-card matching.
+  chargeType       String?
+
+  /// Provenance for the values above. "merchant_file" is the only value any
+  /// code writes: an assumed number must never become authoritative simply by
+  /// being stored in the same column as an observed one.
+  valueSource String @default("merchant_file")
+
+  /// Row number this row repeats, when an earlier row shared its identity.
+  duplicateOfRow Int?
+
+  /// Why a row was rejected during validation. NULL for accepted rows.
+  invalidReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, sourceId])
+  @@index([sourceId, sku])
+  @@index([sourceId, orderRef])
+}
+
+/// One execution of one check type against one source.
+model ReconciliationRun {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  source   ReconciliationSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceId String?
+
+  /// The rate card VERSION this run was reconciled against.
+  ///
+  /// Pinned, not looked up. A merchant who updates their rate card must not
+  /// change what an earlier run found — the old run was correct about the rates
+  /// that were agreed at the time, and rewriting it would destroy the evidence.
+  rateCard        RateCard? @relation(fields: [rateCardId], references: [id], onDelete: SetNull)
+  rateCardId      String?
+  /// Denormalized so the version and name survive even if the card is deleted.
+  rateCardVersion Int?
+  rateCardName    String?
+
+  checkType String
+
+  /// queued | running | completed | completed_with_warnings | failed.
+  /// completed_with_warnings exists so a run that could only partially match is
+  /// never displayed as a clean success.
+  status String @default("queued")
+  /// Merchant-facing reason for a failure or a partial result.
+  statusReason String?
+
+  matchedCount      Int @default(0)
+  probableCount     Int @default(0)
+  unmatchedCount    Int @default(0)
+  discrepancyCount  Int @default(0)
+  /// Discrepancies VedaSuite could size in money. Never inferred from the
+  /// total: a run can find 12 discrepancies and quantify none of them.
+  quantifiedCount   Int @default(0)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  discrepancies ReconciliationDiscrepancy[]
+
+  @@index([storeId, checkType, startedAt])
+  @@index([storeId, status])
+}
+
+/// One detected difference, with the evidence that supports it.
+model ReconciliationDiscrepancy {
+  id      String            @id @default(cuid())
+  run     ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId   String
+  storeId String
+
+  /// Detector key within the check type, e.g. "quantity_mismatch".
+  kind String
+
+  /// confirmed | possible | insufficient_data.
+  ///
+  /// SEPARATE from matchConfidence on purpose. A real quantity difference found
+  /// across a merely PROBABLE match is a possible discrepancy, not a confirmed
+  /// one, and the two must never be collapsed into a single number.
+  certainty String
+
+  /// exact | probable | unmatched.
+  matchConfidence String
+
+  /// SKU, order reference or shipment line this concerns. Used in the finding
+  /// fingerprint, so it must be stable across runs.
+  subjectKey String
+
+  shopifyValue  String?
+  externalValue String?
+  /// The AGREED leg of a three-way comparison: what the rate card said.
+  /// NULL for two-way checks, and for any charge with no mapped rate — which
+  /// is exactly the case where no overcharge may be claimed.
+  expectedValue String?
+  difference    Float?
+
+  /// Charge type this concerns, as the merchant named it in their own file.
+  chargeType String?
+  /// The rate-card version that supplied expectedValue, copied at run time so
+  /// the evidence survives a later rate-card update.
+  rateCardVersion Int?
+
+  /// Money, ONLY where a defensible input existed. NULL means not quantified,
+  /// which is displayed as "impact not quantified" rather than as zero.
+  impactAmount   Float?
+  impactCurrency String?
+  /// How impactAmount was derived. Required whenever impactAmount is set.
+  impactBasis    String?
+
+  /// [{label, value}] pairs, including the merchant's own file row number.
+  evidenceJson String?
+
+  /// The IntelligenceFinding this contributed to, for traceability from a
+  /// finding back to the exact source row. Pointer only, not a foreign key,
+  /// matching IntelligenceFinding.sourceInsightId's convention.
+  findingFingerprint String?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, runId])
+  @@index([runId, kind])
+  @@index([storeId, subjectKey])
+}
+
+/// One line of a Shopify order.
+///
+/// WHY THIS EXISTS. Without line items, a 3PL invoice claiming "4 items picked"
+/// could only be compared against an order total — which says nothing about how
+/// many things were in it. Per-item reconciliation was impossible.
+///
+/// DELIBERATELY NARROW. Identifiers, quantities and amounts. There is no
+/// customer name, email, address or phone here, and none is requested from
+/// Shopify: reconciliation compares what was shipped and billed, not who
+/// bought it.
+model OrderLineItem {
+  id      String @id @default(cuid())
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  /// Denormalized so every read filters on the store directly.
+  storeId String
+
+  shopifyLineItemId String
+  /// Variant and product references, when Shopify supplies them. A line for a
+  /// deleted product legitimately has neither.
+  shopifyVariantId  String?
+  shopifyProductId  String?
+  sku               String?
+  title             String?
+
+  /// Quantity ORIGINALLY ordered.
+  quantity          Int
+  /// Quantity still on the order after refunds/removals. Shopify's
+  /// currentQuantity. NULL when the API did not report one.
+  currentQuantity   Int?
+  /// Quantity Shopify considers still fulfillable.
+  fulfillableQuantity Int?
+  /// Quantity actually refunded. Distinct from the order-level `refunded` flag,
+  /// which cannot express a partial refund of one line.
+  refundedQuantity  Int?
+  /// Quantity Shopify reports as fulfilled.
+  fulfilledQuantity Int?
+
+  price    Float?
+  currency String?
+
+  syncedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Repeat syncs UPDATE rather than duplicate.
+  @@unique([storeId, shopifyLineItemId])
+  @@index([storeId, sku])
+  @@index([orderId])
+}
+
+/// A merchant's agreed 3PL pricing, as a VERSIONED snapshot.
+///
+/// Never edited in place. Uploading new pricing creates a new version and the
+/// previous one is retained, because runs point at the version they used.
+model RateCard {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// Merchant-facing label, e.g. "ShipBob 2026". Versions share a name.
+  name    String
+  /// Monotonic per (store, name). Version 1 is the first upload.
+  version Int
+
+  /// "active" | "superseded". Exactly one active version per name; superseding
+  /// marks the old one rather than deleting it, so old runs stay explainable.
+  status String @default("active")
+
+  /// The upload this version came from, for traceability back to the file.
+  sourceFileName String?
+  currency       String?
+
+  /// Free-text note the merchant can attach, e.g. "post-renegotiation".
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries RateCardEntry[]
+  runs    ReconciliationRun[]
+
+  @@unique([storeId, name, version])
+  @@index([storeId, status])
+}
+
+/// One agreed charge within a rate card version.
+///
+/// GENERIC BY DESIGN. `chargeType` is whatever the merchant called it — pick
+/// fee, additional item, storage, receiving, return handling, or something this
+/// codebase has never heard of. Nothing here enumerates a fixed set of fees,
+/// because a 3PL contract can contain any charge the two parties agreed on.
+model RateCardEntry {
+  id         String   @id @default(cuid())
+  rateCard   RateCard @relation(fields: [rateCardId], references: [id], onDelete: Cascade)
+  rateCardId String
+  storeId    String
+
+  /// Canonical key used for matching, lowercased and whitespace-normalized.
+  chargeKey String
+  /// Exactly as the merchant wrote it, for display.
+  chargeType String
+  /// Extra spellings the merchant declared for this charge, JSON array of
+  /// canonical keys. Merchant-defined; VedaSuite never invents one.
+  aliasesJson String?
+
+  /// What the rate is charged per: "order" | "item" | "shipment" | "month" |
+  /// "kg" | anything the merchant wrote. Free text on purpose.
+  unit String?
+
+  rate     Float
+  currency String?
+
+  /// Optional band, when a contract prices differently above a threshold.
+  minQuantity Float?
+  maxQuantity Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, rateCardId])
+  @@index([rateCardId, chargeKey])
+}
+
+/// Per-location Shopify stock for one variant.
+///
+/// OPTIONAL DATA. Reading it needs the read_inventory scope; a merchant who has
+/// not granted that simply has no rows here, and store-wide reconciliation
+/// continues to work. Absence means "not permitted or not synced" and is never
+/// interpreted as zero — ReconciliationRun records which it was.
+model InventoryLevelSnapshot {
+  id      String @id @default(cuid())
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId String
+
+  /// Shopify location GID and its name at sync time.
+  shopifyLocationId String
+  locationName      String?
+
+  /// The variant this level belongs to, by Shopify id and by SKU. SKU is
+  /// denormalized because reconciliation matches on it and a join per row
+  /// would be wasteful.
+  shopifyVariantId String?
+  shopifyInventoryItemId String?
+  sku              String?
+
+  /// Available quantity at this location. NULL means Shopify reported none,
+  /// which is not zero.
+  available Int?
+
+  syncedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Repeat syncs UPDATE rather than duplicate.
+  @@unique([storeId, shopifyLocationId, shopifyInventoryItemId])
+  @@index([storeId, sku])
+  @@index([storeId, shopifyLocationId])
 }

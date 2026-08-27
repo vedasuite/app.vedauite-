@@ -1,4 +1,5 @@
 import { HttpError } from "../lib/httpError";
+import { readTargetProvenance } from "./pricingEvidenceCalc";
 import { prisma } from "../db/prismaClient";
 
 function parseRationaleJson(value?: string | null) {
@@ -51,6 +52,10 @@ export async function getPricingRecommendations(shopDomain: string) {
       typeof rationale.competitorPressure === "string"
         ? rationale.competitorPressure
         : "not_available";
+    // Carried through so every consumer can apply the SAME target-eligibility
+    // rule. A row written before provenance existed yields null, which
+    // withholds the exact target rather than assuming it was sound.
+    const targetProvenance = readTargetProvenance(row.rationaleJson);
     const automationPosture = deriveAutomationPosture(
       row.expectedProfitGain ?? 0,
       row.expectedMarginDelta
@@ -69,6 +74,7 @@ export async function getPricingRecommendations(shopDomain: string) {
       demandSignals,
       evidenceSignals,
       competitorPressure,
+      targetProvenance,
       automationPosture,
       approvalConfidence: Math.max(
         38,

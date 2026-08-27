@@ -294,13 +294,42 @@ export function buildDeterministicBrief(
   // through to the "N findings to review" branch and reported "0 findings to
   // review" instead of saying everything was clear.
   if (open.length === 0) {
+    // NO FINDINGS != CHECKS RAN.
+    //
+    // This said "All checks ran with the data available" whenever no card
+    // carried an incomplete-data flag — which is a property of the findings
+    // that EXIST, not of the checks that did or did not run. A store with
+    // zero products produced no pricing findings at all, so there was no
+    // card to flag, and the brief cheerfully reported that everything had
+    // run. The canonical module health answers the actual question.
+    const health = summary.moduleHealth;
+    const couldNotRun = health?.couldNotRun ?? [];
+
+    if (health && couldNotRun.length > 0) {
+      return {
+        headline:
+          health.health === "BLOCKED"
+            ? "Some checks could not run"
+            : "No findings from the checks that ran",
+        bullets: [
+          health.headline,
+          ...health.detail.slice(0, 2),
+        ],
+        referencedFindingIds: [],
+        generatedBy: "deterministic",
+        generatedAt,
+      };
+    }
+
     return {
       headline: "Nothing needs your attention right now",
       bullets: [
         "VedaSuite found no open findings for this store.",
         summary.incompleteDataCount > 0
           ? "Some checks are limited by missing inputs — see Store health."
-          : "All checks ran with the data available.",
+          : health
+          ? health.headline
+          : "No open findings were produced by the checks that ran.",
       ],
       referencedFindingIds: [],
       generatedBy: "deterministic",

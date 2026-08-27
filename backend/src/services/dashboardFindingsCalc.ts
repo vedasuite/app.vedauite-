@@ -50,7 +50,8 @@ export type DashboardKpiKey =
   | "fraudAlerts"
   | "competitorChanges"
   | "pricingOpportunities"
-  | "profitOpportunities";
+  | "profitOpportunities"
+  | "reconciliation";
 
 /**
  * Module -> tile mapping.
@@ -67,7 +68,30 @@ export const KPI_MODULES: Record<DashboardKpiKey, readonly string[]> = {
   competitorChanges: ["competitor"],
   pricingOpportunities: ["pricing"],
   profitOpportunities: ["profit"],
+  reconciliation: ["reconciliation"],
 };
+
+/**
+ * Every module that can produce a finding must land on a tile.
+ *
+ * Reconciliation was missing here, and the effect was precisely the
+ * contradiction this file exists to prevent: the Reconciliation workspace
+ * counted one open finding, Action Center listed it, and the Dashboard tiles
+ * summed to zero because the finding had nowhere to land. A merchant reading
+ * the tiles concluded nothing was wrong. Adding a module to `IntelligenceFinding`
+ * without adding it here is a silent under-report, so the guard below turns it
+ * into a startup failure instead.
+ */
+const FINDING_MODULES = [
+  "operational",
+  "fraud",
+  "trust",
+  "return_abuse",
+  "competitor",
+  "pricing",
+  "profit",
+  "reconciliation",
+] as const;
 
 export const DASHBOARD_KPI_KEYS = Object.keys(KPI_MODULES) as DashboardKpiKey[];
 
@@ -77,6 +101,14 @@ for (const key of DASHBOARD_KPI_KEYS) {
   for (const module of KPI_MODULES[key]) {
     MODULE_TO_KPI.set(module, key);
   }
+}
+
+const unmapped = FINDING_MODULES.filter((m) => !MODULE_TO_KPI.has(m));
+if (unmapped.length > 0) {
+  throw new Error(
+    `Finding modules with no Store Overview tile: ${unmapped.join(", ")}. ` +
+      "Add them to KPI_MODULES or Store Overview will under-report findings."
+  );
 }
 
 /** How many findings the Dashboard previews before deferring to Action Center. */
@@ -132,6 +164,7 @@ const EMPTY_KPIS = (): Record<DashboardKpiKey, number> => ({
   competitorChanges: 0,
   pricingOpportunities: 0,
   profitOpportunities: 0,
+  reconciliation: 0,
 });
 
 /**
@@ -246,30 +279,50 @@ function buildAttentionHeadline(input: {
     };
   }
 
+  // ONE NUMBER IN THE HEADLINE, AND IT IS ALWAYS THE TOTAL.
+  //
+  // The title used to count `criticalOrHigh` while the line directly beneath it
+  // counted `totalOpen`. Both were correct and they measured different things,
+  // but stacked together, both called "findings", they read as
+  //
+  //     1 finding needs attention
+  //     Open findings: 3
+  //
+  // — a contradiction to anyone who has not read this file, and disagreeing
+  // with the 3 that Reconciliation, Action Center and the tiles all showed.
+  //
+  // The headline now states the same total every other surface states. Priority
+  // becomes a QUALIFIER inside the detail line rather than a second count
+  // competing with it.
+  const openLabel =
+    input.totalOpen === 1 ? "1 open finding" : `${input.totalOpen} open findings`;
+
   if (input.storeHealth > 0) {
+    const health =
+      input.storeHealth === 1 ? "1 is a store health issue" : `${input.storeHealth} are store health issues`;
     return {
-      attentionTitle:
-        input.storeHealth === 1
-          ? "1 store health issue needs attention first"
-          : `${input.storeHealth} store health issues need attention first`,
-      attentionDetail:
-        "Store health affects how much of the rest of this page VedaSuite can stand behind. Resolve these first.",
+      attentionTitle: openLabel,
+      attentionDetail: `${health} — resolve those first, because store health affects how much of the rest of this page VedaSuite can stand behind.`,
     };
   }
 
   if (input.criticalOrHigh > 0) {
+    const priority =
+      input.criticalOrHigh === input.totalOpen
+        ? input.totalOpen === 1
+          ? "It is high priority."
+          : "All of them are high priority."
+        : `${input.criticalOrHigh} of them ${
+            input.criticalOrHigh === 1 ? "is" : "are"
+          } high priority.`;
     return {
-      attentionTitle:
-        input.criticalOrHigh === 1
-          ? "1 finding needs attention"
-          : `${input.criticalOrHigh} findings need attention`,
-      attentionDetail: `Open findings: ${input.totalOpen}. The highest-priority ones are listed below.`,
+      attentionTitle: openLabel,
+      attentionDetail: `${priority} The highest-priority ones are listed below.`,
     };
   }
 
   return {
-    attentionTitle:
-      input.totalOpen === 1 ? "1 open finding" : `${input.totalOpen} open findings`,
+    attentionTitle: openLabel,
     attentionDetail: "None are critical or high priority. Review them when convenient.",
   };
 }

@@ -48,6 +48,17 @@ export const CAPABILITIES = [
   "billing.upgrade",
   "billing.downgrade",
   "billing.trialActive",
+  // RECONCILIATION. One capability per CHECK, not one for the feature.
+  //
+  // A single reconciliation.run key could not express the packaging: Growth
+  // gets inventory and supplier, Pro additionally gets the 3PL invoice check
+  // and rate cards. Gating four different checks on one boolean would have
+  // meant either giving Growth the 3PL audit or withholding inventory from it,
+  // and the API could not have enforced the difference at all.
+  "reconciliation.inventory",
+  "reconciliation.supplier",
+  "reconciliation.invoice",
+  "reconciliation.rateCard",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -299,6 +310,11 @@ export function buildCapabilities(
   const creditScoreModule = isGrowth || isPro;
   const reportsModule = isGrowth || isPro;
   const profitModule = isPro;
+  // Reconciliation. Mirrors backend/src/billing/capabilities.ts exactly — this
+  // file is a client-side mirror of that derivation, and the backend remains
+  // the authority: every protected route re-derives entitlement server-side.
+  const reconciliationStandard = isGrowth || isPro;
+  const reconciliationAdvanced = isPro;
 
   capabilities["reports.view"] = reportsModule;
   capabilities["settings.view"] = true;
@@ -341,6 +357,20 @@ export function buildCapabilities(
   capabilities["pricing.advancedAutomation"] = profitModule;
 
   capabilities["reports.export"] = reportsModule;
+
+  // RECONCILIATION PACKAGING. Mirrors backend/src/billing/capabilities.ts.
+  //
+  // Growth: inventory and supplier shipment — both compare a merchant's own
+  // file against Shopify and need no contract data.
+  //
+  // Pro: additionally the 3PL invoice check and the rate cards it depends on.
+  // Those two move together because a 3PL audit without a rate card can only
+  // ever say "unverified", and selling Growth a check that cannot conclude
+  // anything would be worse than not selling it at all.
+  capabilities["reconciliation.inventory"] = reconciliationStandard;
+  capabilities["reconciliation.supplier"] = reconciliationStandard;
+  capabilities["reconciliation.invoice"] = reconciliationAdvanced;
+  capabilities["reconciliation.rateCard"] = reconciliationAdvanced;
 
   return capabilities;
 }

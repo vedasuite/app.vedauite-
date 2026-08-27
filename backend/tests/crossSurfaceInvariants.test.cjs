@@ -965,6 +965,11 @@ test("I15: renaming surfaces left every entitlement key intact", async () => {
     pricing: "pricing",
     profit: "profit",
     operational: null,
+    // Reconciliation is a new module, not a renamed one. Its findings travel
+    // through this same map, and `null` — the same value operational carries —
+    // is the staging placeholder until packaging is decided. The point of this
+    // assertion is that NO EXISTING KEY MOVED, and none has.
+    reconciliation: null,
   });
 });
 

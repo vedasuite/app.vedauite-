@@ -135,6 +135,23 @@ function buildSanityChecks(options: {
           : "Could not parse access scopes from shopify.app.toml",
     },
     {
+      // BILLING TEST MODE FAILS SAFE IN THE WRONG DIRECTION FOR PRODUCTION.
+      //
+      // `SHOPIFY_BILLING_TEST_MODE` defaults to TRUE unless it is explicitly
+      // "false", so an unset variable means every subscription Shopify creates
+      // is a TEST charge and no merchant is ever billed. That default is right
+      // for staging — nobody is charged by accident — and silent in production,
+      // where the app would appear to work perfectly while earning nothing.
+      //
+      // Nothing else in this readiness report would have caught it, so it is
+      // reported here rather than left to be discovered from revenue.
+      key: "billing_charges_are_real",
+      ok: !env.billing.testMode,
+      detail: env.billing.testMode
+        ? "SHOPIFY_BILLING_TEST_MODE is not \"false\": Shopify charges are TEST charges and no merchant will be billed. Set it to \"false\" in production."
+        : "Live Shopify charges are enabled.",
+    },
+    {
       key: "privacy_url_available",
       ok: Boolean(env.publicContact.privacyUrl),
       detail: env.publicContact.privacyUrl,

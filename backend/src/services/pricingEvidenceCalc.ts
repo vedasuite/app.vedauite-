@@ -125,6 +125,96 @@ export function classifyPricingEvidence(input: {
 }
 
 /**
+ * Shape of `rationaleJson.targetProvenance`, written by coreEngineService.
+ * Optional throughout: rows persisted before provenance existed carry none.
+ */
+export interface StoredTargetProvenance {
+  biasApplied?: boolean;
+  heuristicCompetitorBlend?: boolean;
+  heuristicReturnPenalty?: boolean;
+  velocityObserved?: boolean;
+  exactTargetSupported?: boolean;
+  assumptionTerms?: string[];
+}
+
+/** Shown wherever a direction is known but the destination is not. */
+export const NO_EXACT_TARGET =
+  "Not enough evidence yet to recommend an exact price.";
+
+/**
+ * THE ONE RULE that decides whether an exact target price may be displayed.
+ *
+ * Pricing & Product Profit and Action Center both call this, so the two can no
+ * longer disagree — production showed "$32.00 -> $34.20" on a card that also
+ * said "evidence needed to say how much", and separately handed Action Center
+ * exact figures like 51.35 and 61.62.
+ *
+ * TWO conditions, both required:
+ *
+ *   1. The EVIDENCE must support a target at all (classifyPricingEvidence).
+ *      Competitor data alone is a real external reason for a direction, but on
+ *      its own it is not proof of a specific destination price.
+ *   2. The NUMBER ITSELF must be free of assumption terms. A target moved by
+ *      the merchant's own bias slider, or blended with an arbitrary 0.35
+ *      weight, is a preference, not a measurement.
+ *
+ * A row with NO recorded provenance fails condition 2. That is deliberate: it
+ * was written before provenance was tracked, so nothing is known about how it
+ * was derived, and unknown must never resolve to "shown".
+ */
+export function isExactTargetAllowed(input: {
+  evidence: Pick<PricingEvidence, "basis" | "showExactTarget">;
+  targetProvenance: StoredTargetProvenance | null | undefined;
+}): boolean {
+  if (!input.evidence.showExactTarget) return false;
+  return input.targetProvenance?.exactTargetSupported === true;
+}
+
+/**
+ * Why an exact target is being withheld, in the merchant's terms.
+ *
+ * Names the actual reason rather than repeating a generic phrase, so the
+ * merchant can tell "we need more data about your product" apart from "your own
+ * pricing settings shaped this number".
+ */
+export function explainWithheldTarget(
+  provenance: StoredTargetProvenance | null | undefined
+): string {
+  const terms = provenance?.assumptionTerms ?? [];
+  if (terms.length === 0) {
+    return `${NO_EXACT_TARGET} VedaSuite can see the direction, but not enough about this product to name a figure.`;
+  }
+  const parts: string[] = [];
+  if (terms.includes("pricing_bias")) {
+    parts.push("your pricing strategy setting rather than measured demand");
+  }
+  if (terms.includes("competitor_blend_weight")) {
+    parts.push("a general weighting of the competitor gap rather than a proven target");
+  }
+  if (terms.includes("return_rate_penalty")) {
+    parts.push("a general return-rate adjustment");
+  }
+  return `${NO_EXACT_TARGET} The suggested figure was shaped by ${parts.join(", and ")}, so VedaSuite shows the direction only.`;
+}
+
+/** Safely reads targetProvenance out of a stored rationaleJson string. */
+export function readTargetProvenance(
+  rationaleJson: string | null | undefined
+): StoredTargetProvenance | null {
+  if (!rationaleJson) return null;
+  try {
+    const parsed = JSON.parse(rationaleJson) as {
+      targetProvenance?: StoredTargetProvenance;
+    };
+    return parsed?.targetProvenance ?? null;
+  } catch {
+    // Unreadable rationale means unknown provenance, which withholds the
+    // target. Failing closed is the whole point.
+    return null;
+  }
+}
+
+/**
  * Direction of travel, safe to show even without a precise target.
  *
  * A merchant can act on "there may be room to increase" without being handed a

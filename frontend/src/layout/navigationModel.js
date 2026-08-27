@@ -41,6 +41,7 @@ export const NAV_PATHS = [
   "/app/fraud-intelligence",
   "/app/ai-pricing-engine",
   "/app/competitor-intelligence",
+  "/app/reconciliation",
   "/app/billing",
   "/app/settings",
   "/app/support",
@@ -55,6 +56,8 @@ export const UNGATED_PATHS = [
   "/app/onboarding",
   "/app/dashboard",
   "/app/action-center",
+  // Ungated for this staging release - see buildNavigationModel.
+  "/app/reconciliation",
   "/app/billing",
   "/app/settings",
   "/app/support",
@@ -106,6 +109,21 @@ export function buildNavigationModel(moduleStatus) {
       path: "/app/competitor-intelligence",
       label: "Market Signals",
       badge: upgrade(moduleStatus?.competitor),
+    },
+    {
+      // ONE destination for all three check types, not three sidebar entries.
+      // Inventory, 3PL invoice and supplier shipment are three checks run by
+      // one engine; listing them separately would present one capability as
+      // three products.
+      //
+      // Deliberately UNGATED, even though the checks inside it are not.
+      //
+      // Starter has none of the three checks, but a badge here would say
+      // "Upgrade" for a destination that also explains what each check does
+      // and what it would cost. Hiding it would be worse still. The gate lives
+      // per check, on the API and on the tiles inside the page.
+      path: "/app/reconciliation",
+      label: "Reconciliation",
     },
     { path: "/app/billing", label: "Billing" },
     { path: "/app/settings", label: "Settings" },

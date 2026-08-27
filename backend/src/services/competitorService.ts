@@ -2,7 +2,13 @@ import { HttpError } from "../lib/httpError";
 import { prisma } from "../db/prismaClient";
 import {
   fetchCompetitorSnapshot,
+  takeCompetitorFetchOutcome,
 } from "./shopifyAdminService";
+import {
+  describeDomainFailure,
+  isCurrentEvidence,
+  isFailure,
+} from "./competitorFetchStatus";
 import { logEvent, withRetry } from "./observabilityService";
 import {
   deriveModuleReadiness,
@@ -436,7 +442,10 @@ function getCompetitorPrimaryStateCopy(args: {
   freshnessLabel: string;
   validMatchedProductsCount: number;
   lowConfidenceProductsCount: number;
+  /** Domains that actually yielded evidence on the latest run. */
   checkedDomainsCount: number;
+  /** Domains that were TRIED. Never the same sentence as the above. */
+  attemptedDomainsCount: number;
   changesDetected: number;
   latestError: string | null;
   lastSuccessfulRunAt: Date | null;
@@ -491,7 +500,10 @@ function getCompetitorPrimaryStateCopy(args: {
     case "CHANGES_DETECTED":
       return {
         title: "Competitor changes were detected across matched products",
-        description: `The latest analysis reviewed ${args.checkedDomainsCount} websites, matched ${args.validMatchedProductsCount} comparable products, and found ${args.changesDetected} competitor changes.`,
+        // Says how many of the attempted domains actually refreshed. Saying
+        // "reviewed 3 websites" when one of the three failed its certificate
+        // check implied fresh evidence that was never collected.
+        description: `The latest analysis refreshed ${args.checkedDomainsCount} of ${args.attemptedDomainsCount} domains, matched ${args.validMatchedProductsCount} comparable products, and found ${args.changesDetected} competitor changes.`,
         nextAction: "View changes",
         coverageStatus: "Changes detected",
         toastMessage: "Competitor analysis completed. New competitor changes were detected.",
@@ -875,23 +887,60 @@ export async function getCompetitorOverview(shopDomain: string) {
 
   const strategyDetections = buildStrategyDetections(comparableRecentRows.comparableRows);
   const lastIngestedAt = comparableAllRows.comparableRows[0]?.collectedAt ?? allRows[0]?.collectedAt ?? null;
+  // ATTEMPTED vs REFRESHED — the distinction the whole of A1 turns on.
+  //
+  // Both numbers are real and both are useful, but only one of them may sit
+  // behind the word "reviewed". A domain whose certificate expired was
+  // attempted; it was not refreshed, and it holds no fresh evidence.
+  const attemptedDomainsCount = store.competitorDomains.length;
+  const refreshedDomains = store.competitorDomains.filter((domain) =>
+    isCurrentEvidence(domain.lastAttemptStatus)
+  );
+  const failedDomains = store.competitorDomains.filter((domain) =>
+    isFailure(domain.lastAttemptStatus)
+  );
+  const refreshedDomainsCount = refreshedDomains.length;
+
+  // FRESHNESS MUST MEAN SUCCESSFUL EVIDENCE COLLECTION.
+  //
+  // This used to read the JOB status. A run in which every domain failed still
+  // finishes SUCCEEDED_NO_DATA — the job did its work correctly — so the page
+  // said "Refreshed recently" on the strength of a run that collected nothing.
+  // Freshness now comes from the newest per-domain SUCCESS, and falls back to
+  // the newest stored row only when no domain has ever recorded one.
+  const newestDomainSuccessAt = refreshedDomains.reduce<Date | null>(
+    (newest, domain) =>
+      domain.lastSuccessAt && (!newest || domain.lastSuccessAt > newest)
+        ? domain.lastSuccessAt
+        : newest,
+    null
+  );
   const lastSuccessAt =
-    latestCompetitorJob &&
-    (latestCompetitorJob.status === "SUCCEEDED" ||
-      latestCompetitorJob.status === "SUCCEEDED_NO_DATA")
-      ? latestCompetitorJob.finishedAt ?? null
-      : lastIngestedAt;
+    newestDomainSuccessAt ??
+    // No domain has ever recorded a success. Stored rows may still exist from
+    // before outcomes were persisted; they are evidence, but they are not a
+    // fresh check, and freshnessHours will report their real age.
+    (store.competitorDomains.some((d) => d.lastAttemptStatus != null)
+      ? null
+      : lastIngestedAt);
   const lastAttemptAt =
+    store.competitorDomains.reduce<Date | null>(
+      (newest, domain) =>
+        domain.lastAttemptAt && (!newest || domain.lastAttemptAt > newest)
+          ? domain.lastAttemptAt
+          : newest,
+      null
+    ) ??
     latestCompetitorJob?.finishedAt ??
     latestCompetitorJob?.startedAt ??
     null;
   const freshnessHours = lastSuccessAt
     ? Number(((Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60)).toFixed(1))
     : null;
-  const checkedDomainsCount =
-    store.competitorDomains.length === 0
-      ? 0
-      : latestCompetitorSummary?.domains ?? store.competitorDomains.length;
+  // "Domains reviewed" now counts domains that actually yielded evidence.
+  // Before any run has recorded an outcome there is nothing to claim, so this
+  // is 0 rather than the configured count.
+  const checkedDomainsCount = refreshedDomainsCount;
   const monitoredProductsCount =
     Math.max(
       latestCompetitorSummary?.products ?? 0,
@@ -984,10 +1033,17 @@ export async function getCompetitorOverview(shopDomain: string) {
     detectedPriceChangesCount +
     detectedPromotionChangesCount +
     stockAlerts;
-  const freshnessLabel = getCompetitorFreshnessLabel(
+  // "Refreshed recently" is only the whole truth when everything refreshed.
+  // With a failed domain in the set the label carries the shortfall, so the
+  // merchant is never left to infer it from a count elsewhere on the page.
+  const baseFreshnessLabel = getCompetitorFreshnessLabel(
     freshnessHours,
     lastSuccessAt
   );
+  const freshnessLabel =
+    failedDomains.length > 0 && attemptedDomainsCount > 0
+      ? `${baseFreshnessLabel} — ${refreshedDomainsCount} of ${attemptedDomainsCount} domains refreshed`
+      : baseFreshnessLabel;
   const primaryState = deriveCompetitorPrimaryState({
     hasDomains: store.competitorDomains.length > 0,
     syncStatusLabel,
@@ -1003,6 +1059,7 @@ export async function getCompetitorOverview(shopDomain: string) {
     validMatchedProductsCount: matchedProductsCount,
     lowConfidenceProductsCount: lowConfidenceMatchesCount,
     checkedDomainsCount,
+    attemptedDomainsCount,
     changesDetected,
     latestError:
       latestCompetitorJob?.errorMessage ??
@@ -1303,7 +1360,20 @@ export async function getCompetitorOverview(shopDomain: string) {
       lastSuccessfulRunAt: toIsoString(lastSuccessAt),
       lastAttemptAt: toIsoString(lastAttemptAt),
       configuredDomainsCount: store.competitorDomains.length,
+      // Attempted, refreshed and failed are three different numbers and the
+      // UI is given all three rather than one number it has to interpret.
+      attemptedDomainsCount,
+      refreshedDomainsCount,
       checkedDomainsCount,
+      failedDomains: failedDomains.map((domain) => ({
+        domain: domain.domain,
+        status: domain.lastAttemptStatus,
+        // merchantMessage ONLY. lastAttemptDetail holds the raw Node code and
+        // is deliberately never serialised to the client.
+        message: describeDomainFailure(domain.domain, domain.lastAttemptStatus),
+        lastAttemptAt: toIsoString(domain.lastAttemptAt),
+        lastSuccessAt: toIsoString(domain.lastSuccessAt),
+      })),
       monitoredProductsCount,
       matchedProductsCount,
       validMatchedProductsCount: matchedProductsCount,
@@ -1737,6 +1807,13 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
     let ingested = 0;
     let lowConfidenceMatches = 0;
     let skipped = 0;
+    /** Per-domain outcome of THIS run, used for the merchant-facing counts. */
+    const domainOutcomes: Array<{
+      domain: string;
+      status: string;
+      refreshed: boolean;
+      merchantMessage: string;
+    }> = [];
 
     for (const domain of domains) {
       const catalogProducts = await fetchCompetitorCatalogProducts(domain.domain, 40);
@@ -1877,12 +1954,64 @@ export async function ingestCompetitorSnapshots(shopDomain: string) {
           domainIngested += 1;
         }
       }
+
+      // PERSIST WHAT ACTUALLY HAPPENED TO THIS DOMAIN.
+      //
+      // THE DEFECT. CompetitorDomain already carried lastAttemptAt /
+      // lastAttemptStatus / lastAttemptDetail / lastSuccessAt, and
+      // competitorFetchStatus already classified every failure precisely — but
+      // NOTHING EVER WROTE THEM. takeCompetitorFetchOutcome had no caller at
+      // all. So lastAttemptStatus was permanently NULL, and every merchant-
+      // facing count fell back to "how many domains are configured".
+      //
+      // That is why production could log `addidas.com -> tls_error,
+      // retriable:false` and still tell the merchant "the latest analysis
+      // reviewed 3 websites". Three were ATTEMPTED. Two were refreshed.
+      const outcome = takeCompetitorFetchOutcome(domain.domain);
+      // A domain that produced rows this run is refreshed regardless of which
+      // path produced them (live fetch or catalog read). A domain that produced
+      // nothing is NOT refreshed, whether or not a specific error was captured.
+      const refreshed = domainIngested > 0;
+      const resolvedStatus = refreshed
+        ? outcome && isCurrentEvidence(outcome.status)
+          ? outcome.status
+          : "fresh_success"
+        : outcome?.status ?? "unparseable";
+      const merchantMessage = refreshed
+        ? `${domain.domain} was checked successfully.`
+        : outcome?.merchantMessage ??
+          `${domain.domain} was reached, but VedaSuite could not find product prices in a format it understands.`;
+
+      domainOutcomes.push({
+        domain: domain.domain,
+        status: resolvedStatus,
+        refreshed,
+        merchantMessage,
+      });
+
+      await prisma.competitorDomain.update({
+        where: { id: domain.id },
+        data: {
+          lastAttemptAt: new Date(),
+          lastAttemptStatus: resolvedStatus,
+          // Technical detail is for logs and support only. It is stored on a
+          // column the UI never reads, so a raw Node code such as
+          // "CERT_HAS_EXPIRED: fetch failed" can never reach a merchant.
+          lastAttemptDetail: outcome?.technicalDetail ?? null,
+          ...(refreshed ? { lastSuccessAt: new Date() } : {}),
+        },
+      });
     }
 
+    const domainsRefreshed = domainOutcomes.filter((d) => d.refreshed).length;
     const status = ingested > 0 ? "SUCCEEDED" : "SUCCEEDED_NO_DATA";
     const result = {
       ingested,
       domains: domains.length,
+      // Attempted and refreshed are SEPARATE numbers and must stay separate.
+      domainsAttempted: domains.length,
+      domainsRefreshed,
+      domainOutcomes,
       products: sourceProducts.eligible.length,
       skipped,
       lowConfidenceMatches,
