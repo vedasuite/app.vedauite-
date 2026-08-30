@@ -46,6 +46,12 @@ export const OPTIONAL_SCOPES = ["read_inventory", "read_locations"] as const;
 
 export type OptionalScope = (typeof OPTIONAL_SCOPES)[number];
 
+/**
+ * The scopes Shopify literally returned, unchanged.
+ *
+ * Kept literal on purpose: diagnostics must be able to show what the merchant's
+ * token actually says, not an interpretation of it.
+ */
 export function parseScopes(raw: string | null | undefined): string[] {
   if (!raw) return [];
   return raw
@@ -54,8 +60,50 @@ export function parseScopes(raw: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * A WRITE SCOPE CARRIES ITS READ SCOPE.
+ *
+ * Shopify's access model is that `write_x` includes `read_x`, and the granted
+ * string it returns lists only the write scope. A store authorized for
+ * `read_products,read_orders,write_orders,read_customers` comes back as
+ *
+ *     read_customers,read_products,write_orders
+ *
+ * with `read_orders` absent — not because it was refused, but because it is
+ * subsumed. Comparing that literally against REQUIRED_SCOPES reported
+ * `read_orders` as missing on a store that plainly had order access, which is
+ * an alarm about a healthy install.
+ *
+ * Expressed as the general rule rather than an exception for `write_orders`:
+ * any `write_x` implies `read_x`. Today `write_orders` is the only write scope
+ * this app requests, so this can only ever add `read_orders` — it cannot reach
+ * inventory or location capability. Written generically so adding a write scope
+ * later needs no second fix here.
+ */
+export function impliedReadScope(scope: string): string | null {
+  const normalized = scope.trim().toLowerCase();
+  if (!normalized.startsWith("write_")) return null;
+  const resource = normalized.slice("write_".length);
+  return resource ? `read_${resource}` : null;
+}
+
+/**
+ * What the token can actually DO: the granted scopes plus the reads their
+ * writes imply. Every capability question is answered against this; anything
+ * reporting what Shopify returned uses `parseScopes`.
+ */
+export function effectiveScopes(raw: string | null | undefined): string[] {
+  const granted = parseScopes(raw);
+  const effective = new Set(granted);
+  for (const scope of granted) {
+    const implied = impliedReadScope(scope);
+    if (implied) effective.add(implied);
+  }
+  return [...effective];
+}
+
 export function hasScope(granted: string | null | undefined, scope: string): boolean {
-  return parseScopes(granted).includes(scope.toLowerCase());
+  return effectiveScopes(granted).includes(scope.trim().toLowerCase());
 }
 
 /**
@@ -96,7 +144,10 @@ export interface InventoryCapability {
 export function inventoryCapability(
   grantedScopes: string | null | undefined
 ): InventoryCapability {
-  const granted = parseScopes(grantedScopes);
+  // Same effective set as every other capability question. No write scope this
+  // app requests implies any inventory or location read, so this is identical
+  // to the literal set today — it simply stops being a second, divergent rule.
+  const granted = effectiveScopes(grantedScopes);
   const has = (scope: string) => granted.includes(scope);
 
   const storeWide = has("read_products");
@@ -155,6 +206,8 @@ export function describeMissingScopes(missing: OptionalScope[]): string | null {
 export function missingRequiredScopes(
   grantedScopes: string | null | undefined
 ): string[] {
-  const granted = parseScopes(grantedScopes);
+  // Answered against EFFECTIVE scopes: a store granted `write_orders` has order
+  // read access, and reporting `read_orders` missing there is a false alarm.
+  const granted = effectiveScopes(grantedScopes);
   return REQUIRED_SCOPES.filter((scope) => !granted.includes(scope));
 }
