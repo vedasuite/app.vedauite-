@@ -4,6 +4,7 @@ import { logEvent } from "../services/observabilityService";
 import { getStoreHealth } from "../services/storeHealthService";
 import {
   inventoryCapability,
+  effectiveScopes,
   missingRequiredScopes,
   parseScopes,
   REQUIRED_SCOPES,
@@ -255,7 +256,13 @@ syncDiagnosticsRouter.get("/sync", async (req, res) => {
         scopes: {
           required: REQUIRED_SCOPES,
           optional: OPTIONAL_SCOPES,
+          // What Shopify literally returned...
           granted: parseScopes(store.grantedScopes),
+          // ...and what that actually permits. Shopify returns only the write
+          // scope when both were authorized, so `granted` can omit read_orders
+          // on a store that has full order access. `missingRequired` is
+          // answered against this set, not the literal one.
+          effective: effectiveScopes(store.grantedScopes),
           missingRequired: missingRequiredScopes(store.grantedScopes),
           canReadProducts: capability.storeWide,
           canReadPerLocationInventory: capability.perLocation,
