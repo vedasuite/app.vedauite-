@@ -252,7 +252,11 @@ model Order {
   storeId              String
   customer             Customer? @relation(fields: [customerId], references: [id])
   customerId           String?
-  shopifyOrderId       String    @unique
+  /// The Shopify order NAME, e.g. "#1001".
+  ///
+  /// Unique only WITHIN a store. Every Shopify store numbers its own orders
+  /// from #1001, so this was never a global identifier — see @@unique below.
+  shopifyOrderId       String
   shopifyOrderGid      String?
   shopifyLegacyOrderId String?
   orderName            String?
@@ -270,6 +274,21 @@ model Order {
   timelineEvents TimelineEvent[]
   lineItems      OrderLineItem[]
 
+  /// ORDER IDENTITY IS STORE-SCOPED.
+  ///
+  /// `shopifyOrderId` held the order NAME ("#1001") under a GLOBAL unique
+  /// constraint. The sync looks an order up scoped to its store, so a second
+  /// merchant's #1001 was never found, fell through to create(), and collided
+  /// with the first merchant's row — failing the whole sync deterministically,
+  /// on every retry. Because Shopify starts every store at #1001, this made
+  /// onboarding fail for essentially any merchant after the first.
+  ///
+  /// Widening global -> (storeId, shopifyOrderId) cannot conflict with existing
+  /// data: any row that satisfied the global constraint satisfies this one.
+  ///
+  /// This compound key is also what `order.upsert` targets, which is what makes
+  /// a repeat sync idempotent and safe against a concurrent webhook.
+  @@unique([storeId, shopifyOrderId])
   @@index([shopifyOrderGid])
   @@index([storeId, shopifyLegacyOrderId])
   @@index([storeId, orderName])

@@ -1309,40 +1309,62 @@ export async function syncShopifyStoreData(shopDomain: string) {
       select: { id: true },
     });
 
-    if (existingOrder) {
-      await prisma.order.update({
-        where: { id: existingOrder.id },
-        data: {
-          customerId,
-          shopifyOrderId: displayOrderId,
-          shopifyOrderGid: orderNode.id,
-          shopifyLegacyOrderId: orderNode.legacyResourceId,
-          orderName: orderNode.name,
-          totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
-          currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
-          status: normalizedStatus,
-          refunded,
-          refundRequested,
-        },
-      });
-    } else {
-      await prisma.order.create({
-        data: {
+    // ONE ATOMIC WRITE, KEYED ON STORE-SCOPED ORDER IDENTITY.
+    //
+    // This was a `findFirst` followed by `create()` or `update()`, which failed
+    // two different ways:
+    //
+    //   1. The lookup was scoped to the store; the unique constraint on
+    //      `shopifyOrderId` was GLOBAL. `shopifyOrderId` holds the order NAME
+    //      ("#1001"), and every Shopify store starts at #1001 — so a second
+    //      merchant's #1001 was never found by the store-scoped lookup, fell
+    //      through to create(), and collided with the FIRST merchant's row.
+    //      Deterministic, so every retry failed identically.
+    //
+    //   2. Even within one store, the gap between reading and writing is a race.
+    //      Order webhooks and a manual sync both call runStoreSyncJob with no
+    //      concurrency guard, so two passes could both miss and both create.
+    //
+    // `upsert` on the compound key closes both: the database decides insert vs
+    // update in a single statement, and the key now matches the identity the
+    // lookup was always using.
+    //
+    // `createdAt` is set on create only. Shopify's order creation time is a
+    // fact about the order, and a repeat sync must not rewrite it.
+    const upsertedOrder = await prisma.order.upsert({
+      where: {
+        storeId_shopifyOrderId: {
           storeId: store.id,
-          customerId,
           shopifyOrderId: displayOrderId,
-          shopifyOrderGid: orderNode.id,
-          shopifyLegacyOrderId: orderNode.legacyResourceId,
-          orderName: orderNode.name,
-          totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
-          currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
-          status: normalizedStatus,
-          refunded,
-          refundRequested,
-          createdAt: new Date(orderNode.createdAt),
         },
-      });
-    }
+      },
+      update: {
+        customerId,
+        shopifyOrderGid: orderNode.id,
+        shopifyLegacyOrderId: orderNode.legacyResourceId,
+        orderName: orderNode.name,
+        totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
+        currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
+        status: normalizedStatus,
+        refunded,
+        refundRequested,
+      },
+      create: {
+        storeId: store.id,
+        customerId,
+        shopifyOrderId: displayOrderId,
+        shopifyOrderGid: orderNode.id,
+        shopifyLegacyOrderId: orderNode.legacyResourceId,
+        orderName: orderNode.name,
+        totalAmount: shopifyFloat(orderNode.currentTotalPriceSet.shopMoney.amount),
+        currency: orderNode.currentTotalPriceSet.shopMoney.currencyCode,
+        status: normalizedStatus,
+        refunded,
+        refundRequested,
+        createdAt: new Date(orderNode.createdAt),
+      },
+      select: { id: true },
+    });
 
     if (existingOrder) {
       syncCounts.saved.ordersUpdated += 1;
@@ -1360,12 +1382,11 @@ export async function syncShopifyStoreData(shopDomain: string) {
     // exactly as it was; these columns add the per-line detail an order-level
     // boolean cannot express, which is what makes a partial refund visible to
     // reconciliation. Nothing here feeds Customer Loss.
-    const savedOrder =
-      existingOrder ??
-      (await prisma.order.findFirst({
-        where: { storeId: store.id, shopifyOrderGid: orderNode.id },
-        select: { id: true },
-      }));
+    // The upsert already returned the row it wrote. Re-reading it was both a
+    // wasted query and a second chance to miss: the fallback searched by
+    // `shopifyOrderGid`, so an order whose GID Shopify had not supplied would
+    // silently lose its line items.
+    const savedOrder = upsertedOrder;
 
     if (savedOrder && orderNode.lineItems) {
       if (orderNode.lineItems.pageInfo?.hasNextPage) {

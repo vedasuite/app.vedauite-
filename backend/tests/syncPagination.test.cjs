@@ -177,6 +177,22 @@ function loadSync({ productPages, orderPages }) {
       })),
   };
   prisma.order = {
+    // The sync writes orders through ONE atomic upsert on the store-scoped
+    // key (storeId, shopifyOrderId). Mirrored here so this harness exercises
+    // the same path production does.
+    upsert: async ({ where, create, update, select }) => {
+      const k = where.storeId_shopifyOrderId;
+      const existing = saved.orders.find(
+        (o) => o.storeId === k.storeId && o.shopifyOrderId === k.shopifyOrderId
+      );
+      if (existing) {
+        Object.assign(existing, update);
+        return select ? { id: existing.id } : existing;
+      }
+      const row = { id: `o-${saved.orders.length}`, ...create };
+      saved.orders.push(row);
+      return select ? { id: row.id } : row;
+    },
     findFirst: async ({ where }) =>
       saved.orders.find((o) => o.shopifyOrderId === where.shopifyOrderId) ?? null,
     create: async ({ data }) => {
