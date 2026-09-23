@@ -214,6 +214,13 @@ const NON_HISTORICAL_MIGRATIONS = [
   "20260826_reconciliation_v1_completion",
   // Per-location Shopify inventory. Additive: one new table.
   "20260826_inventory_levels",
+  // Store-scoped order identity. Replaces the GLOBAL unique index on
+  // Order.shopifyOrderId with ("storeId","shopifyOrderId"). The column holds
+  // the order NAME ("#1001"), which is unique only within a store, so the old
+  // constraint made a second merchant's #1001 collide with the first
+  // merchant's and killed the sync. Widening cannot conflict with existing
+  // rows, so there is no backfill — applied by migrate deploy, never resolved.
+  "20260914_order_identity_store_scoped",
 ];
 /** Kept for the post-deploy checks that name the original one. */
 const PENDING_MIGRATION = NON_HISTORICAL_MIGRATIONS[0];

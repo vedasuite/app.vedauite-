@@ -167,6 +167,8 @@ function loadSync({ productPages, orderPages = [emptyOrderPage()] }) {
     findFirst: async () => null,
     create: async () => ({}),
     update: async () => ({}),
+    // These tests assert PRODUCT persistence; orders only need to not throw.
+    upsert: async () => ({ id: "o-0" }),
     count: async () => 0,
   };
   prisma.productSnapshot = {
